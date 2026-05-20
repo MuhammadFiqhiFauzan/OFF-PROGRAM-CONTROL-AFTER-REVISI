@@ -1,3 +1,10 @@
+/*
+ * Tujuan: Skema Drizzle SQLite untuk Better Auth, RBAC, cache master, dan idempotency lokal.
+ * Caller: Better Auth adapter, route handler Next.js, script init-db, dan service cache lokal.
+ * Dependensi: drizzle-orm/sqlite-core.
+ * Main Functions: table `user`, `session`, `account`, `verification`, `syncState`, `item`, `customer`, `idempotencyLog`.
+ * Side Effects: Definisi schema untuk DB read/write SQLite oleh caller.
+ */
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable("user", {
@@ -7,6 +14,7 @@ export const user = sqliteTable("user", {
     emailVerified: integer('emailVerified', { mode: 'boolean' }).notNull(),
     image: text('image'),
     role: text('role').default('viewer'),
+    permissions: text('permissions').default('{}'),
     banned: integer('banned', { mode: 'boolean' }).default(false),
     banReason: text('banReason'),
     banExpires: integer('banExpires', { mode: 'timestamp' }),

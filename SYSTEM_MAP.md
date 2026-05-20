@@ -10,7 +10,7 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   Portal ERP internal untuk mengakses dan mengotomasi operasi Accurate Online, ditambah modul pemrosesan dokumen/data berat di Python untuk validator diskon, summary promo, pembayaran/SPPD, finance, dan generator PowerPoint.
 - Susunan app:
   - `frontend Next.js`: UI utama, auth web, dashboard, route handler BFF/proxy, local cache reader/writer ke SQLite.
-  - `backend FastAPI`: service pendamping untuk workflow Excel/PDF/OCR, summary manual/AI, payments/finance, principle management, PPTX generation, dan proxy Seedance 2.0.
+  - `backend FastAPI`: service pendamping untuk workflow Excel/PDF/OCR, summary manual/AI, payments/finance, principle management, dan PPTX generation.
   - `shared modules`: `lib/*`, `components/*`, `config/accurateRoutes.js`, `db/schema.ts`.
 - Tech stack utama:
   - runtime:
@@ -31,10 +31,9 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
     - JSON store `python_backend/data/payments.json` untuk state pembayaran
   - integrasi penting:
     - Accurate OAuth + Accurate REST API
-    - Better Auth email/password internal + RBAC role admin/manager/staff/viewer
+    - Better Auth email/password internal + RBAC role/permission per halaman dan modul
     - SMTP email via Nodemailer
     - SumoPod / OpenAI-compatible API di FastAPI summary AI
-    - BytePlus ModelArk Seedance 2.0 untuk generator video asynchronous
     - OCR lokal via Tesseract + PyMuPDF/PyPDF
 - Pola arsitektur singkat:
   - Next.js memakai App Router, bukan Pages Router.
@@ -51,10 +50,11 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - FastAPI -> file I/O, JSON store, SQLite Python side, OCR/PDF libs, external HTTP API
 
 # Core Logic Flow (Function-Level Flowchart)
-- `UI(LoginPage) -> authClient.signIn.email()/signIn.social() -> app/api/auth/[...all]/route.ts[GET|POST] -> lib/auth[betterAuth] -> Drizzle adapter -> SQLite(user, session, account, verification)`
+- `UI(LoginPage) -> authClient.signIn.email() -> app/api/auth/[...all]/route.ts[GET|POST] -> lib/auth[betterAuth] -> Drizzle adapter -> SQLite(user, session, account, verification)`
 - `UI(ForgotPasswordPage) -> checkUserStatus() -> app/(auth)/actions.ts -> Drizzle(user) -> authClient.requestPasswordReset() -> Better Auth email flow -> lib/email[sendEmail] -> SMTP`
-- `UI(Dashboard/*) -> app/(dashboard)/layout.tsx -> auth.api.getSession() -> Better Auth session lookup -> redirect('/login') bila tidak ada session`
-- `UI(Dashboard payments/finance) -> browser GET FastAPI /api/me untuk csrf_token -> POST/upload kirim X-CSRF-Token + Better Auth cookie -> python_backend/main.py[get_current_user] -> validasi session di BETTER_AUTH_DB_PATH -> role admin/manager/staff/viewer -> user_has_permission() -> endpoint payments/finance`
+- `UI(Dashboard/*) -> proxy.ts set x-current-path -> app/(dashboard)/layout.tsx -> auth.api.getSession() -> Drizzle user(role, permissions) -> lib/rbac.canAccessPath() -> redirect('/login' atau '/') bila session/permission tidak valid`
+- `UI(Admin Users & RBAC) -> app/(dashboard)/admin/users/UserManagement.tsx -> /api/admin/users/permissions[GET|POST] -> Drizzle user.permissions JSON -> Sidebar/layout/FastAPI memakai permission module/action yang sama`
+- `UI(Dashboard payments/finance/SPPD) -> browser GET FastAPI /api/me untuk csrf_token -> POST/upload kirim X-CSRF-Token + Better Auth cookie -> python_backend/main.py[get_current_user] -> validasi session di BETTER_AUTH_DB_PATH -> role admin/manager/finance/staff/viewer + user.permissions -> user_has_permission() -> endpoint payments/finance/sppd`
 - `UI(API Wrapper) -> handleLoginAccurate() -> Accurate OAuth authorize -> app/api/auth/callback/route.ts[GET] -> Accurate OAuth token exchange -> redirect hash access_token -> UI`
 - `UI(API Wrapper) -> fetchDatabases()/handleOpenDatabase() -> app/api/auth/db-list|open-db/route.ts -> Accurate account API -> sessionStorage(host, session, token)`
 - `UI(API Wrapper) -> accurateFetch() -> app/api/proxy/route.ts[POST] -> proxy/flatten payload -> Accurate REST API`
@@ -90,6 +90,7 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 - `UI(Payments) -> POST /payments/upload|manual/add|update|delete -> FastAPI validasi Better Auth SQLite session + RBAC -> auto-detect template LPB atau backup PAYMENTS export -> load/save payments.json`
 - `UI(Payments) -> POST /payments/cart/create -> payments_cart_create() -> selected LPB -> draft -> payments.json`
 - `UI(Payments SPPD Settings) -> GET/POST /payments/sppd/settings -> payments_sppd_settings_get/save() -> simpan `sppd_settings` dan nomor surat terakhir di payments.json`
+- `UI(Payments SPPD Excel) -> POST /payments/sppd/upload -> payments_sppd_upload() -> parse workbook -> update data record payments.json kecuali ajukan/gap/status workflow/draft/submission/SPPD No`
 - `UI(Payments Cart) -> POST /payments/cart/submit -> payments_cart_submit() -> next_sppd_number() + render_sppd_docx() hapus highlight template, isi field variable, jatuh tempo 6 bulan, preserve template DOCX/namespace/page break -> output/payments + update payments.json`
 - `UI(Finance) -> GET /payments/finance/data -> FastAPI validasi Better Auth SQLite session + RBAC -> payments_finance_data() -> aggregate submitted records dari payments.json`
 - `UI(Finance) -> GET /payments/finance/export -> payments_finance_export() -> Excel response`
@@ -99,7 +100,6 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 - `UI(Finance) -> POST /payments/finance/update -> payments_finance_update() -> update status pembayaran, proof metadata, dan hasil post Accurate di payments.json`
 - `UI(Principles) -> POST /api/principles/add|{pid}/delete -> file master Excel di data/masters + metadata principles di SQLite(database.sqlite)`
 - `UI(PowerPoint Maker) -> POST /api/powerpoint/generate -> generate_powerpoint_api() -> background_tasks[generate_powerpoint_background] -> output/powerpoint -> /api/powerpoint/download/{file_id}`
-- `UI(Seedance 2.0) -> prompt + URL/reference upload browser FileReader(data URL) -> POST http://localhost:8000/api/seedance/tasks -> python_backend/seedance_api.create_seedance_task() -> BytePlus ModelArk /contents/generations/tasks -> task id -> GET /api/seedance/tasks/{task_id} -> video_url/last_frame_url`
 - `Accurate Webhook -> app/api/webhook/accurate/route.ts[POST] -> whitelist/log payload -> append webhook_events.log`
 
 # Clean Tree
@@ -122,7 +122,6 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - `app/(dashboard)/finance/page.tsx`
   - `app/(dashboard)/principles/page.tsx`
   - `app/(dashboard)/powerpoint-maker/page.tsx`
-  - `app/(dashboard)/seedance/page.tsx`
   - `app/(dashboard)/settings/page.tsx`
   - `app/(dashboard)/master/page.tsx`
   - `app/(dashboard)/master/branch/page.tsx`
@@ -140,6 +139,9 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - `app/(dashboard)/sales/receipt/new/page.tsx`
   - `app/(dashboard)/sales/return/page.tsx`
   - `app/(dashboard)/sales/return/new/page.tsx`
+  - `app/(dashboard)/admin/users/page.tsx`
+  - `app/(dashboard)/admin/users/UserManagement.tsx`
+  - `proxy.ts`
 - `frontend route handlers`
   - `app/api/auth/callback/route.ts`
   - `app/api/auth/db-list/route.ts`
@@ -154,6 +156,8 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - `app/api/local/customers/sync-single/route.ts`
   - `app/api/idempotency/lock/route.ts`
   - `app/api/idempotency/complete/route.ts`
+  - `app/api/admin/bootstrap/route.ts`
+  - `app/api/admin/users/permissions/route.ts`
   - `app/api/webhook/accurate/route.ts`
 - `frontend shared`
   - `components/SidebarLayout.tsx`
@@ -163,6 +167,7 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - `components/ui/Select.tsx`
   - `lib/auth.ts`
   - `lib/auth-client.ts`
+  - `lib/rbac.ts`
   - `lib/db.ts`
   - `lib/apiFetcher.ts`
   - `lib/sync.ts`
@@ -174,7 +179,6 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - `app/(dashboard)/api-wrapper/parsers/purchaseReturnBulkSave.ts`
 - `backend FastAPI`
   - `python_backend/main.py`
-  - `python_backend/seedance_api.py`
   - `python_backend/auth.py`
   - `python_backend/validator_engine.py`
   - `python_backend/payments.py`
@@ -242,6 +246,9 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 - `app/layout.tsx`
   - `RootLayout`
   - Shell global UI, font, background theme, dan toaster aplikasi.
+- `proxy.ts`
+  - `proxy`
+  - Menyisipkan header `x-current-path` agar dashboard layout bisa mengecek RBAC per halaman.
 - `app/globals.css`
   - theme root + `@import "tailwindcss"`
   - Basis styling global; Tailwind 4 dipakai model CSS-first.
@@ -265,13 +272,22 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - Form reset password berbasis token query param Better Auth.
 - `app/(dashboard)/layout.tsx`
   - `DashboardLayout`
-  - Guard auth untuk seluruh dashboard dan wrapper `SidebarLayout`.
+  - Guard auth dan RBAC per halaman untuk seluruh dashboard, lalu wrapper `SidebarLayout`.
+- `app/(dashboard)/admin/users/page.tsx`
+  - `AdminUsersPage`
+  - Guard server khusus halaman User & RBAC.
+- `app/(dashboard)/admin/users/UserManagement.tsx`
+  - `UserManagement`, `loadUsers`, `createUser`, `updateRole`, `savePermissions`
+  - UI admin untuk akun internal, role, reset password, dan permission matrix per modul/action.
+- `app/api/admin/users/permissions/route.ts`
+  - `GET`, `POST`
+  - API admin untuk membaca user dan menyimpan `user.permissions` sebagai JSON RBAC.
 - `components/SidebarLayout.tsx`
   - `SidebarLayout`
-  - Navigasi utama modul, termasuk Format SPPD, Seedance 2.0, dan tombol sign-out Better Auth.
+  - Navigasi utama modul dengan filter RBAC per halaman, termasuk Format SPPD dan tombol sign-out Better Auth.
 - `app/(dashboard)/page.tsx`
   - `DashboardLanding`
-  - Landing dashboard yang mengarahkan ke modul bisnis utama, termasuk akses Seedance 2.0.
+  - Landing dashboard yang mengarahkan ke modul bisnis utama sesuai akses role.
 - `components/DataTable.tsx`
   - `DataTable`
   - Tabel reusable berbasis TanStack Table untuk list master/transaksi.
@@ -293,6 +309,9 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 - `lib/auth-client.ts`
   - `authClient`
   - Client Better Auth untuk dipakai di React client pages.
+- `lib/rbac.ts`
+  - `normalizeRole`, `permissionMapForUser`, `canAccess`, `canAccessPath`
+  - Definisi role admin/manager/finance/staff/viewer, module/action permission, preset role, dan mapping path ke permission.
 - `lib/email.ts`
   - `sendEmail`
   - Pengiriman email SMTP untuk flow verifikasi/reset password.
@@ -304,7 +323,7 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - Engine sinkronisasi background dari Accurate ke cache SQLite lokal.
 - `db/schema.ts`
   - `user`, `session`, `account`, `verification`, `syncState`, `item`, `customer`, `idempotencyLog`
-  - Sumber definisi schema Drizzle untuk auth, cache lokal, dan idempotency.
+  - Sumber definisi schema Drizzle untuk auth, kolom `user.permissions`, cache lokal, dan idempotency.
 - `config/accurateRoutes.js`
   - `accurateRoutes`
   - Registry endpoint Accurate, sample payload, dan template header yang dipakai terutama oleh API Wrapper.
@@ -516,8 +535,8 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - `PaymentsPage`, `fetchData`, `handleUpload`, `handleManualAdd`, `handleSubmitCart`, `handleSaveBulk`, `handleDelete`
   - UI master pembayaran/SPPD yang mengelola JSON store FastAPI dan dapat upload template LPB atau restore backup export PAYMENTS.
 - `app/(dashboard)/payments/sppd/page.tsx`
-  - `PaymentsSppdSettingsPage`, `fetchSettings`, `handleSave`, `getCsrfToken`
-  - UI konfigurasi nomor surat terakhir, format nomor SPPD, tanggal fixed Jaminan, jatuh tempo, dan jumlah transfer per halaman.
+  - `PaymentsSppdSettingsPage`, `fetchSettings`, `handleSave`, `handleUpload`, `getCsrfToken`
+  - UI konfigurasi nomor surat terakhir, format nomor SPPD, tanggal fixed Jaminan, jatuh tempo, jumlah transfer per halaman, dan upload Excel data SPPD.
 - `app/(dashboard)/finance/page.tsx`
   - `FinancePage`, `fetchData`, `handleExport`, `handleSaveMapping`, `handleMarkStatus`, `handleApproveTransfer`
   - UI finance untuk mapping vendor/bank Accurate, upload bukti transfer, posting `purchase-payment/bulk-save.do`, dan update status pembayaran.
@@ -527,9 +546,6 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 - `app/(dashboard)/powerpoint-maker/page.tsx`
   - `PowerPointMakerPage`, `handleGenerate`
   - UI generator slide PPTX yang memanggil FastAPI background job.
-- `app/(dashboard)/seedance/page.tsx`
-  - `SeedancePage`, `handleSubmit`, `handlePoll`, `addReference`
-  - UI creator/poller video Seedance 2.0 yang mengirim prompt dan reference asset ke FastAPI `/api/seedance/tasks`; reference bisa URL manual atau upload file yang dibaca browser sebagai data URL/base64, lalu status task dipolling hingga `video_url` tersedia.
 - `python_backend/requirements.txt`
   - dependency list
   - Mendefinisikan stack backend Python: FastAPI, pandas/openpyxl, PDF/OCR, requests/httpx, OpenAI client.
@@ -546,11 +562,8 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - `migrate`
   - Script migrasi legacy JSON ke SQLite Python-side untuk users/principles/master items.
 - `python_backend/main.py`
-  - `app = FastAPI(...)`, `app.include_router(seedance_router)`, ratusan helper + endpoint
-  - Pusat backend Python: auth bridge, validator, summary, payments, finance, principle management, PPT, file output, HTML legacy pages, dan mounting router Seedance.
-- `python_backend/seedance_api.py`
-  - `create_seedance_task`, `get_seedance_task`, `seedance_health`
-  - Router FastAPI kecil untuk proxy BytePlus ModelArk Seedance 2.0; membaca API key dari env server, menerima reference URL/data URL dari frontend, dan tidak mengekspos key ke browser.
+  - `app = FastAPI(...)`, ratusan helper + endpoint
+  - Pusat backend Python: auth bridge, validator, summary, payments, finance, principle management, PPT, file output, dan HTML legacy pages.
 
 # Data & Config
 - Lokasi `.env*` / config utama:
@@ -621,9 +634,6 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 - SumoPod / OpenAI-compatible API
   - Pemanggil: `python_backend/main.py` fungsi `sumopod_chat_completion`, `ai_extract_summary_rows`
   - Tujuan: ekstraksi AI untuk summary promo.
-- BytePlus ModelArk Seedance 2.0
-  - Pemanggil: `app/(dashboard)/seedance/page.tsx` -> `python_backend/seedance_api.py`
-  - Tujuan: membuat task video asynchronous via `/contents/generations/tasks` dan polling task untuk mendapatkan `video_url`/`last_frame_url`.
 - Accurate Webhook
   - Pemanggil: `app/api/webhook/accurate/route.ts`
   - Tujuan: menerima event webhook dan menyimpannya ke file log.
@@ -631,7 +641,7 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 # Risks / Blind Spots
 - `python_backend/main.py` bersifat monolitik; tidak ada pemisahan router/service/repository formal. Batas antar-layer di backend Python diturunkan dari fungsi helper, bukan struktur folder.
 - Komunikasi Next.js <-> FastAPI tidak dipusatkan di satu wrapper typed client. Ada beberapa page yang memanggil FastAPI langsung dengan pola berbeda-beda.
-- `app/(dashboard)/validator/page.tsx`, `app/(dashboard)/powerpoint-maker/page.tsx`, dan `app/(dashboard)/seedance/page.tsx` memanggil FastAPI cross-port. Seedance memakai env `NEXT_PUBLIC_FASTAPI_BASE_URL` dengan fallback `http://localhost:8000`, sedangkan validator/powerpoint masih hardcoded; pola ini belum dipusatkan dalam typed client.
+- `app/(dashboard)/validator/page.tsx` dan `app/(dashboard)/powerpoint-maker/page.tsx` memanggil FastAPI cross-port; pola ini belum dipusatkan dalam typed client.
 - `app/(dashboard)/summary/page.tsx`, `payments/page.tsx`, `finance/page.tsx`, dan `principles/page.tsx` memang memakai `credentials: "include"` ke FastAPI cross-port, tetapi tidak ada wrapper CSRF eksplisit; mereka bergantung pada fallback same-origin logic di FastAPI.
 - `app/(dashboard)/powerpoint-maker/page.tsx` mengharapkan `file_id` dari endpoint generate, sedangkan `python_backend/main.py` endpoint `/api/powerpoint/generate` mengembalikan `job_id`. Endpoint `/api/job_status/{job_id}` ada di FastAPI, tetapi tidak terlihat dipakai di frontend Next. Ini menunjukkan mismatch flow.
 - `config/accurateRoutes.js` sangat besar dan berfungsi sebagai registry endpoint/sample payload. File ini tampak lebih seperti registry/generated asset daripada core business logic file-by-file; tidak semua route di dalamnya pasti aktif dipakai UI.

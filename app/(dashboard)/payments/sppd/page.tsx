@@ -1,15 +1,15 @@
 "use client";
 
 /*
- * Tujuan: Halaman konfigurasi format SPPD untuk nomor surat, tanggal fixed Jaminan, dan aturan jatuh tempo.
+ * Tujuan: Halaman konfigurasi format SPPD dan upload Excel update data pembayaran/SPPD.
  * Caller: Next.js App Router route `/payments/sppd`.
- * Dependensi: FastAPI `/payments/sppd/settings`, lucide-react, sonner.
- * Main Functions: PaymentsSppdSettingsPage, fetchSettings, handleSave, getCsrfToken.
+ * Dependensi: FastAPI `/payments/sppd/settings`, `/payments/sppd/upload`, lucide-react, sonner.
+ * Main Functions: PaymentsSppdSettingsPage, fetchSettings, handleSave, handleUpload, getCsrfToken.
  * Side Effects: HTTP read/write ke FastAPI dan update `payments.json`.
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, FileText, RefreshCcw, Save, Settings2 } from "lucide-react";
+import { ArrowLeft, FileText, RefreshCcw, Save, Settings2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 interface SppdSettings {
@@ -33,6 +33,16 @@ interface SettingsResponse {
     csrf_token?: string;
 }
 
+interface UploadResponse {
+    ok: boolean;
+    error?: string;
+    updated?: number;
+    not_found?: string[];
+    ignored_columns?: string[];
+    blocked_columns?: string[];
+    changed_fields?: Record<string, number>;
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
 
 async function getJson<T>(url: string): Promise<T> {
@@ -51,6 +61,20 @@ async function postJson<T>(url: string, body: Record<string, unknown>, csrfToken
             "X-CSRF-Token": csrfToken,
         },
         body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || "Request gagal.");
+    return data as T;
+}
+
+async function postForm<T>(url: string, body: FormData, csrfToken: string): Promise<T> {
+    const res = await fetch(`${API_BASE}${url}`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "X-CSRF-Token": csrfToken,
+        },
+        body,
     });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || "Request gagal.");
@@ -85,8 +109,11 @@ export default function PaymentsSppdSettingsPage() {
     const [serverPreview, setServerPreview] = useState("");
     const [templatePath, setTemplatePath] = useState("");
     const [csrfToken, setCsrfToken] = useState("");
+    const [uploadFile, setUploadFile] = useState<File | null>(null);
+    const [uploadResult, setUploadResult] = useState<UploadResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [uploading, setUploading] = useState(false);
 
     const nextSequence = Number(settings.last_sequence || 0) + 1;
     const localPreview = useMemo(
@@ -134,6 +161,28 @@ export default function PaymentsSppdSettingsPage() {
             toast.error(err instanceof Error ? err.message : "Gagal menyimpan format SPPD.");
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleUpload = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!uploadFile) {
+            toast.error("Pilih file Excel dulu.");
+            return;
+        }
+        setUploading(true);
+        setUploadResult(null);
+        try {
+            const token = csrfToken || (await getJson<SettingsResponse>("/api/me")).csrf_token || "";
+            const body = new FormData();
+            body.append("file", uploadFile);
+            const result = await postForm<UploadResponse>("/payments/sppd/upload", body, token);
+            setUploadResult(result);
+            toast.success(`Upload Excel berhasil: ${result.updated || 0} record diupdate.`);
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : "Gagal upload Excel SPPD.");
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -206,6 +255,47 @@ export default function PaymentsSppdSettingsPage() {
                     </div>
                 </section>
             </div>
+
+            <section className="mt-5 border border-white/10 bg-black/30 rounded-lg p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <div className="flex items-center gap-2 text-slate-200 font-semibold">
+                            <Upload size={18} className="text-indigo-400" />
+                            Upload Excel Data SPPD
+                        </div>
+                        <p className="mt-1 text-sm text-slate-400">
+                            Update data pembayaran dari Excel. Kolom ajukan, gap, status track/status pembayaran, draft/submission, dan nomor SPPD tidak ditulis dari Excel.
+                        </p>
+                    </div>
+                    <form onSubmit={handleUpload} className="flex flex-wrap items-center gap-2">
+                        <input
+                            type="file"
+                            accept=".xlsx,.xls"
+                            onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                            className="max-w-[280px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+                        />
+                        <button disabled={uploading || !uploadFile} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 disabled:opacity-50">
+                            <Upload size={16} /> {uploading ? "Uploading..." : "Upload"}
+                        </button>
+                    </form>
+                </div>
+                {uploadResult && (
+                    <div className="mt-4 grid gap-3 md:grid-cols-3 text-sm">
+                        <div className="rounded-lg border border-white/10 bg-black/40 p-3">
+                            <div className="text-xs uppercase tracking-wide text-slate-500">Record Update</div>
+                            <div className="mt-1 text-xl font-bold text-white">{uploadResult.updated || 0}</div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/40 p-3">
+                            <div className="text-xs uppercase tracking-wide text-slate-500">Kolom Diblok</div>
+                            <div className="mt-1 text-slate-300">{uploadResult.blocked_columns?.join(", ") || "-"}</div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/40 p-3">
+                            <div className="text-xs uppercase tracking-wide text-slate-500">Tidak Ditemukan</div>
+                            <div className="mt-1 text-slate-300">{uploadResult.not_found?.join(", ") || "-"}</div>
+                        </div>
+                    </div>
+                )}
+            </section>
         </div>
     );
 }

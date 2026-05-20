@@ -1,20 +1,21 @@
-// Tujuan: Shell navigasi utama dashboard Smart ERP, termasuk akses modul payments/SPPD dan Seedance 2.0.
+// Tujuan: Shell navigasi utama dashboard Smart ERP dengan filtering navigasi berdasarkan RBAC.
 // Caller: `app/(dashboard)/layout.tsx`.
-// Dependensi: `authClient`, router Next.js, ikon `lucide-react`.
+// Dependensi: `authClient`, router Next.js, ikon `lucide-react`, helper RBAC.
 // Main Functions: `SidebarLayout`, `handleSignOut`.
 // Side Effects: Sign-out Better Auth dan navigasi browser; tidak melakukan DB/file I/O langsung.
 "use client";
 
 import { useState } from "react";
-import { Menu, Home, Users, ShoppingCart, ShoppingBag, Settings, Database, Server, Box, GitBranch, ArrowLeftRight, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Presentation, Settings2, FileVideo, FileText, Shield } from "lucide-react";
+import { Menu, Home, Users, ShoppingCart, ShoppingBag, Settings, Database, Server, Box, GitBranch, ArrowLeftRight, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Presentation, Settings2, FileText, Shield } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
+import { canAccessPath, normalizeRole } from "@/lib/rbac";
 
-export default function SidebarLayout({ children }: { children: React.ReactNode }) {
+export default function SidebarLayout({ children, role, permissions }: { children: React.ReactNode; role?: string | null; permissions?: string | null }) {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const router = useRouter();
     const { data: session } = authClient.useSession();
-    const userRole = session?.user?.role;
+    const userRole = normalizeRole(role || session?.user?.role);
 
     const handleSignOut = async () => {
         await authClient.signOut({
@@ -26,8 +27,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         });
     };
 
-    // Sidebar navigation structure based on implementation plan
-    const navItems = [
+    const allNavItems = [
         { name: "Dashboard", icon: Home, href: "/" },
         { name: "AOL Form Engine", icon: Settings2, href: "/api-wrapper" },
         { name: "Validator Diskon", icon: Percent, href: "/validator" },
@@ -36,7 +36,6 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         { name: "Pembayaran / SPPD", icon: Wallet, href: "/payments" },
         { name: "Format SPPD", icon: FileText, href: "/payments/sppd" },
         { name: "PowerPoint Maker", icon: Presentation, href: "/powerpoint-maker" },
-        { name: "Seedance 2.0", icon: FileVideo, href: "/seedance" },
         { name: "Master Principle", icon: Database, href: "/principles" },
         { name: "Cabang", icon: GitBranch, href: "/master/branch" },
         { name: "Gudang", icon: Box, href: "/master/warehouse" },
@@ -46,8 +45,9 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         { name: "Penerimaan Penjualan", icon: ShoppingBag, href: "/sales/receipt" },
         { name: "Retur Penjualan", icon: ArrowLeftRight, href: "/sales/return" },
         { name: "Pengaturan API", icon: Settings, href: "/settings" },
-        ...(userRole === "admin" ? [{ name: "User & RBAC", icon: Shield, href: "/admin/users" }] : []),
+        { name: "User & RBAC", icon: Shield, href: "/admin/users" },
     ];
+    const navItems = allNavItems.filter((item) => canAccessPath(item.href, userRole, permissions || "{}"));
 
     return (
         <div className="flex h-screen overflow-hidden">

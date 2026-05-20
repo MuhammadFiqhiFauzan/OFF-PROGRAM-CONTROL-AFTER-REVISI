@@ -1,12 +1,17 @@
-// Tujuan: Landing dashboard untuk akses cepat modul operasional Smart ERP, termasuk Seedance 2.0.
+// Tujuan: Landing dashboard untuk akses cepat modul operasional Smart ERP.
 // Caller: Route Next.js dashboard `/`.
-// Dependensi: `lucide-react`, `next/link`, daftar modul lokal.
+// Dependensi: `lucide-react`, `next/link`, Better Auth, Drizzle user, helper RBAC, daftar modul lokal.
 // Main Functions: `DashboardLanding`, `MODULES`.
-// Side Effects: Navigasi client via link; tidak melakukan DB/HTTP/file I/O.
-"use client";
+// Side Effects: DB read user permissions dan navigasi via link.
 
-import { Percent, CalendarCheck2, DollarSign, Wallet, Presentation, Database, ArrowRight, Settings2, ShieldCheck, Cpu, FileVideo } from "lucide-react";
+import { Percent, CalendarCheck2, DollarSign, Wallet, Presentation, Database, ArrowRight, Settings2, ShieldCheck, Cpu } from "lucide-react";
 import Link from "next/link";
+import { headers } from "next/headers";
+import { eq } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { user } from "@/db/schema";
+import { canAccessPath, normalizeRole } from "@/lib/rbac";
 
 const MODULES = [
     {
@@ -64,15 +69,6 @@ const MODULES = [
         border: "border-orange-500/20 hover:border-orange-400/50"
     },
     {
-        title: "Seedance 2.0",
-        desc: "Buat dan pantau task video BytePlus ModelArk.",
-        icon: FileVideo,
-        href: "/seedance",
-        color: "from-amber-500/20 to-amber-600/5",
-        iconColor: "text-amber-300",
-        border: "border-amber-500/20 hover:border-amber-400/50"
-    },
-    {
         title: "Master Principle",
         desc: "Konfigurasi kamus data principle untuk PDF Extraction AI.",
         icon: Database,
@@ -83,7 +79,16 @@ const MODULES = [
     }
 ];
 
-export default function DashboardLanding() {
+export default async function DashboardLanding() {
+    const session = await auth.api.getSession({ headers: await headers() });
+    const userId = String(session?.user?.id || "");
+    const [dbUser] = userId
+        ? await db.select({ role: user.role, permissions: user.permissions }).from(user).where(eq(user.id, userId)).limit(1)
+        : [];
+    const role = normalizeRole(dbUser?.role || session?.user?.role);
+    const permissions = dbUser?.permissions || "{}";
+    const visibleModules = MODULES.filter((mod) => canAccessPath(mod.href, role, permissions));
+
     return (
         <div className="max-w-7xl mx-auto pb-12 pt-4 selection:bg-indigo-500/30">
             {/* Hero Section */}
@@ -120,7 +125,7 @@ export default function DashboardLanding() {
                     <span className="w-1.5 h-6 rounded-full bg-indigo-500 block"></span> Modul Operasional
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {MODULES.map((mod, i) => {
+                    {visibleModules.map((mod, i) => {
                         const Icon = mod.icon;
                         return (
                             <Link 

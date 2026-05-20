@@ -1,8 +1,8 @@
 # main.py (PATCH v12) — Channel lookup uploader + Internal dataset optional + Required-file guard UI/API
-# Tujuan: FastAPI backend untuk validator, payments restore/SPPD, finance approval, proof upload, dan helper export.
+# Tujuan: FastAPI backend untuk validator, payments restore/SPPD, finance approval, RBAC, proof upload, dan helper export.
 # Caller: Next.js dashboard routes, browser uploads, dan service local AccAPI.
 # Dependensi: FastAPI, pandas/openpyxl, payments.py, template DOCX SPPD, Better Auth SQLite DB, filesystem JSON/output, auth utilities.
-# Main Functions: render_sppd_docx, payments_upload, payments_sppd_settings_get/save, payments_finance_data, payments_finance_proof, payments_finance_update.
+# Main Functions: render_sppd_docx, payments_upload, payments_sppd_settings_get/save/upload, payments_finance_data, payments_finance_proof, payments_finance_update.
 # Side Effects: HTTP response/download, file upload/read/write, payments.json mutation, DOCX/XLSX generation, audit logging.
 # =======================================================================================================
 # You requested:
@@ -51,8 +51,6 @@ from payments import (
     validator_promo_template_rows,
     validator_sales_template_rows,
 )
-from seedance_api import router as seedance_router
-
 try:
     import bcrypt as _bcrypt  # type: ignore
 except Exception:
@@ -113,8 +111,50 @@ LOGIN_MAX_FAILED_ATTEMPTS = int(os.getenv("LOGIN_MAX_FAILED_ATTEMPTS", "5"))
 LOGIN_FAILED_WINDOW_SECONDS = int(os.getenv("LOGIN_FAILED_WINDOW_SECONDS", "300"))
 LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "300"))
 
-PERMISSION_MODULES = ["validator", "summary", "payments", "finance"]
-PERMISSION_ACTIONS = ["view", "edit", "update", "delete"]
+PERMISSION_MODULES = [
+    "dashboard",
+    "api_wrapper",
+    "payments",
+    "sppd",
+    "finance",
+    "principles",
+    "summary",
+    "validator",
+    "powerpoint",
+    "master_data",
+    "sales",
+    "settings",
+    "users",
+]
+PERMISSION_ACTIONS = [
+    "view",
+    "create",
+    "edit",
+    "update",
+    "delete",
+    "upload",
+    "export",
+    "submit",
+    "execute",
+    "edit_settings",
+    "upload_excel",
+    "generate",
+    "download",
+    "approve",
+    "transfer",
+    "upload_proof",
+    "post_accurate",
+    "retry_post",
+    "run",
+    "email",
+    "sync",
+    "manage",
+    "create_user",
+    "edit_user",
+    "delete_user",
+    "set_role",
+    "set_permission",
+]
 
 if APP_IS_PRODUCTION:
     enforce_non_default_auth_secret(AUTH_SECRET)
@@ -157,7 +197,6 @@ PATCH_NOTES_HTML = r"""
 """
 
 app = FastAPI(title="Discount Validator API", version=f"PATCH-{PATCH_VERSION}")
-app.include_router(seedance_router)
 
 # ----- Background Jobs Storage -----
 # In a real enterprise app, use Redis/Celery. For now, in-memory dict mapped by job_id.
@@ -834,6 +873,16 @@ def parse_auth_users(spec: str) -> Dict[str, str]:
 
 def normalize_permissions(raw) -> Dict[str, Set[str]]:
     perms: Dict[str, Set[str]] = {}
+    if isinstance(raw, str):
+        raw_text = s(raw)
+        if not raw_text:
+            return {}
+        try:
+            raw = json.loads(raw_text)
+        except Exception:
+            raw = [item.strip() for item in raw_text.replace(";", ",").split(",") if item.strip()]
+    if isinstance(raw, dict) and "__custom" in raw:
+        raw = raw.get("permissions", {})
     if isinstance(raw, dict):
         for mod, actions in raw.items():
             mod = s(mod).lower()
@@ -865,6 +914,25 @@ def normalize_permissions(raw) -> Dict[str, Set[str]]:
             if mod in PERMISSION_MODULES and act in PERMISSION_ACTIONS:
                 perms.setdefault(mod, set()).add(act)
     return perms
+
+def parse_permission_profile(raw) -> Tuple[Dict[str, Set[str]], bool]:
+    if raw is None:
+        return ({}, False)
+    parsed = raw
+    if isinstance(raw, str):
+        raw_text = s(raw)
+        if not raw_text or raw_text == "{}":
+            return ({}, False)
+        try:
+            parsed = json.loads(raw_text)
+        except Exception:
+            return (normalize_permissions(raw_text), True)
+    if isinstance(parsed, dict) and parsed.get("__custom") is True:
+        return (normalize_permissions(parsed.get("permissions", {})), True)
+    if isinstance(parsed, dict) and parsed.get("__custom") is False:
+        return ({}, False)
+    perms = normalize_permissions(parsed)
+    return (perms, bool(perms))
 
 def load_users_json(path: str) -> Dict[str, Dict[str, str]]:
     if not path or not os.path.exists(path):
@@ -943,7 +1011,7 @@ def get_user_role(username: str) -> str:
     if username.startswith("betterauth|"):
         parts = username.split("|", 2)
         role = s(parts[1] if len(parts) > 1 else "").lower()
-        if role in {"admin", "manager", "staff", "viewer"}:
+        if role in {"admin", "manager", "finance", "staff", "viewer"}:
             return role
         return "viewer"
     rec = get_auth_user_records().get(username)
@@ -1239,7 +1307,7 @@ def get_current_user(request: Request) -> Optional[str]:
                     exp = expiresAt / 1000.0 if expiresAt > 20000000000 else expiresAt
                     if exp > now:
                         role = s(role).lower() or "viewer"
-                        if role not in {"admin", "manager", "staff", "viewer"}:
+                        if role not in {"admin", "manager", "finance", "staff", "viewer"}:
                             role = "viewer"
                         return f"betterauth|{role}|{s(email).lower() or s(name)}"
         except Exception as e:
@@ -1261,13 +1329,31 @@ def get_user_permissions_info(username: str) -> Tuple[Dict[str, Set[str]], bool]
     username = s(username)
     if not username:
         return ({}, False)
+    if username.startswith("betterauth|"):
+        parts = username.split("|", 2)
+        email = s(parts[2] if len(parts) > 2 else "").lower()
+        if not email:
+            return ({}, False)
+        try:
+            import sqlite3
+            if not os.path.exists(BETTER_AUTH_DB_PATH):
+                return ({}, False)
+            conn = sqlite3.connect(BETTER_AUTH_DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT permissions FROM user WHERE lower(email) = ? LIMIT 1", (email,))
+            row = c.fetchone()
+            conn.close()
+            if not row:
+                return ({}, False)
+            return parse_permission_profile(row[0])
+        except Exception as e:
+            append_error_log("get_user_permissions_info_betterauth", e, {"email": email})
+            return ({}, False)
     rec = get_auth_user_records().get(username)
     if not rec:
         return ({}, False)
     raw = rec.get("permissions", None)
-    if raw is None:
-        return ({}, False)
-    return (normalize_permissions(raw), True)
+    return parse_permission_profile(raw)
 
 def user_has_permission(username: Optional[str], module: str, action: str) -> bool:
     if not username:
@@ -1277,32 +1363,52 @@ def user_has_permission(username: Optional[str], module: str, action: str) -> bo
     module = s(module).lower()
     action = s(action).lower()
     role = get_user_role(username)
-    next_role_permissions = {
+    role_permissions = {
+        "admin": {mod: set(PERMISSION_ACTIONS) for mod in PERMISSION_MODULES},
         "manager": {
-            "validator": {"view", "edit", "update"},
-            "summary": {"view", "edit", "update"},
-            "payments": {"view", "edit", "update", "delete"},
-            "finance": {"view", "edit", "update"},
+            "dashboard": {"view"},
+            "api_wrapper": {"view", "execute"},
+            "payments": {"view", "export", "submit", "edit", "update"},
+            "sppd": {"view", "generate", "download"},
+            "finance": {"view", "approve", "export"},
+            "principles": {"view"},
+            "summary": {"view", "export"},
+            "validator": {"view", "download"},
+            "powerpoint": {"view", "download"},
+            "master_data": {"view"},
+            "sales": {"view", "export"},
+            "settings": {"view"},
+        },
+        "finance": {
+            "dashboard": {"view"},
+            "payments": {"view", "export"},
+            "sppd": {"view", "download"},
+            "finance": {"view", "approve", "transfer", "upload_proof", "post_accurate", "retry_post", "export", "update", "edit"},
+            "principles": {"view"},
         },
         "staff": {
-            "validator": {"view", "edit"},
-            "summary": {"view", "edit"},
-            "payments": {"view", "edit", "update"},
-            "finance": {"view"},
+            "dashboard": {"view"},
+            "payments": {"view", "create", "edit", "update", "upload", "submit"},
+            "sppd": {"view", "generate", "download"},
+            "principles": {"view"},
+            "summary": {"view", "upload", "generate", "export", "edit", "update"},
+            "validator": {"view", "upload", "run", "download", "edit"},
         },
         "viewer": {
+            "dashboard": {"view"},
             "validator": {"view"},
             "summary": {"view"},
             "payments": {"view"},
-            "finance": set(),
+            "sppd": {"view"},
+            "finance": {"view"},
         },
     }
-    if role in next_role_permissions:
-        return action in next_role_permissions.get(role, {}).get(module, set())
     perms, defined = get_user_permissions_info(username)
     if defined:
         allowed = perms.get(module, set())
         return action in allowed
+    if role in role_permissions:
+        return action in role_permissions.get(role, {}).get(module, set())
     if module == "finance":
         return is_finance_user(username)
     return True
@@ -5297,7 +5403,7 @@ def payments_page(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse("/login")
-    if not user_has_permission(user, "payments", "view"):
+    if not user_has_permission(user, "sppd", "view"):
         return HTMLResponse("Forbidden", status_code=403)
     is_fin = user_has_permission(user, "finance", "view")
     can_edit = user_has_permission(user, "payments", "edit")
@@ -5685,7 +5791,7 @@ async def payments_update(request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"ok": False, "error": "Unauthorized"})
-    if not user_has_permission(user, "payments", "update"):
+    if not user_has_permission(user, "sppd", "edit_settings"):
         return JSONResponse(status_code=403, content={"ok": False, "error": "Forbidden"})
     csrf_token = request.headers.get("X-CSRF-Token", "")
     if not validate_csrf_request(request, csrf_token):
@@ -5739,6 +5845,240 @@ async def payments_update(request: Request):
     save_payments_db(db)
     append_audit_log(user, "payments_update", "lpb", {"count": len(updated), "samples": updated[:10]})
     return JSONResponse({"ok": True})
+
+SPPD_EXCEL_FORBIDDEN_FIELDS = {
+    "ajukan",
+    "gap_nilai",
+    "gap_nilai_display",
+    "status_pembayaran",
+    "status_tracking",
+    "tracking_status",
+    "submitted_at",
+    "submitted_by",
+    "submission_id",
+    "draft_id",
+    "sppd_no",
+    "finance_status",
+    "payment_proof",
+    "proof_metadata",
+    "accurate_posting",
+}
+
+SPPD_EXCEL_FIELD_ALIASES = {
+    "recordid": "record_id",
+    "record_id": "record_id",
+    "id": "record_id",
+    "tippepengajuan": "tipe_pengajuan",
+    "tipepengajuan": "tipe_pengajuan",
+    "tipe_pengajuan": "tipe_pengajuan",
+    "nolpb": "no_lpb",
+    "no_lpb": "no_lpb",
+    "lpb": "no_lpb",
+    "principle": "principle",
+    "supplier": "principle",
+    "vendor": "principle",
+    "tglsetor": "tgl_setor",
+    "tgl_setor": "tgl_setor",
+    "tglwin": "tgl_win",
+    "tgl_win": "tgl_win",
+    "tgljtempowin": "tgl_jtempo_win",
+    "tgl_jtempo_win": "tgl_jtempo_win",
+    "tglterimabarang": "tgl_terima_barang",
+    "tgl_terima_barang": "tgl_terima_barang",
+    "tglinvoice": "tgl_invoice",
+    "tgl_invoice": "tgl_invoice",
+    "noinvoice": "invoice_no",
+    "invoice": "invoice_no",
+    "invoice_no": "invoice_no",
+    "nomorinvoice": "invoice_no",
+    "jenisdokumen": "jenis_dokumen",
+    "jenis_dokumen": "jenis_dokumen",
+    "nomordokumen": "nomor_dokumen",
+    "nomor_dokumen": "nomor_dokumen",
+    "nilaigiro": "nilai_invoice",
+    "nilaiinvoice": "nilai_invoice",
+    "nilai_invoice": "nilai_invoice",
+    "nilaisistem": "nilai_win",
+    "nilaiwin": "nilai_win",
+    "nilai_win": "nilai_win",
+    "potongan": "potongan",
+    "nilaipembayaran": "nilai_pembayaran",
+    "nilai_pembayaran": "nilai_pembayaran",
+    "jtinvoice": "jt_invoice",
+    "jt_invoice": "jt_invoice",
+    "jatuhtempoinvoice": "jt_invoice",
+    "actualdate": "actual_date",
+    "actual_date": "actual_date",
+    "tglpembayaran": "tgl_pembayaran",
+    "tgl_pembayaran": "tgl_pembayaran",
+    "tanggalpembayaran": "tgl_pembayaran",
+    "tanggalpengajuanpembayaran": "target_payment_date",
+    "targetpaymentdate": "target_payment_date",
+    "target_payment_date": "target_payment_date",
+    "metodepembayaran": "payment_method",
+    "paymentmethod": "payment_method",
+    "payment_method": "payment_method",
+    "jenispembayaran": "jenis_pembayaran",
+    "jenis_pembayaran": "jenis_pembayaran",
+    "keterangan": "keterangan",
+    "ajukan": "ajukan",
+    "gap": "gap_nilai",
+    "gapnilai": "gap_nilai",
+    "gap_nilai": "gap_nilai",
+    "status": "status_pembayaran",
+    "statuspembayaran": "status_pembayaran",
+    "status_pembayaran": "status_pembayaran",
+    "statustracking": "status_tracking",
+    "status_tracking": "status_tracking",
+    "trackingstatus": "tracking_status",
+    "tracking_status": "tracking_status",
+    "submittedat": "submitted_at",
+    "submitted_at": "submitted_at",
+    "submittedby": "submitted_by",
+    "submitted_by": "submitted_by",
+    "submissionid": "submission_id",
+    "submission_id": "submission_id",
+    "draftid": "draft_id",
+    "draft_id": "draft_id",
+    "sppdno": "sppd_no",
+    "sppd_no": "sppd_no",
+}
+
+SPPD_EXCEL_NUMERIC_FIELDS = {"nilai_invoice", "nilai_win", "potongan", "nilai_pembayaran"}
+SPPD_EXCEL_DATE_FIELDS = {
+    "tgl_setor",
+    "tgl_win",
+    "tgl_jtempo_win",
+    "tgl_terima_barang",
+    "tgl_invoice",
+    "jt_invoice",
+    "actual_date",
+    "tgl_pembayaran",
+    "target_payment_date",
+}
+
+def normalize_excel_field_name(value: Any) -> str:
+    text = s(value).lower()
+    text = text.replace(".", "")
+    text = re.sub(r"[^a-z0-9_]+", "", text)
+    return text
+
+def normalize_sppd_excel_value(field: str, value: Any) -> Any:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    if field in SPPD_EXCEL_NUMERIC_FIELDS:
+        return parse_number_id(value)
+    if field in SPPD_EXCEL_DATE_FIELDS:
+        return to_date_str(value)
+    if field == "tipe_pengajuan":
+        return normalize_pengajuan_type(value)
+    return s(value)
+
+def parse_sppd_excel_rows(content: bytes) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
+    df = pd.read_excel(io.BytesIO(content))
+    if df.empty:
+        return [], [], []
+    columns: Dict[str, str] = {}
+    ignored_columns: List[str] = []
+    blocked_columns: List[str] = []
+    for col in df.columns:
+        normalized = normalize_excel_field_name(col)
+        field = SPPD_EXCEL_FIELD_ALIASES.get(normalized)
+        if field in SPPD_EXCEL_FORBIDDEN_FIELDS:
+            blocked_columns.append(s(col))
+            continue
+        if field:
+            columns[s(col)] = field
+        elif normalized:
+            ignored_columns.append(s(col))
+    rows: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        item: Dict[str, Any] = {}
+        for col, field in columns.items():
+            value = normalize_sppd_excel_value(field, row.get(col))
+            if value is None or s(value) == "":
+                continue
+            item[field] = value
+        if item:
+            rows.append(item)
+    return rows, ignored_columns, blocked_columns
+
+@app.post("/payments/sppd/upload")
+async def payments_sppd_upload(request: Request, file: UploadFile = File(None)):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"ok": False, "error": "Unauthorized"})
+    if not user_has_permission(user, "sppd", "upload_excel"):
+        return JSONResponse(status_code=403, content={"ok": False, "error": "Forbidden"})
+    csrf_token = request.headers.get("X-CSRF-Token", "")
+    if not validate_csrf_request(request, csrf_token):
+        return JSONResponse(status_code=403, content={"ok": False, "error": "CSRF token invalid"})
+    if file is None:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "File Excel belum diupload."})
+    try:
+        content = await read_upload_file_limited(
+            file,
+            max_bytes=MAX_EXCEL_UPLOAD_BYTES,
+            allowed_exts=(".xlsx", ".xls"),
+            label="File SPPD",
+        )
+        rows, ignored_columns, blocked_columns = parse_sppd_excel_rows(content)
+        if not rows:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Tidak ada baris valid untuk diupdate."})
+        db = load_payments_db()
+        updated: List[str] = []
+        not_found: List[str] = []
+        changed_fields: Dict[str, int] = {}
+        for item in rows:
+            row_id = s(item.get("record_id", "")) or s(item.get("no_lpb", ""))
+            key = resolve_payment_record_key(db, row_id)
+            if not key or key not in db.get("lpb", {}):
+                not_found.append(row_id or "-")
+                continue
+            rec = db["lpb"][key]
+            next_no_lpb = s(item.get("no_lpb", rec.get("no_lpb", "")))
+            if next_no_lpb:
+                dup_key = find_lpb_duplicate_key(db, next_no_lpb, exclude_key=key)
+                if dup_key:
+                    return JSONResponse(status_code=400, content={"ok": False, "error": f"No. LPB {next_no_lpb} sudah dipakai record lain."})
+            for field, value in item.items():
+                if field == "record_id" or field in SPPD_EXCEL_FORBIDDEN_FIELDS:
+                    continue
+                rec[field] = value
+                changed_fields[field] = changed_fields.get(field, 0) + 1
+            if "nilai_invoice" in item or "nilai_win" in item:
+                try:
+                    rec["gap_nilai"] = float(parse_number_id(rec.get("nilai_win", 0))) - float(parse_number_id(rec.get("nilai_invoice", 0)))
+                except Exception:
+                    rec["gap_nilai"] = 0.0
+            updated.append(key)
+        if not updated:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Tidak ada record yang cocok untuk diupdate.", "not_found": not_found[:20]})
+        save_payments_db(db)
+        append_audit_log(user, "payments_sppd_excel_upload", "lpb", {
+            "updated": len(updated),
+            "not_found": len(not_found),
+            "changed_fields": changed_fields,
+            "blocked_columns": blocked_columns,
+        })
+        return JSONResponse({
+            "ok": True,
+            "updated": len(updated),
+            "not_found": not_found[:20],
+            "ignored_columns": ignored_columns[:30],
+            "blocked_columns": blocked_columns[:30],
+            "changed_fields": changed_fields,
+        })
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(e)})
+    except Exception as e:
+        append_error_log("payments_sppd_upload", e, {"user": user})
+        return JSONResponse(status_code=500, content={"ok": False, "error": "Gagal memproses upload Excel SPPD."})
 
 @app.post("/payments/delete")
 async def payments_delete(request: Request):
@@ -11313,14 +11653,14 @@ def get_principles(request: Request):
     if not user: return JSONResponse(status_code=401, content={"ok": False, "error": "Unauthorized"})
     ps = _load_principles()
     return {"ok": True, "principles": ps}
-# Tujuan: FastAPI backend untuk validator diskon, summary, payments, finance, principle, PPTX, dan proxy Seedance 2.0.
+# Tujuan: FastAPI backend untuk validator diskon, summary, payments, finance, principle, dan PPTX.
 # Caller: Next.js dashboard, halaman HTML legacy FastAPI, dan workflow internal operasional.
-# Dependensi: pandas/openpyxl, auth helpers, validator_engine, payments, SumoPod/OpenAI-compatible API, BytePlus ModelArk.
-# Main Functions: `app`, endpoint validator/summary/payments/finance/principles/powerpoint, include router `seedance_router`.
-# Side Effects: DB/file read-write runtime, HTTP call AI/SMTP/BytePlus, generate Excel/PPTX/download artifacts.
+# Dependensi: pandas/openpyxl, auth helpers, validator_engine, payments, SumoPod/OpenAI-compatible API.
+# Main Functions: `app`, endpoint validator/summary/payments/finance/principles/powerpoint.
+# Side Effects: DB/file read-write runtime, HTTP call AI/SMTP, generate Excel/PPTX/download artifacts.
 #
-# Tujuan: Backend FastAPI utama untuk validator, summary, payments/SPPD, finance, principle, PPT, dan Seedance.
+# Tujuan: Backend FastAPI utama untuk validator, summary, payments/SPPD, finance, principle, dan PPT.
 # Caller: Next.js dashboard, halaman legacy FastAPI, dan API browser internal AccAPI.
-# Dependensi: pandas/openpyxl, payments.py, validator_engine.py, seedance_api.py, payments.json, file output, Accurate session dari UI.
+# Dependensi: pandas/openpyxl, payments.py, validator_engine.py, payments.json, file output, Accurate session dari UI.
 # Main Functions: app routes, load/save payments DB, upload/restore payments, render SPPD, finance proof/mapping/update APIs.
 # Side Effects: HTTP response, JSON/file I/O, DOCX/XLSX generation, audit/error log writes.

@@ -1,3 +1,10 @@
+/*
+ * Tujuan: Guard server untuk halaman User & RBAC.
+ * Caller: Next.js App Router route `/admin/users`.
+ * Dependensi: Better Auth session dan komponen UserManagement.
+ * Main Functions: AdminUsersPage.
+ * Side Effects: Redirect login/dashboard bila session atau role admin tidak valid.
+ */
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";

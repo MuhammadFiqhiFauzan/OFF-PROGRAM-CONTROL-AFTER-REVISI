@@ -1,5 +1,8 @@
-// Initialize SQLite tables used by Better Auth and local cache when the runtime volume is empty.
-// Safe to run repeatedly because all statements use IF NOT EXISTS.
+// Tujuan: Inisialisasi/migrasi SQLite runtime untuk Better Auth, RBAC, cache master, dan idempotency.
+// Caller: Dockerfile.frontend startup command sebelum `next start`.
+// Dependensi: @libsql/client dan filesystem volume DATABASE_URL.
+// Main Functions: create table IF NOT EXISTS, migration ALTER TABLE, role/permission default update.
+// Side Effects: Membuat folder DB dan menjalankan DDL/DML SQLite.
 import { createClient } from '@libsql/client';
 import { mkdirSync } from 'node:fs';
 
@@ -19,6 +22,7 @@ const statements = [
     emailVerified INTEGER NOT NULL,
     image TEXT,
     role TEXT DEFAULT 'viewer',
+    permissions TEXT DEFAULT '{}',
     banned INTEGER DEFAULT 0,
     banReason TEXT,
     banExpires INTEGER,
@@ -105,6 +109,7 @@ for (const sql of statements) {
 
 const migrations = [
   `ALTER TABLE user ADD COLUMN role TEXT DEFAULT 'viewer';`,
+  `ALTER TABLE user ADD COLUMN permissions TEXT DEFAULT '{}';`,
   `ALTER TABLE user ADD COLUMN banned INTEGER DEFAULT 0;`,
   `ALTER TABLE user ADD COLUMN banReason TEXT;`,
   `ALTER TABLE user ADD COLUMN banExpires INTEGER;`,
@@ -122,5 +127,6 @@ for (const sql of migrations) {
 }
 
 await db.execute(`UPDATE user SET role = 'viewer' WHERE role IS NULL OR role = '';`);
+await db.execute(`UPDATE user SET permissions = '{}' WHERE permissions IS NULL OR permissions = '';`);
 
 console.log('SQLite tables are ready');
