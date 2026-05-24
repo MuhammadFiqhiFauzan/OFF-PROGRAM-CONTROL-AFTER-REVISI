@@ -1,7 +1,7 @@
 "use client";
 
 /*
- * Tujuan: Halaman manajemen payments/SPPD untuk upload LPB/backup, entry manual, edit grid, clear data, dan submit cart.
+ * Tujuan: Halaman manajemen payments/SPPD untuk upload LPB/backup, entry manual, edit grid terpaginasikan, clear data, dan submit cart.
  * Caller: Next.js App Router route `/payments`.
  * Dependensi: FastAPI payments endpoints, Better Auth client, lucide-react, sonner.
  * Main Functions: PaymentsPage, fetchData, handleUpload, handleManualAdd, handleSubmitCart, handleSaveBulk, handleDelete, handleClearAll.
@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState, useMemo } from "react";
-import { Wallet, Upload, FileSpreadsheet, Send, Plus, Search, Save, Trash2, DownloadCloud, Landmark, FileText, AlertTriangle } from "lucide-react";
+import { Wallet, Upload, FileSpreadsheet, Send, Plus, Search, Save, Trash2, DownloadCloud, Landmark, FileText, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 
@@ -44,6 +44,7 @@ interface PaymentRecord {
 type PaymentApiRecord = PaymentRecord & { id?: string; ajukan?: boolean };
 
 const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
+const PAGE_SIZE_OPTIONS = [50, 100, 200];
 let cachedCsrfToken = "";
 
 async function getBackendCsrfToken(forceRefresh = false): Promise<string> {
@@ -101,6 +102,8 @@ export default function PaymentsPage() {
     const [isDeleting, setIsDeleting] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isClearing, setIsClearing] = useState(false);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
 
     // Filters
     const [filters, setFilters] = useState<Record<string, string>>({});
@@ -262,7 +265,7 @@ export default function PaymentsPage() {
     const handleTemplate = () => window.open(`${API_BASE}/payments/template`, '_blank');
 
     const handleInputChange = (id: string, field: keyof PaymentRecord, value: PaymentRecord[keyof PaymentRecord] | boolean) => {
-        setRecords(records.map(r => r.record_id === id ? { ...r, [field]: value } : r));
+        setRecords(prev => prev.map(r => r.record_id === id ? { ...r, [field]: value } : r));
     };
 
     const handleFilterChange = (key: string, value: string) => {
@@ -299,6 +302,24 @@ export default function PaymentsPage() {
             return true;
         });
     }, [records, filters]);
+
+    const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+    const activePage = Math.min(page, pageCount);
+    const pageStart = filteredRecords.length === 0 ? 0 : (activePage - 1) * pageSize + 1;
+    const pageEnd = Math.min(activePage * pageSize, filteredRecords.length);
+
+    const paginatedRecords = useMemo(() => {
+        const start = (activePage - 1) * pageSize;
+        return filteredRecords.slice(start, start + pageSize);
+    }, [filteredRecords, activePage, pageSize]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [filters, pageSize]);
+
+    useEffect(() => {
+        if (page > pageCount) setPage(pageCount);
+    }, [page, pageCount]);
 
     return (
         <div className="max-w-[1700px] mx-auto pb-12">
@@ -386,8 +407,42 @@ export default function PaymentsPage() {
             {/* Main Interactive Matrix */}
             <div className="bg-[#1a1c23]/60 backdrop-blur-xl rounded-2xl shadow-xl border border-white/10 flex flex-col overflow-hidden relative">
                 <div className="p-4 border-b border-white/5 bg-black/40 flex flex-col lg:flex-row justify-between lg:items-center gap-4">
-                    <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                        <Search size={18} /> Engine Filter Kolom Data
+                    <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                            <Search size={18} /> Engine Filter Kolom Data
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                            <span className="font-mono text-slate-300">{pageStart}-{pageEnd}</span>
+                            <span>dari</span>
+                            <span className="font-mono text-slate-300">{filteredRecords.length}</span>
+                            <select
+                                className="h-8 bg-black/50 border border-white/10 rounded-lg px-2 text-slate-300 outline-none focus:border-emerald-500/50"
+                                value={pageSize}
+                                onChange={e => setPageSize(Number(e.target.value))}
+                                title="Jumlah baris per halaman"
+                            >
+                                {PAGE_SIZE_OPTIONS.map(size => <option key={size} value={size}>{size} baris</option>)}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={() => setPage(prev => Math.max(1, prev - 1))}
+                                disabled={activePage <= 1}
+                                className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-white/5"
+                                title="Halaman sebelumnya"
+                            >
+                                <ChevronLeft size={16} />
+                            </button>
+                            <span className="font-mono text-slate-300">{activePage}/{pageCount}</span>
+                            <button
+                                type="button"
+                                onClick={() => setPage(prev => Math.min(pageCount, prev + 1))}
+                                disabled={activePage >= pageCount}
+                                className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-white/5"
+                                title="Halaman berikutnya"
+                            >
+                                <ChevronRight size={16} />
+                            </button>
+                        </div>
                     </div>
                     <div className="flex flex-wrap gap-2 text-sm">
                         <button onClick={handleExport} className="flex items-center gap-2 bg-white/5 border border-white/10 text-slate-300 font-bold px-4 py-2.5 rounded-xl hover:bg-white/10 transition-colors">
@@ -454,8 +509,8 @@ export default function PaymentsPage() {
                             ) : filteredRecords.length === 0 ? (
                                 <tr><td colSpan={18} className="px-5 py-24 text-center text-slate-500 italic pb-[200px]">Data pembayaran SPPD tidak ditemukan (Kosong).</td></tr>
                             ) : (
-                                filteredRecords.map((r, i) => (
-                                    <tr key={i} className="hover:bg-white/[0.03] transition-colors whitespace-nowrap group">
+                                paginatedRecords.map((r) => (
+                                    <tr key={r.record_id} className="hover:bg-white/[0.03] transition-colors whitespace-nowrap group">
                                         <td className="px-3 py-1.5 text-center">
                                             <input type="checkbox" checked={!!r.ajukan} onChange={e => handleInputChange(r.record_id, 'ajukan', e.target.checked)} className="rounded bg-black/50 border-white/10 text-emerald-500 focus:ring-emerald-500/50 w-4 h-4 cursor-pointer" />
                                         </td>

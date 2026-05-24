@@ -86,7 +86,7 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
 - `UI(Summary) -> POST /summary/manual/parse_pdf_regex|parse_pdf_ai -> extract_pdf_text_safe()/AI extraction -> rows draft`
 - `UI(Summary) -> POST /summary/manual/generate -> summary_manual_generate() -> matching master items/customer -> output summary_manual(form+dataset) -> /summary/manual/download/{file_id}/{kind}`
 - `UI(Summary) -> POST /summary/manual/email -> summary_manual_email() -> background email sender -> SMTP server`
-- `UI(Payments) -> GET /payments/data -> FastAPI validasi Better Auth SQLite session + RBAC -> load_payments_db() -> payments.json`
+- `UI(Payments) -> GET /payments/data -> FastAPI validasi Better Auth SQLite session + RBAC -> load_payments_db() -> payments.json -> client-side filter + pagination agar grid besar tidak merender semua input sekaligus`
 - `UI(Payments) -> POST /payments/upload|manual/add|update|delete -> FastAPI validasi Better Auth SQLite session + RBAC -> auto-detect template LPB lengkap atau backup PAYMENTS export -> simpan LPB plus optional invoice/dokumen/keterangan ke payments.json`
 - `UI(Payments Admin Clear) -> POST /payments/clear -> FastAPI admin-only + CSRF -> backup payments.json -> kosongkan lpb/submissions/drafts/proofs sambil preserve finance_mappings/sppd_settings/sppd_seq`
 - `UI(Payments) -> POST /payments/cart/create -> payments_cart_create() -> selected LPB -> draft -> payments.json`
@@ -534,7 +534,7 @@ Side Effects: Tidak ada; dokumentasi sinkron terhadap flow kode aktif.
   - UI utama summary promo manual/AI yang bergantung pada FastAPI.
 - `app/(dashboard)/payments/page.tsx`
   - `PaymentsPage`, `fetchData`, `handleUpload`, `handleManualAdd`, `handleSubmitCart`, `handleSaveBulk`, `handleDelete`, `handleClearAll`
-  - UI master pembayaran/SPPD yang mengelola JSON store FastAPI, upload template LPB atau restore backup export PAYMENTS, dan clear seluruh data payments untuk admin dengan backup otomatis.
+  - UI master pembayaran/SPPD yang mengelola JSON store FastAPI, upload template LPB atau restore backup export PAYMENTS, render grid dengan pagination client-side, dan clear seluruh data payments untuk admin dengan backup otomatis.
 - `app/(dashboard)/payments/sppd/page.tsx`
   - `PaymentsSppdSettingsPage`, `fetchSettings`, `handleSave`, `handleUpload`, `getCsrfToken`
   - UI konfigurasi nomor surat terakhir, format nomor SPPD, tanggal fixed Jaminan, jatuh tempo, jumlah transfer per halaman, dan upload Excel data SPPD.
