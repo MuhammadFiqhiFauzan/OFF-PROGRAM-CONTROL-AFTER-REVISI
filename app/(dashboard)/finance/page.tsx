@@ -1,10 +1,10 @@
 "use client";
 
 /*
- * Tujuan: Halaman finance untuk review, mapping Accurate, upload bukti transfer, dan posting purchase-payment.
+ * Tujuan: Halaman Finance untuk review, mapping Accurate, upload bukti transfer, format nilai decimal, dan posting purchase-payment.
  * Caller: Next.js App Router route `/finance`.
  * Dependensi: FastAPI payments finance endpoints, accurateFetch Accurate proxy, lucide-react, sonner.
- * Main Functions: FinancePage, fetchData, handleSaveMapping, handleMarkStatus, handleApproveTransfer.
+ * Main Functions: FinancePage, fetchData, formatMoneyDisplay, handleSaveMapping, handleMarkStatus, handleApproveTransfer.
  * Side Effects: HTTP call ke FastAPI, upload bukti transfer, post Accurate purchase-payment/bulk-save.do, update payments.json.
  */
 
@@ -75,6 +75,44 @@ interface PurchasePaymentPayload {
 
 const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
 let cachedCsrfToken = "";
+
+function parseMoneyAmount(value: unknown): number {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const raw = String(value ?? "").trim();
+    if (!raw) return 0;
+    const cleaned = raw.replace(/[^0-9.,-]/g, "");
+    const hasComma = cleaned.includes(",");
+    const hasDot = cleaned.includes(".");
+    let normalized = cleaned;
+
+    if (hasComma && hasDot) {
+        normalized = cleaned.lastIndexOf(".") > cleaned.lastIndexOf(",")
+            ? cleaned.replace(/,/g, "")
+            : cleaned.replace(/\./g, "").replace(",", ".");
+    } else if (hasComma) {
+        const parts = cleaned.split(",");
+        normalized = parts.length === 2 && parts[1].length <= 2
+            ? cleaned.replace(",", ".")
+            : cleaned.replace(/,/g, "");
+    } else if (hasDot) {
+        const parts = cleaned.split(".");
+        normalized = parts.length > 2 || parts[parts.length - 1].length === 3
+            ? cleaned.replace(/\./g, "")
+            : cleaned;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoneyDisplay(value: unknown): string {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "0.00";
+    return parseMoneyAmount(value).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
 
 async function getBackendCsrfToken(forceRefresh = false): Promise<string> {
     if (cachedCsrfToken && !forceRefresh) return cachedCsrfToken;
@@ -201,9 +239,18 @@ export default function FinancePage() {
             setErrorMsg("");
             const res = await api.get(`/payments/finance/data?date=${encodeURIComponent(date)}`);
             if (res.data.ok) {
-                const rows: FinanceRecord[] = res.data.data || [];
+                const rows: FinanceRecord[] = (res.data.data || []).map((record: FinanceRecord) => ({
+                    ...record,
+                    total_invoice_display: formatMoneyDisplay(record.total_invoice_display || record.total_invoice),
+                    total_potongan_display: formatMoneyDisplay(record.total_potongan_display),
+                    total_nilai_display: formatMoneyDisplay(record.total_nilai_display || record.total_nilai),
+                    detail_invoices: (record.detail_invoices || []).map((item) => ({
+                        ...item,
+                        paymentAmountDisplay: formatMoneyDisplay(item.paymentAmountDisplay || item.paymentAmount),
+                    })),
+                }));
                 setRecords(rows);
-                setTotalAll(res.data.total_all_display || "Rp 0");
+                setTotalAll(formatMoneyDisplay(res.data.total_all_display || res.data.total_all));
                 if (res.data.date) setDateFilter(res.data.date);
                 setMappingDrafts((prev) => {
                     const next = { ...prev };

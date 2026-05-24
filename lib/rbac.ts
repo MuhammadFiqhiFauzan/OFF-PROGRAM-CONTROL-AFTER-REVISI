@@ -1,5 +1,5 @@
 /*
- * Tujuan: Definisi role, permission module/action, dan helper akses halaman untuk RBAC internal.
+ * Tujuan: Definisi role, permission module/action, dan helper akses halaman untuk RBAC internal aktif.
  * Caller: Better Auth admin plugin, dashboard layout/sidebar, admin user management, dan API admin permission.
  * Dependensi: better-auth default access controller.
  * Main Functions: normalizeRole, normalizePermissionMap, permissionMapForUser, canAccess, canAccessPath.
@@ -27,11 +27,7 @@ export const appModules = [
     "principles",
     "summary",
     "validator",
-    "powerpoint",
-    "master_data",
-    "sales",
     "off_program_control",
-    "settings",
     "users",
 ] as const;
 export type AppModule = (typeof appModules)[number];
@@ -45,11 +41,7 @@ export const moduleLabels: Record<AppModule, string> = {
     principles: "Principles",
     summary: "Summary",
     validator: "Validator",
-    powerpoint: "PowerPoint Maker",
-    master_data: "Master Data",
-    sales: "Sales",
     off_program_control: "OFF Program Control",
-    settings: "Settings",
     users: "Users & RBAC",
 };
 
@@ -123,11 +115,7 @@ export const moduleActions: Record<AppModule, readonly PermissionAction[]> = {
     principles: ["view", "upload", "delete"],
     summary: ["view", "upload", "generate", "email", "export", "edit", "update"],
     validator: ["view", "upload", "run", "download", "edit"],
-    powerpoint: ["view", "generate", "download"],
-    master_data: ["view", "create", "edit", "delete", "sync"],
-    sales: ["view", "create", "edit", "delete", "export"],
     off_program_control: ["view", "create", "update", "approve", "export"],
-    settings: ["view", "sync", "manage"],
     users: ["view", "create_user", "edit_user", "delete_user", "set_role", "set_permission"],
 };
 
@@ -202,11 +190,7 @@ export const rolePermissionPresets: Record<AppRole, PermissionMap> = {
         pick("principles", ["view"]),
         pick("summary", ["view", "export"]),
         pick("validator", ["view", "download"]),
-        pick("powerpoint", ["view", "download"]),
-        pick("master_data", ["view"]),
-        pick("sales", ["view", "export"]),
-        pick("off_program_control", ["view", "update", "approve", "export"]),
-        pick("settings", ["view"])
+        pick("off_program_control", ["view", "update", "approve", "export"])
     ),
     finance: mergePermissionMaps(
         pick("dashboard", ["view"]),
@@ -244,12 +228,8 @@ export const pagePermissions: Array<{ prefix: string; module: AppModule; action:
     { prefix: "/principles", module: "principles", action: "view" },
     { prefix: "/summary", module: "summary", action: "view" },
     { prefix: "/validator", module: "validator", action: "view" },
-    { prefix: "/powerpoint-maker", module: "powerpoint", action: "view" },
     { prefix: "/api-wrapper", module: "api_wrapper", action: "view" },
-    { prefix: "/master", module: "master_data", action: "view" },
-    { prefix: "/sales", module: "sales", action: "view" },
     { prefix: "/off-program-control", module: "off_program_control", action: "view" },
-    { prefix: "/settings", module: "settings", action: "view" },
     { prefix: "/", module: "dashboard", action: "view" },
 ];
 

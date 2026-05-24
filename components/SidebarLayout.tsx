@@ -1,4 +1,4 @@
-// Tujuan: Shell navigasi utama dashboard Smart ERP dengan filtering navigasi berdasarkan RBAC.
+// Tujuan: Shell navigasi utama dashboard Smart ERP dengan filtering navigasi berdasarkan RBAC dan satu pintu fitur Accurate.
 // Caller: `app/(dashboard)/layout.tsx`.
 // Dependensi: `authClient`, router Next.js, ikon `lucide-react`, helper RBAC.
 // Main Functions: `SidebarLayout`, `handleSignOut`.
@@ -6,7 +6,7 @@
 "use client";
 
 import { useState } from "react";
-import { Menu, Home, Users, ShoppingCart, ShoppingBag, Settings, Database, Server, Box, GitBranch, ArrowLeftRight, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Presentation, Settings2, FileText, Shield, ClipboardCheck } from "lucide-react";
+import { Menu, Home, Users, Database, Server, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Settings2, FileText, Shield, ClipboardCheck } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { canAccessPath, normalizeRole } from "@/lib/rbac";
@@ -32,20 +32,11 @@ export default function SidebarLayout({ children, role, permissions }: { childre
         { name: "AOL Form Engine", icon: Settings2, href: "/api-wrapper" },
         { name: "Validator Diskon", icon: Percent, href: "/validator" },
         { name: "Summary Promo", icon: CalendarCheck2, href: "/summary" },
-        { name: "Tarikan Finance", icon: DollarSign, href: "/finance" },
+        { name: "Finance", icon: DollarSign, href: "/finance" },
         { name: "Pembayaran / SPPD", icon: Wallet, href: "/payments" },
         { name: "Format SPPD", icon: FileText, href: "/payments/sppd" },
         { name: "OFF Program Control", icon: ClipboardCheck, href: "/off-program-control" },
-        { name: "PowerPoint Maker", icon: Presentation, href: "/powerpoint-maker" },
         { name: "Master Principle", icon: Database, href: "/principles" },
-        { name: "Cabang", icon: GitBranch, href: "/master/branch" },
-        { name: "Gudang", icon: Box, href: "/master/warehouse" },
-        { name: "Pelanggan", icon: Users, href: "/master/customer" },
-        { name: "Barang & Jasa", icon: Database, href: "/master/item" },
-        { name: "Faktur Penjualan", icon: ShoppingCart, href: "/sales/invoice" },
-        { name: "Penerimaan Penjualan", icon: ShoppingBag, href: "/sales/receipt" },
-        { name: "Retur Penjualan", icon: ArrowLeftRight, href: "/sales/return" },
-        { name: "Pengaturan API", icon: Settings, href: "/settings" },
         { name: "User & RBAC", icon: Shield, href: "/admin/users" },
     ];
     const navItems = allNavItems.filter((item) => canAccessPath(item.href, userRole, permissions || "{}"));

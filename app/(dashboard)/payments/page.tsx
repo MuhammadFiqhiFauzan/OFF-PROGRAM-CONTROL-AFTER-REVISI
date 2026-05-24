@@ -1,7 +1,7 @@
 "use client";
 
 /*
- * Tujuan: Halaman manajemen payments/SPPD untuk upload LPB/backup, entry manual, edit grid terpaginasikan dengan format nilai invoice decimal 2 digit, clear data, dan submit cart.
+ * Tujuan: Halaman manajemen payments/SPPD untuk upload LPB/backup, entry manual, edit grid terpaginasikan dengan format nilai decimal 2 digit, clear data, dan submit cart.
  * Caller: Next.js App Router route `/payments`.
  * Dependensi: FastAPI payments endpoints, Better Auth client, lucide-react, sonner.
  * Main Functions: PaymentsPage, fetchData, handleUpload, handleManualAdd, handleSubmitCart, handleSaveBulk, handleDelete, handleClearAll.
@@ -25,6 +25,7 @@ interface PaymentRecord {
     jt_win?: string;
     tgl_jtempo_win?: string;
     nilai_sistem?: number;
+    nilai_win?: number | string;
     nilai_win_display?: string;
     tgl_terima_barang?: string;
     tgl_invoice?: string;
@@ -35,6 +36,7 @@ interface PaymentRecord {
     nomor_dokumen?: string;
     nilai_invoice?: string | number;
     jt_invoice?: string;
+    gap_nilai?: number | string;
     gap_nilai_display?: string;
     actual_date?: string;
     tgl_pembayaran?: string;
@@ -175,6 +177,7 @@ export default function PaymentsPage() {
                     ...r,
                     record_id: r.id || r.record_id,
                     ajukan: !!r.ajukan,
+                    nilai_win_display: formatInvoiceAmountDisplay(r.nilai_win_display || r.nilai_sistem || r.nilai_win),
                     nilai_invoice: formatInvoiceAmountDisplay(r.nilai_invoice)
                 }));
                 setRecords(data);
@@ -338,7 +341,7 @@ export default function PaymentsPage() {
             const searchParams: { [key: string]: string | undefined } = {
                 no_lpb: r.no_lpb, principle: r.principle, tgl_setor: r.tgl_setor, tgl_win: r.tgl_win,
                 jtempo_win: r.jt_win || r.tgl_jtempo_win,
-                nilai_sistem: r.nilai_win_display || String(r.nilai_sistem || ''),
+                nilai_sistem: r.nilai_win_display || formatInvoiceAmountDisplay(r.nilai_sistem || r.nilai_win),
                 tgl_terima_barang: r.tgl_terima_barang, tgl_invoice: r.tgl_invoice,
                 invoice: r.invoice_no || r.invoice, jenis_dokumen: r.jenis_dokumen,
                 nomor_dokumen: r.nomor_dokumen, nilai_invoice: String(r.nilai_invoice || ''),
@@ -578,7 +581,7 @@ export default function PaymentsPage() {
                                         <td className="px-3 py-1.5 font-mono text-slate-500">{r.tgl_setor || "-"}</td>
                                         <td className="px-3 py-1.5 font-mono text-slate-500">{r.tgl_win || "-"}</td>
                                         <td className="px-3 py-1.5 font-mono text-slate-500">{r.tgl_jtempo_win || r.jt_win || "-"}</td>
-                                        <td className="px-3 py-1.5 text-right font-mono text-emerald-200/50 lg:font-bold">{r.nilai_win_display || (r.nilai_sistem ? `Rp ${r.nilai_sistem.toLocaleString()}` : "-")}</td>
+                                        <td className="px-3 py-1.5 text-right font-mono text-emerald-200/50 lg:font-bold">{r.nilai_win_display || "-"}</td>
                                         <td className="px-3 py-1.5 font-mono text-slate-500">{r.tgl_terima_barang || "-"}</td>
                                         
                                         {/* Editable Columns Start */}
@@ -588,7 +591,7 @@ export default function PaymentsPage() {
                                         <td className="px-1 py-1"><input type="text" value={r.nomor_dokumen || ""} onChange={e => handleInputChange(r.record_id, 'nomor_dokumen', e.target.value)} className="w-[120px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50 placeholder:text-slate-600" placeholder="-" /></td>
                                         <td className="px-1 py-1"><input type="text" inputMode="decimal" value={r.nilai_invoice || ""} onChange={e => handleInputChange(r.record_id, 'nilai_invoice', formatInvoiceAmountInput(e.target.value))} onBlur={() => handleInputChange(r.record_id, 'nilai_invoice', formatInvoiceAmountDisplay(r.nilai_invoice))} className="w-[120px] text-indigo-400 font-bold text-right rounded border border-indigo-500/30 bg-indigo-500/5 px-2 py-1 outline-none focus:border-indigo-500" /></td>
                                         <td className="px-1 py-1"><input type="date" value={r.jt_invoice || ""} onChange={e => handleInputChange(r.record_id, 'jt_invoice', e.target.value)} className="w-[120px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50" /></td>
-                                        <td className="px-3 py-1.5 text-right font-mono text-red-400 text-xs">{r.gap_nilai_display || "0"}</td>
+                                        <td className="px-3 py-1.5 text-right font-mono text-red-400 text-xs">{formatInvoiceAmountDisplay(r.gap_nilai_display || r.gap_nilai || 0)}</td>
                                         <td className="px-1 py-1"><input type="date" value={r.actual_date || ""} onChange={e => handleInputChange(r.record_id, 'actual_date', e.target.value)} className="w-[120px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50" /></td>
                                         <td className="px-1 py-1"><input type="date" value={r.tgl_pembayaran || ""} onChange={e => handleInputChange(r.record_id, 'tgl_pembayaran', e.target.value)} className="w-[120px] rounded border border-emerald-500/30 bg-emerald-500/5 text-emerald-400 font-semibold px-2 py-1 outline-none focus:border-emerald-500" /></td>
                                         <td className="px-3 py-1.5">

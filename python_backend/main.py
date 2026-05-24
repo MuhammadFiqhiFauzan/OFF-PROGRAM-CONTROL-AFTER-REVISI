@@ -1,9 +1,9 @@
 # main.py (PATCH v12) — Channel lookup uploader + Internal dataset optional + Required-file guard UI/API
-# Tujuan: FastAPI backend untuk validator, payments restore/SPPD, finance approval, RBAC, proof upload, dan helper export.
+# Tujuan: FastAPI backend untuk validator, payments restore/SPPD, finance approval, RBAC, proof upload, dan helper export berformat.
 # Caller: Next.js dashboard routes, browser uploads, dan service local AccAPI.
 # Dependensi: FastAPI, pandas/openpyxl, payments.py, template DOCX SPPD, Better Auth SQLite DB, filesystem JSON/output, auth utilities.
-# Main Functions: render_sppd_docx, payments_upload, payments_clear, parse_lpb_upload, payments_sppd_settings_get/save/upload, payments_finance_data, payments_finance_proof, payments_finance_update.
-# Side Effects: HTTP response/download, file upload/read/write, payments.json backup/mutation, DOCX/XLSX generation, audit logging.
+# Main Functions: render_sppd_docx, payments_upload, payments_clear, parse_lpb_upload, payments_template_download, payments_sppd_settings_get/save/upload, payments_finance_data, payments_finance_proof, payments_finance_update.
+# Side Effects: HTTP response/download, file upload/read/write, payments.json backup/mutation, DOCX/XLSX generation with number/date formatting, audit logging.
 # =======================================================================================================
 # You requested:
 # 1) Engine reads program by channel using lookup "Data Channel by SUB" + data penjualan.
@@ -27,6 +27,8 @@
 from fastapi import FastAPI, UploadFile, File, Request, Form, Response, Cookie, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 import openpyxl
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 import pandas as pd
 import io, os, re, uuid, json, math, base64, hashlib, hmac, time, zipfile, copy, mimetypes
 from dotenv import load_dotenv
@@ -120,10 +122,6 @@ PERMISSION_MODULES = [
     "principles",
     "summary",
     "validator",
-    "powerpoint",
-    "master_data",
-    "sales",
-    "settings",
     "users",
 ]
 PERMISSION_ACTIONS = [
@@ -1374,10 +1372,6 @@ def user_has_permission(username: Optional[str], module: str, action: str) -> bo
             "principles": {"view"},
             "summary": {"view", "export"},
             "validator": {"view", "download"},
-            "powerpoint": {"view", "download"},
-            "master_data": {"view"},
-            "sales": {"view", "export"},
-            "settings": {"view"},
         },
         "finance": {
             "dashboard": {"view"},
@@ -2212,11 +2206,39 @@ def _normalize_yyyy_mm_dd(value: str) -> str:
     except Exception:
         return ""
 
+def _style_excel_download_sheet(ws) -> None:
+    money_tokens = ("NILAI", "AMOUNT", "TOTAL", "GAP", "POTONGAN", "PEMBAYARAN")
+    date_tokens = ("TGL", "DATE", "J.T", "J TEMPO", "JATUH TEMPO")
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for col_idx, cell in enumerate(ws[1], start=1):
+        header = s(cell.value).upper()
+        width = max(12, min(34, len(header) + 3))
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+        if any(token in header for token in money_tokens):
+            for row_idx in range(2, ws.max_row + 1):
+                ws.cell(row_idx, col_idx).number_format = '#,##0.00'
+                ws.cell(row_idx, col_idx).alignment = Alignment(horizontal="right")
+        elif any(token in header for token in date_tokens):
+            for row_idx in range(2, ws.max_row + 1):
+                ws.cell(row_idx, col_idx).number_format = "yyyy-mm-dd"
+
 def _excel_download_response(rows: List[Dict[str, Any]], filename: str, sheet_name: str) -> Response:
     df = pd.DataFrame(rows)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
+        _style_excel_download_sheet(writer.book[sheet_name])
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(
         content=buf.getvalue(),
@@ -10538,180 +10560,6 @@ def load_principle_master(request: Request, pid: str):
     except Exception as e:
         return {"ok": False, "error": f"Gagal membaca Excel: {str(e)}"}
 
-# ---------------------------------------------------------------------------------------
-# POWERPOINT MAKER (python-pptx)
-# ---------------------------------------------------------------------------------------
-PPTX_OUTPUTS: Dict[str, str] = {}
-PPTX_OUTPUT_DIR = os.path.join(BASE_DIR, "output", "powerpoint")
-os.makedirs(PPTX_OUTPUT_DIR, exist_ok=True)
-
-def generate_powerpoint_background(job_id: str, payload: dict, user: str):
-    try:
-        BACKGROUND_JOBS[job_id]["status"] = "processing"
-        
-        from pptx import Presentation
-        from pptx.util import Inches, Pt
-        from pptx.dml.color import RGBColor
-        from pptx.enum.text import PP_ALIGN
-        from pptx.enum.shapes import MSO_SHAPE
-
-        prs = Presentation()
-        
-        # Determine Template Design
-        design = payload.get("designTemplate", "corporate")
-        theme_colors = {
-            "corporate": {"bg": RGBColor(240, 244, 248), "primary": RGBColor(30, 58, 138), "accent": RGBColor(59, 130, 246)},
-            "modern": {"bg": RGBColor(255, 255, 255), "primary": RGBColor(15, 23, 42), "accent": RGBColor(99, 102, 241)},
-            "creative": {"bg": RGBColor(253, 244, 255), "primary": RGBColor(134, 25, 143), "accent": RGBColor(217, 70, 239)}
-        }
-        tc = theme_colors.get(design, theme_colors["corporate"])
-        
-        # TITLE SLIDE
-        title_slide_layout = prs.slide_layouts[0]
-        slide = prs.slides.add_slide(title_slide_layout)
-        background = slide.background
-        fill = background.fill
-        fill.solid()
-        fill.fore_color.rgb = tc["bg"]
-
-        title = slide.shapes.title
-        subtitle = slide.placeholders[1]
-
-        title.text = payload.get("title", "Project Presentation")
-        title.text_frame.paragraphs[0].font.color.rgb = tc["primary"]
-        title.text_frame.paragraphs[0].font.name = 'Arial'
-        title.text_frame.paragraphs[0].font.bold = True
-        
-        subtitle.text = f"{payload.get('subtitle', 'Generated automatically')}\n\nGroup: {payload.get('promoGroup', 'N/A')}\nPeriod: {payload.get('periode', 'N/A')}"
-        subtitle.text_frame.paragraphs[0].font.color.rgb = tc["accent"]
-        subtitle.text_frame.paragraphs[0].font.name = 'Arial'
-
-        # CONTENT SLIDES -> Generate 1 slide per program
-        programs = payload.get("programs", [])
-        if not programs:
-            programs = [{"title": "Sample Program", "details": "Please provide programs data.", "items": ["Item 1", "Item 2"]}]
-            
-        for prog in programs:
-            slide_layout = prs.slide_layouts[1] # Title and Content
-            slide = prs.slides.add_slide(slide_layout)
-            
-            fill = slide.background.fill
-            fill.solid()
-            fill.fore_color.rgb = tc["bg"]
-
-            title_shape = slide.shapes.title
-            body_shape = slide.placeholders[1]
-            
-            title_shape.text = prog.get("title", "Program Title")
-            title_shape.text_frame.paragraphs[0].font.color.rgb = tc["primary"]
-            title_shape.text_frame.paragraphs[0].font.name = 'Arial'
-            title_shape.text_frame.paragraphs[0].font.bold = True
-            
-            tf = body_shape.text_frame
-            tf.clear()
-            
-            p = tf.paragraphs[0]
-            p.text = prog.get("details", "")
-            p.font.color.rgb = RGBColor(50, 50, 50)
-            p.font.size = Pt(18)
-            
-            # Additional elements (items)
-            items = prog.get("items", [])
-            for item in items:
-                p_item = tf.add_paragraph()
-                p_item.text = f"• {item}"
-                p_item.level = 1
-                p_item.font.color.rgb = RGBColor(70, 70, 70)
-                p_item.font.size = Pt(16)
-                
-            # Add decorative shape
-            left = Inches(8)
-            top = Inches(0.5)
-            width = Inches(1.5)
-            height = Inches(0.5)
-            shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = tc["accent"]
-            shape.line.color.rgb = tc["accent"]
-            tp = shape.text_frame.paragraphs[0]
-            tp.text = "CONFIDENTIAL"
-            tp.font.color.rgb = RGBColor(255, 255, 255)
-            tp.font.size = Pt(10)
-            tp.font.bold = True
-            tp.alignment = PP_ALIGN.CENTER
-
-        file_id = str(uuid.uuid4())
-        filename = f"{file_id}_presentation.pptx"
-        output_path = os.path.join(PPTX_OUTPUT_DIR, filename)
-        prs.save(output_path)
-        
-        PPTX_OUTPUTS[file_id] = output_path
-        
-        BACKGROUND_JOBS[job_id]["status"] = "done"
-        BACKGROUND_JOBS[job_id]["result"] = {
-            "file_id": file_id,
-            "download_url": f"/api/powerpoint/download/{file_id}"
-        }
-        
-    except Exception as e:
-        import traceback
-        with open(os.path.join(BASE_DIR, "debug_traceback.txt"), "a") as f:
-            traceback.print_exc(file=f)
-        BACKGROUND_JOBS[job_id]["status"] = "error"
-        BACKGROUND_JOBS[job_id]["error"] = str(e)
-        if hasattr(e, '__traceback__'):
-            append_error_log("generate_powerpoint", e, {"user": user, "job_id": job_id})
-
-async def accel_or_file_response(path: str, filename: str) -> Response:
-    """Helper to serve files (uses memory for small files, X-Accel-Redirect on production if configured, else FileResponse)."""
-    if not os.path.exists(path):
-        return JSONResponse(status_code=404, content={"ok": False, "error": "File not found on server"})
-    
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        "Access-Control-Expose-Headers": "Content-Disposition",
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    }
-
-    try:
-        sz = os.path.getsize(path)
-        if sz < 10_000_000:
-            with open(path, "rb") as f:
-                content = f.read()
-            return Response(content, headers=headers)
-        return FileResponse(path, filename=filename, headers=headers)
-    except Exception:
-        return FileResponse(path, filename=filename, headers=headers)
-
-@app.post("/api/powerpoint/generate")
-async def generate_powerpoint_api(request: Request, background_tasks: BackgroundTasks):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse(status_code=401, content={"ok": False, "error": "Unauthorized"})
-        
-    csrf_token = request.headers.get("X-CSRF-Token", "")
-    if not validate_csrf_request(request, csrf_token):
-        return JSONResponse(status_code=403, content={"ok": False, "error": "CSRF token invalid"})
-        
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "Invalid JSON Payload"})
-        
-    job_id = str(uuid.uuid4())
-    BACKGROUND_JOBS[job_id] = {"status": "pending", "started_at": time.time()}
-    
-    background_tasks.add_task(generate_powerpoint_background, job_id, payload, user)
-    
-    return JSONResponse({"ok": True, "job_id": job_id, "message": "PowerPoint generation started in background"})
-
-@app.get("/api/powerpoint/download/{file_id}")
-def download_powerpoint(request: Request, file_id: str):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-
-
 # --- RESTORED MISSING ROUTES ---
 
 @app.get("/api/job_status/{job_id}")
@@ -10725,17 +10573,6 @@ async def get_job_status(job_id: str, request: Request):
         return JSONResponse(status_code=404, content={"ok": False, "error": "Job not found"})
         
     return JSONResponse(content={"ok": True, "status": job["status"], "result": job.get("result"), "error": job.get("error")})
-
-@app.get("/powerpoint-maker")
-def view_powerpoint_maker(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return RedirectResponse("/login")
-    if not user_has_permission(user, "summary", "view"): # Using summary read permission
-        return HTMLResponse("Forbidden", status_code=403)
-        
-    html = POWERPOINT_MAKER_HTML.replace("__CSRF_TOKEN__", generate_csrf_token(request))
-    return render_html_with_csrf(request, html)
 
 @app.post("/summary/manual/parse_pdf_regex")
 async def summary_manual_parse_pdf_regex(request: Request, token: str = Form(...), pdf: UploadFile = File(...)):
@@ -11729,13 +11566,13 @@ def get_principles(request: Request):
     if not user: return JSONResponse(status_code=401, content={"ok": False, "error": "Unauthorized"})
     ps = _load_principles()
     return {"ok": True, "principles": ps}
-# Tujuan: FastAPI backend untuk validator diskon, summary, payments, finance, principle, dan PPTX.
+# Tujuan: FastAPI backend untuk validator diskon, summary, payments, finance, dan principle.
 # Caller: Next.js dashboard, halaman HTML legacy FastAPI, dan workflow internal operasional.
 # Dependensi: pandas/openpyxl, auth helpers, validator_engine, payments, SumoPod/OpenAI-compatible API.
-# Main Functions: `app`, endpoint validator/summary/payments/finance/principles/powerpoint.
-# Side Effects: DB/file read-write runtime, HTTP call AI/SMTP, generate Excel/PPTX/download artifacts.
+# Main Functions: `app`, endpoint validator/summary/payments/finance/principles.
+# Side Effects: DB/file read-write runtime, HTTP call AI/SMTP, generate Excel/download artifacts.
 #
-# Tujuan: Backend FastAPI utama untuk validator, summary, payments/SPPD, finance, principle, dan PPT.
+# Tujuan: Backend FastAPI utama untuk validator, summary, payments/SPPD, finance, dan principle.
 # Caller: Next.js dashboard, halaman legacy FastAPI, dan API browser internal AccAPI.
 # Dependensi: pandas/openpyxl, payments.py, validator_engine.py, payments.json, file output, Accurate session dari UI.
 # Main Functions: app routes, load/save payments DB, upload/restore payments, render SPPD, finance proof/mapping/update APIs.

@@ -1,10 +1,10 @@
-// Tujuan: Landing dashboard untuk akses cepat modul operasional Smart ERP.
+// Tujuan: Landing dashboard untuk akses cepat modul operasional Smart ERP dengan satu pintu Accurate.
 // Caller: Route Next.js dashboard `/`.
 // Dependensi: `lucide-react`, `next/link`, Better Auth, Drizzle user, helper RBAC, daftar modul lokal.
 // Main Functions: `DashboardLanding`, `MODULES`.
 // Side Effects: DB read user permissions dan navigasi via link.
 
-import { Percent, CalendarCheck2, DollarSign, Wallet, Presentation, Database, ArrowRight, Settings2, ShieldCheck, Cpu } from "lucide-react";
+import { Percent, CalendarCheck2, DollarSign, Wallet, Database, ArrowRight, Settings2, ShieldCheck, Cpu } from "lucide-react";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
@@ -42,8 +42,8 @@ const MODULES = [
         border: "border-sky-500/20 hover:border-sky-400/50"
     },
     {
-        title: "Tarikan Finance",
-        desc: "Track pencairan dana dan ekspor history jurnal langsung.",
+        title: "Finance",
+        desc: "Review transfer, bukti pembayaran, dan posting purchase-payment.",
         icon: DollarSign,
         href: "/finance",
         color: "from-purple-500/20 to-purple-600/5",
@@ -58,15 +58,6 @@ const MODULES = [
         color: "from-rose-500/20 to-rose-600/5",
         iconColor: "text-rose-400",
         border: "border-rose-500/20 hover:border-rose-400/50"
-    },
-    {
-        title: "PowerPoint Maker",
-        desc: "Sintesis data menjadi slide PPTX presentasi eksekutif.",
-        icon: Presentation,
-        href: "/powerpoint-maker",
-        color: "from-orange-500/20 to-orange-600/5",
-        iconColor: "text-orange-400",
-        border: "border-orange-500/20 hover:border-orange-400/50"
     },
     {
         title: "Master Principle",
@@ -108,7 +99,7 @@ export default async function DashboardLanding() {
                             </span>
                         </h1>
                         <p className="text-lg text-slate-400 max-w-xl leading-relaxed">
-                            Akses seluruh modul operasional, finansial, injeksi Accurate, hingga generator AI PPT/PDF dalam satu dashboard terpadu.
+                            Akses modul operasional, finansial, validator, summary, dan satu pintu injeksi Accurate dalam dashboard terpadu.
                         </p>
                     </div>
                     
