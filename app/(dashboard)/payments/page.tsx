@@ -1,7 +1,7 @@
 "use client";
 
 /*
- * Tujuan: Halaman manajemen payments/SPPD untuk upload LPB/backup, entry manual, edit grid terpaginasikan, clear data, dan submit cart.
+ * Tujuan: Halaman manajemen payments/SPPD untuk upload LPB/backup, entry manual, edit grid terpaginasikan dengan format nilai invoice decimal, clear data, dan submit cart.
  * Caller: Next.js App Router route `/payments`.
  * Dependensi: FastAPI payments endpoints, Better Auth client, lucide-react, sonner.
  * Main Functions: PaymentsPage, fetchData, handleUpload, handleManualAdd, handleSubmitCart, handleSaveBulk, handleDelete, handleClearAll.
@@ -46,6 +46,61 @@ type PaymentApiRecord = PaymentRecord & { id?: string; ajukan?: boolean };
 const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
 const PAGE_SIZE_OPTIONS = [50, 100, 200];
 let cachedCsrfToken = "";
+
+function parseInvoiceAmount(value: unknown): number {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const raw = String(value ?? "").trim();
+    if (!raw) return 0;
+    const cleaned = raw.replace(/[^0-9.,-]/g, "");
+    const hasComma = cleaned.includes(",");
+    const hasDot = cleaned.includes(".");
+    let normalized = cleaned;
+
+    if (hasComma && hasDot) {
+        normalized = cleaned.lastIndexOf(".") > cleaned.lastIndexOf(",")
+            ? cleaned.replace(/,/g, "")
+            : cleaned.replace(/\./g, "").replace(",", ".");
+    } else if (hasComma) {
+        const parts = cleaned.split(",");
+        normalized = parts.length === 2 && parts[1].length <= 2
+            ? cleaned.replace(",", ".")
+            : cleaned.replace(/,/g, "");
+    } else if (hasDot) {
+        const parts = cleaned.split(".");
+        normalized = parts.length > 2 || parts[parts.length - 1].length === 3
+            ? cleaned.replace(/\./g, "")
+            : cleaned;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatInvoiceAmountDisplay(value: unknown): string {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const amount = parseInvoiceAmount(value);
+    if (!Number.isFinite(amount)) return "";
+    const hasFraction = Math.abs(amount % 1) > 1e-9;
+    return amount.toLocaleString("en-US", {
+        minimumFractionDigits: hasFraction ? 2 : 0,
+        maximumFractionDigits: 2
+    });
+}
+
+function formatInvoiceAmountInput(value: string): string {
+    if (value.includes(",") && value.includes(".") && value.lastIndexOf(",") > value.lastIndexOf(".")) {
+        return formatInvoiceAmountDisplay(value);
+    }
+    const normalized = value.replace(/,/g, "").replace(/[^0-9.]/g, "");
+    if (!normalized) return "";
+    const hasDot = normalized.includes(".");
+    const [wholeRaw, ...fractionParts] = normalized.split(".");
+    const whole = wholeRaw.replace(/^0+(?=\d)/, "") || "0";
+    const formattedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const fraction = fractionParts.join("").slice(0, 2);
+    return hasDot ? `${formattedWhole}.${fraction}` : formattedWhole;
+}
 
 async function getBackendCsrfToken(forceRefresh = false): Promise<string> {
     if (cachedCsrfToken && !forceRefresh) return cachedCsrfToken;
@@ -118,7 +173,10 @@ export default function PaymentsPage() {
             const res = await api.get("/payments/data");
             if (res.data.ok) {
                 const data = res.data.data.map((r: PaymentApiRecord) => ({
-                    ...r, record_id: r.id || r.record_id, ajukan: !!r.ajukan
+                    ...r,
+                    record_id: r.id || r.record_id,
+                    ajukan: !!r.ajukan,
+                    nilai_invoice: formatInvoiceAmountDisplay(r.nilai_invoice)
                 }));
                 setRecords(data);
             } else {
@@ -163,7 +221,7 @@ export default function PaymentsPage() {
                 no_lpb: manualEntry.no_lpb,
                 principle: manualEntry.principle,
                 invoice_no: manualEntry.invoice_no,
-                nilai_invoice: Number(manualEntry.nilai_invoice.replace(/[^0-9]/g, '')),
+                nilai_invoice: parseInvoiceAmount(manualEntry.nilai_invoice),
                 jenis_dokumen: manualEntry.jenis_dokumen,
                 nomor_dokumen: manualEntry.nomor_dokumen
             };
@@ -200,7 +258,7 @@ export default function PaymentsPage() {
                 invoice_no: r.invoice_no || r.invoice,
                 jenis_dokumen: r.jenis_dokumen,
                 nomor_dokumen: r.nomor_dokumen,
-                nilai_invoice: Number(String(r.nilai_invoice || "").replace(/[^0-9]/g, '')),
+                nilai_invoice: parseInvoiceAmount(r.nilai_invoice),
                 jt_invoice: r.jt_invoice,
                 actual_date: r.actual_date,
                 tgl_pembayaran: r.tgl_pembayaran
@@ -377,7 +435,7 @@ export default function PaymentsPage() {
                         <input placeholder="No Ref/LPB (Opsional)" className="bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-1 focus:ring-emerald-500/50" value={manualEntry.no_lpb} onChange={e => setManualEntry({ ...manualEntry, no_lpb: e.target.value })} disabled={manualEntry.tipe === 'CBD'} />
                         <input placeholder="Principle (Wajib)" required className="bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-1 focus:ring-emerald-500/50" value={manualEntry.principle} onChange={e => setManualEntry({ ...manualEntry, principle: e.target.value })} />
                         <input placeholder="No Invoice" className="bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-1 focus:ring-emerald-500/50" value={manualEntry.invoice_no} onChange={e => setManualEntry({ ...manualEntry, invoice_no: e.target.value })} />
-                        <input placeholder="Nilai Invoice (Wajib)" required className="bg-[#1e2333] font-bold border border-emerald-500/30 rounded-lg px-3 py-2 text-sm text-emerald-400 outline-none focus:ring-1 focus:ring-emerald-500" value={manualEntry.nilai_invoice} onChange={e => setManualEntry({ ...manualEntry, nilai_invoice: e.target.value })} />
+                        <input placeholder="Nilai Invoice (Wajib)" required inputMode="decimal" className="bg-[#1e2333] font-bold border border-emerald-500/30 rounded-lg px-3 py-2 text-sm text-emerald-400 outline-none focus:ring-1 focus:ring-emerald-500" value={manualEntry.nilai_invoice} onChange={e => setManualEntry({ ...manualEntry, nilai_invoice: formatInvoiceAmountInput(e.target.value) })} />
                         <button type="submit" disabled={isAddingManual} className="bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 font-bold rounded-lg px-3 py-2 text-sm hover:bg-emerald-500/30 transition-colors disabled:opacity-50">
                             Simpan Entry
                         </button>
@@ -529,7 +587,7 @@ export default function PaymentsPage() {
                                         <td className="px-1 py-1"><input type="text" value={r.invoice_no || r.invoice || ""} onChange={e => handleInputChange(r.record_id, 'invoice_no', e.target.value)} className="w-[120px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50" /></td>
                                         <td className="px-1 py-1"><input type="text" value={r.jenis_dokumen || ""} onChange={e => handleInputChange(r.record_id, 'jenis_dokumen', e.target.value)} className="w-[90px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50 placeholder:text-slate-600" placeholder="-" /></td>
                                         <td className="px-1 py-1"><input type="text" value={r.nomor_dokumen || ""} onChange={e => handleInputChange(r.record_id, 'nomor_dokumen', e.target.value)} className="w-[120px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50 placeholder:text-slate-600" placeholder="-" /></td>
-                                        <td className="px-1 py-1"><input type="text" value={r.nilai_invoice || ""} onChange={e => handleInputChange(r.record_id, 'nilai_invoice', e.target.value)} className="w-[120px] text-indigo-400 font-bold text-right rounded border border-indigo-500/30 bg-indigo-500/5 px-2 py-1 outline-none focus:border-indigo-500" /></td>
+                                        <td className="px-1 py-1"><input type="text" inputMode="decimal" value={r.nilai_invoice || ""} onChange={e => handleInputChange(r.record_id, 'nilai_invoice', formatInvoiceAmountInput(e.target.value))} className="w-[120px] text-indigo-400 font-bold text-right rounded border border-indigo-500/30 bg-indigo-500/5 px-2 py-1 outline-none focus:border-indigo-500" /></td>
                                         <td className="px-1 py-1"><input type="date" value={r.jt_invoice || ""} onChange={e => handleInputChange(r.record_id, 'jt_invoice', e.target.value)} className="w-[120px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50" /></td>
                                         <td className="px-3 py-1.5 text-right font-mono text-red-400 text-xs">{r.gap_nilai_display || "0"}</td>
                                         <td className="px-1 py-1"><input type="date" value={r.actual_date || ""} onChange={e => handleInputChange(r.record_id, 'actual_date', e.target.value)} className="w-[120px] rounded border border-white/10 bg-black/40 text-slate-300 px-2 py-1 outline-none focus:border-blue-500/50" /></td>
