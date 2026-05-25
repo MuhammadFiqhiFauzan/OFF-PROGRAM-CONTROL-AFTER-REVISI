@@ -5,7 +5,7 @@
  * Main Functions: table `user`, `session`, `account`, `verification`, `syncState`, `item`, `customer`, `idempotencyLog`.
  * Side Effects: Definisi schema untuk DB read/write SQLite oleh caller.
  */
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable("user", {
     id: text("id").primaryKey(),
@@ -245,3 +245,107 @@ export const offAuditLog = sqliteTable("off_audit_log", {
     metadata: text("metadata", { mode: "json" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull()
 });
+
+// --- Claim Workflow (starts only after OFF Program Control completion) --- //
+
+export const claimWorkflow = sqliteTable("claim_workflow", {
+    id: text("id").primaryKey(),
+    offBatchId: text("off_batch_id").notNull().unique().references(() => offBatch.id),
+    claimWorkflowNo: text("claim_workflow_no").notNull().unique(),
+    principleCode: text("principle_code").notNull(),
+    principleName: text("principle_name").notNull(),
+    status: text("status").notNull().default("Draft"),
+    totalDpp: real("total_dpp").notNull().default(0),
+    totalPpn: real("total_ppn").notNull().default(0),
+    totalPph: real("total_pph").notNull().default(0),
+    totalClaim: real("total_claim").notNull().default(0),
+    totalPaid: real("total_paid").notNull().default(0),
+    remainingAmount: real("remaining_amount").notNull().default(0),
+    submittedToPrincipalAt: integer("submitted_to_principal_at", { mode: "timestamp" }),
+    closedAt: integer("closed_at", { mode: "timestamp" }),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull()
+}, (table) => ({
+    principleCodeIdx: index("idx_claim_workflow_principle_code").on(table.principleCode),
+    statusIdx: index("idx_claim_workflow_status").on(table.status),
+    createdAtIdx: index("idx_claim_workflow_created_at").on(table.createdAt),
+}));
+
+export const claimWorkflowItem = sqliteTable("claim_workflow_item", {
+    id: text("id").primaryKey(),
+    claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
+    offBatchItemId: text("off_batch_item_id").references(() => offBatchItem.id),
+    noSurat: text("no_surat"),
+    jenisPromosi: text("jenis_promosi"),
+    periode: text("periode"),
+    outlet: text("outlet"),
+    dpp: real("dpp").notNull().default(0),
+    ppnRate: real("ppn_rate").notNull().default(0),
+    ppnAmount: real("ppn_amount").notNull().default(0),
+    pphRate: real("pph_rate").notNull().default(0),
+    pphAmount: real("pph_amount").notNull().default(0),
+    nilaiKlaim: real("nilai_klaim").notNull().default(0),
+    nomorEcInternal: text("nomor_ec_internal"),
+    ecPeka: text("ec_peka"),
+    cnNumber: text("cn_number"),
+    status: text("status").notNull().default("Draft"),
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => ({
+    workflowIdx: index("idx_claim_workflow_item_workflow_id").on(table.claimWorkflowId),
+    offBatchItemIdx: index("idx_claim_workflow_item_off_batch_item_id").on(table.offBatchItemId),
+}));
+
+export const claimPayment = sqliteTable("claim_payment", {
+    id: text("id").primaryKey(),
+    claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
+    paymentDate: text("payment_date").notNull(),
+    paymentAmount: real("payment_amount").notNull().default(0),
+    paymentType: text("payment_type"),
+    paymentNote: text("payment_note"),
+    proofPath: text("proof_path"),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => ({
+    workflowIdx: index("idx_claim_payment_workflow_id").on(table.claimWorkflowId),
+}));
+
+export const claimPekaReport = sqliteTable("claim_peka_report", {
+    id: text("id").primaryKey(),
+    sourceFile: text("source_file").notNull(),
+    claimNo: text("claim_no"),
+    jenisKlaim: text("jenis_klaim"),
+    rdName: text("rd_name"),
+    periode: text("periode"),
+    noSuratRd: text("no_surat_rd"),
+    totalClaim: real("total_claim").notNull().default(0),
+    cnNumber: text("cn_number"),
+    requestor: text("requestor"),
+    lastProcessedDate: text("last_processed_date"),
+    pendingUser: text("pending_user"),
+    leadTime: real("lead_time"),
+    age: real("age"),
+    note: text("note"),
+    ecNumber: text("ec_number"),
+    importedAt: integer("imported_at", { mode: "timestamp" }).notNull()
+});
+
+export const claimAuditLog = sqliteTable("claim_audit_log", {
+    id: text("id").primaryKey(),
+    claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
+    actorId: text("actor_id"),
+    actorName: text("actor_name"),
+    actorRole: text("actor_role"),
+    action: text("action").notNull(),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status"),
+    note: text("note"),
+    metadata: text("metadata", { mode: "json" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => ({
+    workflowIdx: index("idx_claim_audit_log_workflow_id").on(table.claimWorkflowId),
+    createdAtIdx: index("idx_claim_audit_log_created_at").on(table.createdAt),
+}));

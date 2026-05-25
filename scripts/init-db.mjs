@@ -1,10 +1,32 @@
 // Tujuan: Inisialisasi/migrasi SQLite runtime untuk Better Auth, RBAC, cache master, dan idempotency.
-// Caller: Dockerfile.frontend startup command sebelum `next start`.
+// Caller: Dockerfile.frontend startup command sebelum `next start`, juga dipanggil lokal via `node scripts/init-db.mjs`.
 // Dependensi: @libsql/client dan filesystem volume DATABASE_URL.
 // Main Functions: create table IF NOT EXISTS, migration ALTER TABLE, role/permission default update.
 // Side Effects: Membuat folder DB dan menjalankan DDL/DML SQLite.
 import { createClient } from "@libsql/client";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Load .env dari working directory supaya `DATABASE_URL=file:sqlite.db` di
+// `.env` lokal kepakai saat dijalankan langsung dari CLI dev.
+function loadEnvFile() {
+  const envPath = resolve(process.cwd(), ".env");
+  if (!existsSync(envPath)) return;
+  const content = readFileSync(envPath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+loadEnvFile();
 
 const databaseUrl = process.env.DATABASE_URL || "file:/app/data/sqlite.db";
 const filePath = databaseUrl.startsWith("file:")
@@ -245,6 +267,96 @@ const statements = [
     created_at INTEGER NOT NULL,
     FOREIGN KEY (batch_id) REFERENCES off_batch(id)
   );`,
+  `CREATE TABLE IF NOT EXISTS claim_workflow (
+    id TEXT PRIMARY KEY,
+    off_batch_id TEXT NOT NULL UNIQUE,
+    claim_workflow_no TEXT NOT NULL UNIQUE,
+    principle_code TEXT NOT NULL,
+    principle_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Draft',
+    total_dpp REAL NOT NULL DEFAULT 0,
+    total_ppn REAL NOT NULL DEFAULT 0,
+    total_pph REAL NOT NULL DEFAULT 0,
+    total_claim REAL NOT NULL DEFAULT 0,
+    total_paid REAL NOT NULL DEFAULT 0,
+    remaining_amount REAL NOT NULL DEFAULT 0,
+    submitted_to_principal_at INTEGER,
+    closed_at INTEGER,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (off_batch_id) REFERENCES off_batch(id)
+  );`,
+  `CREATE TABLE IF NOT EXISTS claim_workflow_item (
+    id TEXT PRIMARY KEY,
+    claim_workflow_id TEXT NOT NULL,
+    off_batch_item_id TEXT,
+    no_surat TEXT,
+    jenis_promosi TEXT,
+    periode TEXT,
+    outlet TEXT,
+    dpp REAL NOT NULL DEFAULT 0,
+    ppn_rate REAL NOT NULL DEFAULT 0,
+    ppn_amount REAL NOT NULL DEFAULT 0,
+    pph_rate REAL NOT NULL DEFAULT 0,
+    pph_amount REAL NOT NULL DEFAULT 0,
+    nilai_klaim REAL NOT NULL DEFAULT 0,
+    nomor_ec_internal TEXT,
+    ec_peka TEXT,
+    cn_number TEXT,
+    status TEXT NOT NULL DEFAULT 'Draft',
+    note TEXT,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id),
+    FOREIGN KEY (off_batch_item_id) REFERENCES off_batch_item(id)
+  );`,
+  `CREATE TABLE IF NOT EXISTS claim_payment (
+    id TEXT PRIMARY KEY,
+    claim_workflow_id TEXT NOT NULL,
+    payment_date TEXT NOT NULL,
+    payment_amount REAL NOT NULL DEFAULT 0,
+    payment_type TEXT,
+    payment_note TEXT,
+    proof_path TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id)
+  );`,
+  `CREATE TABLE IF NOT EXISTS claim_peka_report (
+    id TEXT PRIMARY KEY,
+    source_file TEXT NOT NULL,
+    claim_no TEXT,
+    jenis_klaim TEXT,
+    rd_name TEXT,
+    periode TEXT,
+    no_surat_rd TEXT,
+    total_claim REAL NOT NULL DEFAULT 0,
+    cn_number TEXT,
+    requestor TEXT,
+    last_processed_date TEXT,
+    pending_user TEXT,
+    lead_time REAL,
+    age REAL,
+    note TEXT,
+    ec_number TEXT,
+    imported_at INTEGER NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS claim_audit_log (
+    id TEXT PRIMARY KEY,
+    claim_workflow_id TEXT NOT NULL,
+    actor_id TEXT,
+    actor_name TEXT,
+    actor_role TEXT,
+    action TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT,
+    note TEXT,
+    metadata TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id)
+  );`,
 ];
 
 for (const sql of statements) {
@@ -320,6 +432,9 @@ const migrations = [
   `ALTER TABLE off_payment ADD COLUMN created_by TEXT;`,
   `ALTER TABLE off_payment ADD COLUMN updated_at INTEGER;`,
   `ALTER TABLE off_audit_log ADD COLUMN item_id TEXT;`,
+  `ALTER TABLE claim_workflow_item ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE claim_workflow_item ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE claim_payment ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 for (const sql of migrations) {
@@ -330,6 +445,21 @@ for (const sql of migrations) {
       throw error;
     }
   }
+}
+
+const indexStatements = [
+  `CREATE INDEX IF NOT EXISTS idx_claim_workflow_principle_code ON claim_workflow(principle_code);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_workflow_status ON claim_workflow(status);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_workflow_created_at ON claim_workflow(created_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_workflow_id ON claim_workflow_item(claim_workflow_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_off_batch_item_id ON claim_workflow_item(off_batch_item_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_payment_workflow_id ON claim_payment(claim_workflow_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_workflow_id ON claim_audit_log(claim_workflow_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_created_at ON claim_audit_log(created_at);`,
+];
+
+for (const sql of indexStatements) {
+  await db.execute(sql);
 }
 
 await db.execute(
