@@ -35,7 +35,16 @@ export function calculateClaimAmount(
     };
 }
 
-/** Outstanding tidak boleh negatif; overpayment belum dimodelkan di Phase 1. */
+/**
+ * Outstanding tidak boleh negatif; overpayment belum dimodelkan di Phase
+ * 2B. Phase ini sengaja melakukan clamp ke 0 agar nilai outstanding selalu
+ * bermakna untuk monitoring.
+ *
+ * TODO: Future overpayment support harus pakai field terpisah, bukan
+ * negative remaining amount. Misalnya:
+ *   overpaidAmount = max(totalPaid - totalClaim, 0)
+ * dan tetap menyimpan remainingAmount = max(totalClaim - totalPaid, 0).
+ */
 export function calculateRemainingAmount(totalClaim: number, totalPaid: number): number {
     return Math.max(finiteAmount(totalClaim) - finiteAmount(totalPaid), 0);
 }

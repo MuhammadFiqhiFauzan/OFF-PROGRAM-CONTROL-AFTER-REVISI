@@ -213,7 +213,10 @@ export const rolePermissionPresets: Record<AppRole, PermissionMap> = {
         pick("summary", ["view", "upload", "generate", "export", "edit", "update"]),
         pick("validator", ["view", "upload", "run", "download", "edit"]),
         pick("off_program_control", ["view", "create", "update"]),
-        pick("claim_workflow", ["view", "edit", "update", "submit"])
+        // Claim Workflow guardrail: staff hanya boleh membaca daftar / detail
+        // sebatas yang diizinkan policy. Pembuatan, edit pajak, dan submit
+        // ke principal harus tetap eksklusif role admin/claim.
+        pick("claim_workflow", ["view"])
     ),
     viewer: mergePermissionMaps(
         pick("dashboard", ["view"]),
