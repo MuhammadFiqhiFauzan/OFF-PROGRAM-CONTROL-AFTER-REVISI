@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { offBatch, offBatchItem, offPayment } from "@/db/schema";
-import { buildNoPengajuan, canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findDuplicateNoSuratWithinPayload, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, parseCurrency, publicBatch, publicPayment, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
+import { buildNoPengajuan, canActorAccessOffData, canActorForceDuplicateNoSurat, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findDuplicateNoSuratWithinPayload, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, parseCurrency, publicBatch, publicPayment, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
 
 function asNumber(value: unknown) {
     return parseCurrency(value);
@@ -154,21 +154,37 @@ export async function POST(request: Request) {
             }, { status: 409 });
         }
 
-        if (!force && candidateNoSurats.length > 0) {
+        let forcedDuplicateMetadata: Record<string, unknown> | null = null;
+        if (candidateNoSurats.length > 0) {
             const conflictMap = await findOffNoSuratConflicts({
                 principleCode: principle.code,
                 noSurats: candidateNoSurats,
             });
             if (conflictMap.size > 0) {
                 const conflicts = Array.from(conflictMap.values()).flat();
-                return NextResponse.json({
-                    ok: false,
-                    code: "DUPLICATE_NO_SURAT",
-                    message: `No Surat berikut sudah pernah dipakai pada principle ${principle.name}: ${Array.from(conflictMap.keys()).join(", ")}. Konfirmasi ulang jika ingin tetap melanjutkan.`,
-                    principleCode: principle.code,
-                    principleName: principle.name,
-                    conflicts,
-                }, { status: 409 });
+                if (force && !canActorForceDuplicateNoSurat(actor)) {
+                    return NextResponse.json({
+                        ok: false,
+                        code: "DUPLICATE_NO_SURAT_OVERRIDE_FORBIDDEN",
+                        error: "Hanya role admin atau claim yang dapat memaksa penggunaan No Surat duplikat.",
+                        conflicts,
+                    }, { status: 403 });
+                }
+                if (force) {
+                    forcedDuplicateMetadata = {
+                        noSurats: Array.from(conflictMap.keys()),
+                        conflicts,
+                    };
+                } else {
+                    return NextResponse.json({
+                        ok: false,
+                        code: "DUPLICATE_NO_SURAT",
+                        message: `No Surat berikut sudah pernah dipakai pada principle ${principle.name}: ${Array.from(conflictMap.keys()).join(", ")}. Konfirmasi ulang jika ingin tetap melanjutkan.`,
+                        principleCode: principle.code,
+                        principleName: principle.name,
+                        conflicts,
+                    }, { status: 409 });
+                }
             }
         }
 
@@ -211,7 +227,16 @@ export async function POST(request: Request) {
         });
 
         await db.insert(offBatchItem).values(items.map((item) => ({ ...item, batchId })));
-        await writeOffAudit({ batchId, actor, action: "create_batch", toStatus: "Draft", metadata: { itemCount: items.length } });
+        await writeOffAudit({
+            batchId,
+            actor,
+            action: "create_batch",
+            toStatus: "Draft",
+            metadata: {
+                itemCount: items.length,
+                forcedDuplicateNoSurat: forcedDuplicateMetadata,
+            },
+        });
 
         return NextResponse.json({ ok: true, batchId, noPengajuan });
     } catch (error) {

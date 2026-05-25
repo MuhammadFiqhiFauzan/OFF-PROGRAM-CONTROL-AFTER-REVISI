@@ -8,6 +8,8 @@ import {
   type ElementType,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowRight,
@@ -520,6 +522,72 @@ async function parseJsonResponse(response: Response) {
   } catch {
     return { error: text };
   }
+}
+
+function CreateClaimWorkflowButton({
+  batch,
+  canCreate,
+}: {
+  batch: OffApiBatch;
+  canCreate: boolean;
+}) {
+  const router = useRouter();
+  const [isCreating, setIsCreating] = useState(false);
+  const eligible =
+    batch.status === "Completed" &&
+    batch.financeStatus === "Paid" &&
+    batch.finalStatus === "Completed";
+
+  if (!canCreate || !eligible) return null;
+
+  const createWorkflow = async () => {
+    setIsCreating(true);
+    try {
+      const response = await fetch(
+        `/api/claim-workflow/from-off-batch/${batch.id}`,
+        { method: "POST", credentials: "include" },
+      );
+      const data = await parseJsonResponse(response);
+      const workflowId =
+        data.workflow && typeof data.workflow === "object"
+          ? String((data.workflow as { id?: unknown }).id || "")
+          : "";
+      if (
+        response.status === 409 &&
+        data.code === "CLAIM_WORKFLOW_ALREADY_EXISTS"
+      ) {
+        toast.info("Claim Workflow untuk batch OFF ini sudah tersedia.");
+        if (workflowId) router.push(`/claim-workflow/${workflowId}`);
+        return;
+      }
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          String(data.error || "Gagal membuat Claim Workflow dari OFF."),
+        );
+      }
+      toast.success("Claim Workflow berhasil dibuat.");
+      if (workflowId) router.push(`/claim-workflow/${workflowId}`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Gagal membuat Claim Workflow dari OFF.",
+      );
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={createWorkflow}
+      disabled={isCreating}
+      className="mt-4 inline-flex rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-2 text-sm font-bold text-indigo-200 hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {isCreating ? "Creating Claim Workflow..." : "Create Claim Workflow"}
+    </button>
+  );
 }
 
 function computeUiBatchProgress(batch: OffApiBatch): number {
@@ -4518,6 +4586,10 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                     value={displayStatusLabel(selectedFinalBatch?.finalStatus)}
                   />
                 </div>
+                <CreateClaimWorkflowButton
+                  batch={selectedFinalBatch}
+                  canCreate={offRole === "admin" || offRole === "claim"}
+                />
               </Panel>
 
               <Panel title="Riwayat Pembayaran dari Keuangan" icon={Wallet}>
@@ -6343,11 +6415,13 @@ function OverviewReadOnlyDetail({
   items,
   payments,
   paymentSummary,
+  canCreateClaimWorkflow,
 }: {
   batch: OffApiBatch;
   items: OffApiItem[];
   payments: OffApiPayment[];
   paymentSummary?: OffPaymentSummary;
+  canCreateClaimWorkflow: boolean;
 }) {
   const totalNominal = Number(
     batch.summary?.totalNominal ||
@@ -6422,6 +6496,10 @@ function OverviewReadOnlyDetail({
             Lihat PDF
           </a>
         )}
+        <CreateClaimWorkflowButton
+          batch={batch}
+          canCreate={canCreateClaimWorkflow}
+        />
       </Panel>
 
       <Panel title="Item Batch" icon={ReceiptText}>
@@ -6573,7 +6651,7 @@ function OverviewReadOnlyDetail({
   );
 }
 
-function OverviewTab() {
+function OverviewTab({ offRole }: OffDashboardProps) {
   const [overviewBatches, setOverviewBatches] = useState<OffApiBatch[]>([]);
   const [overviewSearch, setOverviewSearch] = useState("");
   const [overviewStatusFilter, setOverviewStatusFilter] = useState("");
@@ -6761,6 +6839,7 @@ function OverviewTab() {
           items={selectedItems}
           payments={selectedPayments}
           paymentSummary={selectedPaymentSummary}
+          canCreateClaimWorkflow={offRole === "admin" || offRole === "claim"}
         />
       )}
     </div>
@@ -6935,7 +7014,7 @@ export default function OffProgramControlPage() {
             </div>
           </div>
 
-          {effectiveActiveTab === "overview" && <OverviewTab />}
+          {effectiveActiveTab === "overview" && <OverviewTab offRole={offRole} />}
           {effectiveActiveTab === "supervisor" && (
             <SupervisorDashboard offRole={offRole} />
           )}

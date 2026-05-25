@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { offBatch, offBatchItem } from "@/db/schema";
-import { buildNoPengajuan, canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findDuplicateNoSuratWithinPayload, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, getBatchWithItems, parseCurrency, publicBatch, publicPayment, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
+import { buildNoPengajuan, canActorAccessOffData, canActorForceDuplicateNoSurat, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findDuplicateNoSuratWithinPayload, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, getBatchWithItems, parseCurrency, publicBatch, publicPayment, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -27,6 +27,36 @@ function periodText(item: Record<string, unknown>) {
     const periodeAkhir = String(item.periodeAkhir || "").trim();
     if (periodeAwal && periodeAkhir) return `${periodeAwal} - ${periodeAkhir}`;
     return String(item.periode || periodeAwal || periodeAkhir || "");
+}
+
+function normalizeItems(items: unknown[], now: Date) {
+    return items.map((item, index) => {
+        const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+        return {
+            id: randomUUID(),
+            itemNo: index + 1,
+            rowNo: index + 1,
+            noSurat: String(row.noSurat || "").trim(),
+            namaProgram: String(row.namaProgram || row.program || `Program ${index + 1}`),
+            periode: periodText(row),
+            toko: String(row.toko || ""),
+            barang: String(row.barang || ""),
+            nominal: asNumber(row.nominal),
+            caraBayar: normalizeCaraBayar(row.caraBayar),
+            type: String(row.type || ""),
+            deadline: String(row.deadline || ""),
+            kwt: bool(row.kwt),
+            skp: bool(row.skp),
+            fp: bool(row.fp),
+            pc: bool(row.pc),
+            foto: bool(row.foto),
+            rekap: bool(row.rekap),
+            others: bool(row.others),
+            othersText: String(row.othersText || ""),
+            createdAt: now,
+            updatedAt: now,
+        };
+    });
 }
 
 function batchSummary(items: Array<typeof offBatchItem.$inferSelect>) {
@@ -100,23 +130,14 @@ export async function PATCH(request: Request, context: Context) {
             }
         }
 
-        const patch: Partial<typeof offBatch.$inferInsert> = {
-            noPengajuan,
-            gelombang,
-            principleCode: nextPrinciple.code,
-            principleName: nextPrinciple.name,
-            bulan,
-            tahun,
-            supervisorName: body.supervisorName ? String(body.supervisorName) : data.batch.supervisorName,
-            updatedAt: now,
-        };
-        await db.update(offBatch).set(patch).where(eq(offBatch.id, id));
-
+        let replacementItems: ReturnType<typeof normalizeItems> | null = null;
+        let forcedDuplicateMetadata: Record<string, unknown> | null = null;
         if (Array.isArray(body.items)) {
-            // Validasi duplikat No Surat (per principle, kecuali batch yang sudah Cancelled by OM).
+            // Prepare and validate all replacement items before mutating the batch header.
+            replacementItems = normalizeItems(body.items, now);
             const force = body.forceDuplicateNoSurat === true || body.forceDuplicateNoSurat === "true";
-            const candidateNoSurats = (body.items as Array<Record<string, unknown>>)
-                .map((item) => String(item.noSurat || "").trim())
+            const candidateNoSurats = replacementItems
+                .map((item) => item.noSurat)
                 .filter((value) => value.length > 0);
 
             const intraDuplicates = findDuplicateNoSuratWithinPayload(candidateNoSurats);
@@ -129,7 +150,7 @@ export async function PATCH(request: Request, context: Context) {
                 }, { status: 409 });
             }
 
-            if (!force && candidateNoSurats.length > 0) {
+            if (candidateNoSurats.length > 0) {
                 const conflictMap = await findOffNoSuratConflicts({
                     principleCode: nextPrinciple.code,
                     noSurats: candidateNoSurats,
@@ -137,46 +158,62 @@ export async function PATCH(request: Request, context: Context) {
                 });
                 if (conflictMap.size > 0) {
                     const conflicts = Array.from(conflictMap.values()).flat();
-                    return NextResponse.json({
-                        ok: false,
-                        code: "DUPLICATE_NO_SURAT",
-                        message: `No Surat berikut sudah pernah dipakai pada principle ${nextPrinciple.name}: ${Array.from(conflictMap.keys()).join(", ")}. Konfirmasi ulang jika ingin tetap melanjutkan.`,
-                        principleCode: nextPrinciple.code,
-                        principleName: nextPrinciple.name,
+                    if (force && !canActorForceDuplicateNoSurat(actor)) {
+                        return NextResponse.json({
+                            ok: false,
+                            code: "DUPLICATE_NO_SURAT_OVERRIDE_FORBIDDEN",
+                            error: "Hanya role admin atau claim yang dapat memaksa penggunaan No Surat duplikat.",
+                            conflicts,
+                        }, { status: 403 });
+                    }
+                    if (!force) {
+                        return NextResponse.json({
+                            ok: false,
+                            code: "DUPLICATE_NO_SURAT",
+                            message: `No Surat berikut sudah pernah dipakai pada principle ${nextPrinciple.name}: ${Array.from(conflictMap.keys()).join(", ")}. Konfirmasi ulang jika ingin tetap melanjutkan.`,
+                            principleCode: nextPrinciple.code,
+                            principleName: nextPrinciple.name,
+                            conflicts,
+                        }, { status: 409 });
+                    }
+                    forcedDuplicateMetadata = {
+                        noSurats: Array.from(conflictMap.keys()),
                         conflicts,
-                    }, { status: 409 });
+                    };
                 }
             }
-
-            await db.delete(offBatchItem).where(eq(offBatchItem.batchId, id));
-            await db.insert(offBatchItem).values(body.items.map((item: Record<string, unknown>, index: number) => ({
-                id: randomUUID(),
-                batchId: id,
-                itemNo: index + 1,
-                rowNo: index + 1,
-                noSurat: String(item.noSurat || "").trim(),
-                namaProgram: String(item.namaProgram || item.program || `Program ${index + 1}`),
-                periode: periodText(item),
-                toko: String(item.toko || ""),
-                barang: String(item.barang || ""),
-                nominal: asNumber(item.nominal),
-                caraBayar: normalizeCaraBayar(item.caraBayar),
-                type: String(item.type || ""),
-                deadline: String(item.deadline || ""),
-                kwt: bool(item.kwt),
-                skp: bool(item.skp),
-                fp: bool(item.fp),
-                pc: bool(item.pc),
-                foto: bool(item.foto),
-                rekap: bool(item.rekap),
-                others: bool(item.others),
-                othersText: String(item.othersText || ""),
-                createdAt: now,
-                updatedAt: now,
-            })));
         }
 
-        await writeOffAudit({ batchId: id, actor, action: "update_batch", fromStatus: data.batch.status, toStatus: data.batch.status });
+        const patch: Partial<typeof offBatch.$inferInsert> = {
+            noPengajuan,
+            gelombang,
+            principleCode: nextPrinciple.code,
+            principleName: nextPrinciple.name,
+            bulan,
+            tahun,
+            supervisorName: body.supervisorName ? String(body.supervisorName) : data.batch.supervisorName,
+            updatedAt: now,
+        };
+        await db.update(offBatch).set(patch).where(eq(offBatch.id, id));
+
+        if (replacementItems) {
+            await db.delete(offBatchItem).where(eq(offBatchItem.batchId, id));
+            if (replacementItems.length > 0) {
+                await db.insert(offBatchItem).values(replacementItems.map((item) => ({ ...item, batchId: id })));
+            }
+        }
+
+        await writeOffAudit({
+            batchId: id,
+            actor,
+            action: "update_batch",
+            fromStatus: data.batch.status,
+            toStatus: data.batch.status,
+            metadata: {
+                itemCount: replacementItems?.length ?? data.items.length,
+                forcedDuplicateNoSurat: forcedDuplicateMetadata,
+            },
+        });
         const updated = await getBatchWithItems(id);
         return NextResponse.json({
             ok: true,

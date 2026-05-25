@@ -35,11 +35,7 @@ export function calculateClaimAmount(
     };
 }
 
-/**
- * Selisih antara totalClaim dan totalPaid. Tidak di-clamp ke 0 supaya
- * overpayment tetap terlihat sebagai nilai negatif (dapat ditampilkan
- * sebagai "Lebih Bayar" di UI atau memicu alert reconciliation).
- */
+/** Outstanding tidak boleh negatif; overpayment belum dimodelkan di Phase 1. */
 export function calculateRemainingAmount(totalClaim: number, totalPaid: number): number {
-    return finiteAmount(totalClaim) - finiteAmount(totalPaid);
+    return Math.max(finiteAmount(totalClaim) - finiteAmount(totalPaid), 0);
 }

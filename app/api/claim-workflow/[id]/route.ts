@@ -54,8 +54,13 @@ export async function GET(_request: Request, context: Context) {
                 ...row.workflow,
                 offNoPengajuan: row.offNoPengajuan,
             },
+            offBatch: {
+                id: row.workflow.offBatchId,
+                noPengajuan: row.offNoPengajuan,
+            },
             items,
             payments,
+            canEditItems: actor.role === "admin" || actor.role === "claim",
         });
     } catch (error) {
         console.error("[CLAIM WORKFLOW DETAIL ERROR]", error);

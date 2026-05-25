@@ -67,11 +67,9 @@ export function canActorReadClaimAudit(actor: ClaimSessionActor | null): boolean
 }
 
 /**
- * Gate pembuatan workflow baru. admin/claim atau RBAC
- * `claim_workflow.create`.
+ * Gate pembuatan workflow baru. Creation from OFF is a workflow boundary,
+ * sehingga hanya resolved OFF role admin/claim yang boleh melakukannya.
  */
 export function canActorCreateClaimWorkflow(actor: ClaimSessionActor | null): boolean {
-    if (!actor) return false;
-    if (isPrivilegedClaimRole(actor)) return true;
-    return canAccess("claim_workflow", "create", actor.rawRole, actor.rawPermissions);
+    return isPrivilegedClaimRole(actor);
 }

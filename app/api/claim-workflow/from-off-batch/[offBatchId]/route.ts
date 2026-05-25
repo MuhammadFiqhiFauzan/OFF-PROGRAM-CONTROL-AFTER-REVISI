@@ -12,7 +12,6 @@ import {
 import {
     calculateClaimAmount,
     calculateRemainingAmount,
-    canActorCreateClaimWorkflow,
     claimWorkflowOffRequirements,
     claimWorkflowStatuses,
     requireClaimSession,
@@ -40,8 +39,8 @@ export async function POST(request: NextRequest, context: Context) {
     if (!actor) {
         return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
-    if (!canActorCreateClaimWorkflow(actor)) {
-        return NextResponse.json({ ok: false, error: "Role Anda tidak memiliki izin membuat Claim Workflow." }, { status: 403 });
+    if (actor.role !== "admin" && actor.role !== "claim") {
+        return NextResponse.json({ ok: false, error: "Hanya role admin atau claim yang dapat membuat Claim Workflow dari OFF." }, { status: 403 });
     }
 
     let body: { ppnRate?: unknown; pphRate?: unknown; note?: unknown } = {};

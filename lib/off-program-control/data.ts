@@ -53,6 +53,10 @@ export function canActorAccessOffData(actor: OffActor | null) {
     return Boolean(actor && actor.role !== "unknown" && actor.role !== "sales");
 }
 
+export function canActorForceDuplicateNoSurat(actor: OffActor | null) {
+    return Boolean(actor && (actor.role === "admin" || actor.role === "claim"));
+}
+
 export async function getBatchWithItems(batchId: string) {
     const [batch] = await db.select().from(offBatch).where(eq(offBatch.id, batchId));
     if (!batch) return null;

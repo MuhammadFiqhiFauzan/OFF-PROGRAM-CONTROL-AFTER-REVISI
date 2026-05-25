@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   FileText,
   Send,
@@ -56,6 +57,9 @@ function statusTone(status: string) {
     status === claimWorkflowStatuses.waitingPeka
   ) {
     return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  }
+  if (status === claimWorkflowStatuses.readyToSubmit) {
+    return "border-indigo-500/30 bg-indigo-500/10 text-indigo-200";
   }
   return "border-amber-500/30 bg-amber-500/10 text-amber-300";
 }
@@ -231,7 +235,12 @@ export default function ClaimWorkflowPage() {
                     className="text-slate-300 hover:bg-white/[0.03]"
                   >
                     <td className="whitespace-nowrap px-5 py-4 font-semibold text-white">
-                      {row.claimWorkflowNo}
+                      <Link
+                        href={`/claim-workflow/${row.id}`}
+                        className="text-indigo-200 hover:text-indigo-100 hover:underline"
+                      >
+                        {row.claimWorkflowNo}
+                      </Link>
                     </td>
                     <td className="px-5 py-4">{row.principleName}</td>
                     <td className="whitespace-nowrap px-5 py-4">

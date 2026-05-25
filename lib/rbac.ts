@@ -213,7 +213,7 @@ export const rolePermissionPresets: Record<AppRole, PermissionMap> = {
         pick("summary", ["view", "upload", "generate", "export", "edit", "update"]),
         pick("validator", ["view", "upload", "run", "download", "edit"]),
         pick("off_program_control", ["view", "create", "update"]),
-        pick("claim_workflow", ["view", "create", "edit", "update", "submit"])
+        pick("claim_workflow", ["view", "edit", "update", "submit"])
     ),
     viewer: mergePermissionMaps(
         pick("dashboard", ["view"]),
