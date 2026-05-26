@@ -1,0 +1,7 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  // Register the autoskills install path so Kilo can discover skills installed by `npx autoskills`
+  "skills": {
+    "paths": ["./.agents/skills"]
+  }
+}
