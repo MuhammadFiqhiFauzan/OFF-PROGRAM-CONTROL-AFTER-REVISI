@@ -64,7 +64,8 @@ function subjectText(workflow: ClaimWorkflowRow, items: ClaimWorkflowItemRow[]):
         const item = items[0];
         return `Klaim ${item.jenisPromosi || "Program"} Periode ${item.periode || "-"}`;
     }
-    return `Klaim Program Principle ${workflow.principleName}`;
+    const principle = String(workflow.principleName ?? "").trim() || "PRINCIPAL TERKAIT";
+    return `Klaim Program ${principle}`;
 }
 
 function buildRows(workflow: ClaimWorkflowRow, items: ClaimWorkflowItemRow[]): LetterRow[] {
@@ -124,14 +125,20 @@ function drawContinuationHeading(page: PDFPage, workflow: ClaimWorkflowRow, page
     drawRightText(page, `Halaman ${pageNo}`, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 84, 9, font);
 }
 
+function recipientName(workflow: ClaimWorkflowRow): string {
+    const raw = String(workflow.principleName ?? "").trim();
+    return raw.length > 0 ? raw : "PRINCIPAL TERKAIT";
+}
+
 async function buildClaimLetterPdf(
     workflow: ClaimWorkflowRow,
     items: ClaimWorkflowItemRow[],
     generatedAt: Date,
 ): Promise<Buffer> {
+    const principle = recipientName(workflow);
     const pdfDoc = await PDFDocument.create();
     pdfDoc.setTitle(`Surat Claim ${workflow.claimWorkflowNo}`);
-    pdfDoc.setSubject("Claim Letter to PT Godrej Consumer Products Indonesia");
+    pdfDoc.setSubject(`Claim Letter - ${principle}`);
     pdfDoc.setCreator("AccAPI Claim Workflow");
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -143,16 +150,16 @@ async function buildClaimLetterPdf(
     page.drawText(`No.     : ${fitText(generatedReference(workflow, items), 68)}`, { x: MARGIN, y: 741, size: 10, font });
     page.drawText(`Perihal : ${fitText(subjectText(workflow, items), 68)}`, { x: MARGIN, y: 723, size: 10, font });
     page.drawText("Kepada Yth.", { x: MARGIN, y: 678, size: 10, font });
-    page.drawText("PT. GODREJ CONSUMER PRODUCTS INDONESIA (PT GCPI)", { x: MARGIN, y: 660, size: 10, font: bold });
+    page.drawText(fitText(principle, 70), { x: MARGIN, y: 660, size: 10, font: bold });
     page.drawText("Di Tempat", { x: MARGIN, y: 642, size: 10, font });
     page.drawText("Dengan hormat,", { x: MARGIN, y: 600, size: 10, font });
-    page.drawText("Bersama surat ini kami mengajukan klaim kepada PT Godrej Consumer Products", {
+    page.drawText(fitText(`Bersama surat ini kami mengajukan klaim kepada ${principle}`, 88), {
         x: MARGIN,
         y: 577,
         size: 10,
         font,
     });
-    page.drawText("Indonesia atas program yang telah dilaksanakan, dengan rincian sebagai berikut:", {
+    page.drawText("atas program yang telah dilaksanakan, dengan rincian sebagai berikut:", {
         x: MARGIN,
         y: 560,
         size: 10,

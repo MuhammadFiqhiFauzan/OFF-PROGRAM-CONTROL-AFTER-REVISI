@@ -115,6 +115,16 @@ export async function POST(request: Request, context: Context) {
                     error: "Return to Draft hanya tersedia saat status Ready to Submit.",
                 }, { status: 409 });
             }
+            // return_to_draft dapat menginvalidasi Claim Letter PDF aktif dan
+            // membuka kembali tax editing, jadi audit wajib mencatat alasan
+            // konkret. Tolak jika note kosong/blank.
+            if (!note) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "RETURN_TO_DRAFT_NOTE_REQUIRED",
+                    error: "Alasan wajib diisi saat mengembalikan Claim Workflow ke Draft.",
+                }, { status: 400 });
+            }
             toStatus = claimWorkflowStatuses.draft;
         } else {
             // submit_to_principal

@@ -202,6 +202,13 @@ Aturan ini tidak boleh dilanggar oleh patch apa pun.
 - Setiap aksi `return` / `revisi` (mis. `sm_return`, `claim_return`,
   `om_cancel`, `return_to_draft` Claim Workflow) **wajib menyertakan
   alasan** (string non-kosong). Backend harus menolak request tanpa alasan.
+- Khusus Claim Workflow `return_to_draft` (`Ready to Submit` → `Draft`):
+  backend di `app/api/claim-workflow/[id]/status/route.ts` mengembalikan
+  HTTP 400 dengan code `RETURN_TO_DRAFT_NOTE_REQUIRED` saat `note` kosong
+  / blank. Alasan wajib karena aksi ini menginvalidasi Claim Letter PDF
+  aktif dan membuka kembali tax editing per item; audit log harus
+  mencatat sebabnya. UI detail page wajib prompt input alasan dan tolak
+  blank sebelum hit API.
 - Alasan return ikut tercatat di audit log (`note`) dan ditampilkan ke
   role sebelumnya supaya bisa diperbaiki.
 

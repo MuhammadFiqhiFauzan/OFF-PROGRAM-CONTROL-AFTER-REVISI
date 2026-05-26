@@ -30,9 +30,13 @@ Claim Workflow is the post-OFF web module for monitoring claims sent to a princi
 ### Phase 2C - claim letter PDF generation
 - `POST /api/claim-workflow/[id]/claim-letter` generates the claim letter that replaces the old Word mail merge file `SURAT CLAIM GODREJ.docx`.
 - Generation is `admin`/`claim` only and is allowed only from `Ready to Submit` or `Submitted to Principal`, never `Draft` or `Need Revision`.
-- The PDF uses stored Claim Workflow items/totals rather than an Excel filter or Word active record.
+- The PDF uses stored Claim Workflow items/totals rather than an Excel filter or Word active record. It does not depend on `terbilang.xlam`.
+- The PDF is generic per principle: recipient, subject, and body all derive from `claim_workflow.principleName`. Godrej-specific text has been removed; if `principleName` is missing, the letter falls back to `PRINCIPAL TERKAIT`.
 - Generated file metadata is stored on `claim_workflow`, and successful generation writes the `claim_letter_generated` audit action.
 - `GET /api/claim-workflow/[id]/claim-letter` serves the previously generated PDF to actors permitted to view that workflow.
+- Only the latest active PDF is retained. After successful regeneration, the previous active PDF file under `runtime/claim-workflow/letters/` is deleted; its path is preserved in `claim_audit_log.metadata.previousClaimLetterPdfPath` for traceability.
+
+> Future audit-grade document versioning should use a separate document/version table if the business requires every historical PDF to remain accessible. Until then, treat the active PDF as the only authoritative artifact.
 
 ## Separation From OFF Program Control
 
@@ -136,7 +140,7 @@ Successful response shape:
 ### Allowed Transitions
 
 - `mark_ready`: `Draft` → `Ready to Submit`, or `Need Revision` → `Ready to Submit`.
-- `return_to_draft`: `Ready to Submit` → `Draft`.
+- `return_to_draft`: `Ready to Submit` → `Draft`. Requires a non-empty `note` (alasan) in the request body; the backend rejects blank notes with HTTP 400 and code `RETURN_TO_DRAFT_NOTE_REQUIRED`. The reason is mandatory because returning to Draft invalidates the active Claim Letter PDF and reopens tax editing, so the audit log must capture why.
 - `submit_to_principal`: `Ready to Submit` → `Submitted to Principal`. Sets `claim_workflow.submitted_to_principal_at` to the transition timestamp.
 
 No other transitions (`Waiting PEKA`, `EC Received`, `CN Received`, `Partially Paid`, `Paid`, `Outstanding`, `Closed`, `Cancelled`) are implemented in this phase.
@@ -154,7 +158,13 @@ Only resolved OFF role `admin` or `claim` may invoke status transitions. `staff`
 - Every item `nilaiKlaim` must be `> 0`.
 - `note` is optional.
 
-`return_to_draft` only validates the source status. `submit_to_principal` only validates the source status (validation already happened at `mark_ready`); it does not generate any PDF, import any PEKA data, or create any payment.
+### Validation For `return_to_draft`
+
+- Current status must be `Ready to Submit`.
+- `note` (alasan) is **required** and must be a non-empty string after trim. The backend returns HTTP 400 with code `RETURN_TO_DRAFT_NOTE_REQUIRED` and message "Alasan wajib diisi saat mengembalikan Claim Workflow ke Draft." when missing or blank.
+- The detail page UI must prompt the user for the reason and refuse to call the API with a blank input.
+
+`submit_to_principal` only validates the source status (validation already happened at `mark_ready`); it does not generate any PDF, import any PEKA data, or create any payment.
 
 ### Audit
 
@@ -179,9 +189,81 @@ To resume editing after `Ready to Submit`, an authorized user must first invoke 
 
 Phase 2C generates an A4 claim-letter PDF as the web replacement for `SURAT CLAIM GODREJ.docx`. It uses persisted `claim_workflow` and `claim_workflow_item` values, including DPP, PPN, PPH, and `nilaiKlaim`; it does not depend on Word mail merge, Excel filters, or `terbilang.xlam`. Generation remains blocked for `Draft` and `Need Revision`.
 
+The letter is generic per principle: the recipient line, subject (`Perihal`), and body all use `claim_workflow.principleName`. Godrej-specific text has been removed. If `principleName` is missing or blank for any reason, the letter falls back to `PRINCIPAL TERKAIT` so the workflow does not break for non-Godrej principles. The signature block remains `CV. Surya Perkasa / Distributor Makassar`.
+
 The detail page displays generation state and a link to the stored PDF after generation. `claim_workflow.claim_letter_pdf_path`, `claim_letter_generated_at`, and `claim_letter_generated_by` store the current generated artifact metadata, while `claim_audit_log.action = "claim_letter_generated"` records each successful generation.
 
 If a generated `Ready to Submit` workflow is returned to `Draft`, its active claim-letter metadata is cleared so a revised draft cannot expose a stale PDF as current. The `return_to_draft` audit metadata retains the invalidated file path for traceability.
+
+### PDF Storage Behavior
+
+- Only the latest active Claim Letter PDF is retained. After a successful regeneration, the previous active PDF file under `runtime/claim-workflow/letters/` is deleted, and its path is recorded in `claim_audit_log.metadata.previousClaimLetterPdfPath` for traceability.
+- After `return_to_draft`, the active PDF metadata on `claim_workflow` is cleared and the file (if it still resides under `runtime/claim-workflow/letters/`) is deleted; the path is preserved in `claim_audit_log.metadata.invalidatedClaimLetterPdfPath`.
+- Old PDF *content* is not guaranteed to remain accessible after regeneration or `return_to_draft`. Only the audit metadata path is retained.
+- TODO: Future audit-grade document versioning should use a separate document/version table if the business requires every historical PDF to remain accessible. Phase 2C deliberately keeps a single active artifact.
+
+## Current Active Flow
+
+```
+OFF Completed
+  -> Create Claim Workflow (admin/claim)
+  -> Draft
+  -> Edit DPP / PPN / PPH (admin/claim, items in Draft / Need Revision)
+  -> Ready to Submit (mark_ready, requires totalClaim > 0 and every item DPP/Nilai Klaim > 0)
+  -> Generate Claim Letter PDF (admin/claim, generic per principleName)
+  -> Submitted to Principal (submit_to_principal)
+```
+
+`return_to_draft` is the only backwards transition currently allowed (`Ready to Submit` → `Draft`); it requires a non-empty `note` and clears the active Claim Letter PDF metadata.
+
+## Phase 3A PEKA Manual Import And Matching Preview
+
+Phase 3A introduces the foundation for replacing the Excel `REPORT PEKA` workbook. It is **preview-only**: PEKA rows are imported into `claim_peka_report`, but EC/CN values are NOT yet written into `claim_workflow_item` and Claim Workflow status is NOT changed by import or preview.
+
+### Import endpoint
+
+`POST /api/claim-workflow/peka/import` (admin/claim only)
+
+- Accepts `multipart/form-data` with field `file` (`.xlsx` or `.csv`, ≤ 10 MB).
+- Parses the first worksheet using the existing `xlsx` package.
+- Header matching is tolerant via `normalizeHeader`: `CLAIM NO.`, `CLAIM NO`, `Jenis Klaim`, `RD NAME`, `PERIODE`, `NO. SURAT RD`, `NO SURAT RD`, `TOTAL CLAIM`, `CN NUMBER`, `CN`, `REQUESTOR`, `LAST PROCESSED/RECIVE DATE`, `LAST PROCESSED/RECEIVE DATE`, `PENDING USER`, `LEAD TIME`, `AGE`, `NOTE`, `EC`.
+- Rows whose `noSuratRd` is blank after `normalizeNoSurat` are skipped and counted in `skippedCount`.
+- Non-numeric `TOTAL CLAIM` cells are stored as `0` and reported as warnings; date-ish columns are kept as text in this phase.
+- Insert is wrapped in a single transaction so import is all-or-nothing.
+- Response: `{ ok, success, importedCount, skippedCount, warningCount, warnings[≤20], sourceFile }`.
+- The endpoint never updates `claim_workflow_item` and never changes `claim_workflow.status`.
+
+### Matching preview endpoint
+
+`GET /api/claim-workflow/[id]/peka-matches` (any user allowed to read the workflow)
+
+- Loads workflow items and PEKA rows.
+- Indexes PEKA rows by `normalizeNoSurat(no_surat_rd)`.
+- For each item, returns a preview row with `matchedCount` and `status`:
+  - `matchedCount = 0` → `unmatched`.
+  - `matchedCount = 1` → `matched` with `bestMatch` (EC, CN, claimNo, totalClaim, pendingUser, leadTime, age, note, sourceFile, importedAt).
+  - `matchedCount > 1` → `duplicate_match`. The most recently imported row is exposed as `bestMatch`; the rest go into `conflictMatches` for manual review.
+- The endpoint is **read-only**: no DB writes, no audit row.
+
+### Detail page UI
+
+`/claim-workflow/[id]` adds a "PEKA Preview" section with a `Load PEKA Matches` button, a per-item table (No Surat, Jenis Promosi, Nilai Klaim, status pill, EC, CN, Pending User, Lead Time, Source File), and an explicit duplicate-match warning. Apply/update buttons are intentionally absent in Phase 3A.
+
+### List page UI
+
+`/claim-workflow` shows a "PEKA Manual Import" panel only for resolved OFF roles `admin` or `claim`. Staff and other roles never see the upload control.
+
+### Normalization rule
+
+Both endpoints use `normalizeNoSurat` from `lib/claim-workflow/peka.ts`: trim, collapse whitespace, normalise spacing around `/`, then uppercase. Empty/blank inputs become an empty string and are excluded from index/matching.
+
+### Deferred until later phases
+
+- Applying EC/CN to `claim_workflow_item` (writing `ecPeka`, `cnNumber`).
+- Auto-resolving duplicate matches.
+- Transitioning Claim Workflow status to `Waiting PEKA`, `EC Received`, or `CN Received`.
+- Payment entry, payment proof upload, close workflow, overpayment field.
+- Automatic sync from a network folder.
 
 ## Calculations
 
