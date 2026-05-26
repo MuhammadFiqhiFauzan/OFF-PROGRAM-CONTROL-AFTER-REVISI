@@ -85,13 +85,27 @@ Setelah seed selesai:
 
 1. Buka `/off-program-control` — daftar batch demo per status muncul.
 2. Buka `/claim-workflow` — daftar Claim Workflow demo per status muncul.
+   - Card metric `Outstanding` menampilkan jumlah workflow yang masih
+     punya `remainingAmount > 0` (akurat dari endpoint
+     `/api/claim-workflow/outstanding`).
+   - Section `Monitor Outstanding` di atas daftar utama menampilkan
+     ringkasan dan tabel workflow yang belum lunas.
+   - Tab `All` / `Outstanding` / `Paid / Closed` di tabel utama dapat
+     dipakai filter cepat.
 3. Klik salah satu Claim Workflow → buka detail page. Pastikan:
    - Card **Claim Letter**, **Claim Summary**, dan **Kwitansi Claim**
      menunjukkan status `Generated` untuk demo `Ready to Submit` ke atas.
    - Tombol `Open PDF` membuka file di
      `runtime/claim-workflow/{letters,summaries,receipts}/`.
+   - Section **Pembayaran Principal / Paid** menampilkan summary cards
+     (Total Claim, Total Paid, Remaining, Payment Status) dan tabel
+     payment. Demo `Partially Paid` / `Paid` / `Closed` punya minimal 1
+     row payment active.
    - Audit log berisi event `claim_letter_generated`,
-     `claim_summary_generated`, `claim_receipt_generated`.
+     `claim_summary_generated`, `claim_receipt_generated`. Demo
+     `Partially Paid` / `Paid` / `Closed` juga punya event
+     `payment_created` (via path lain di route lokal — di seed pakai
+     prefix `demo_payment_seeded`).
 
 ---
 

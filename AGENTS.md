@@ -169,17 +169,30 @@ Draft
 Ready to Submit
     ↓ (submit ke principal)
 Submitted to Principal
-    ↓ (pembayaran masuk dari principal — R3)
+    ↓ (input pembayaran principal — R3)
 Partially Paid → Paid
     ↓
-Closed
+Closed (R4)
 ```
 
 Status non-linear yang valid:
 
-- `Need Revision` (kembali ke Draft untuk koreksi item/pajak)
-- `Outstanding` (klaim lewat deadline tanpa dibayar lengkap)
-- `Cancelled`
+- `Need Revision` (kembali ke Draft untuk koreksi item/pajak).
+- `Outstanding` (klaim lewat deadline tanpa dibayar lengkap).
+- `Cancelled` (pembatalan eksplisit oleh admin).
+
+Phase R3 — Principal Payment + Outstanding (Mei 2026):
+- Pembayaran principal disimpan sebagai transaksi di `claim_payment`,
+  bukan satu field flat. `totalPaid = sum(active payments)` dan
+  `remainingAmount = max(totalClaim - totalPaid, 0)`.
+- Status `Partially Paid` / `Paid` di-derive otomatis oleh route
+  `POST /api/claim-workflow/[id]/payments` (dan diturunkan kembali oleh
+  `POST .../payments/[paymentId]/void`). Status route umum (`mark_ready`,
+  `return_to_draft`, `submit_to_principal`) tidak boleh dipakai untuk
+  set `Partially Paid` / `Paid` secara manual supaya totals dan status
+  tidak pernah drift.
+- Overpayment ditolak: `paymentAmount > remainingAmount + Rp1` dijawab
+  dengan code `CLAIM_PAYMENT_OVERPAYMENT`.
 
 Status legacy `Waiting PEKA`, `EC Received`, dan `CN Received` sudah
 **retired** (Mei 2026). Tidak boleh dipakai untuk transisi baru. Lihat

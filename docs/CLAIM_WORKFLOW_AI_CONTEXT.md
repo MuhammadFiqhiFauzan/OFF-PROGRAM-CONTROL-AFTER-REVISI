@@ -549,40 +549,165 @@ Phase 3+ telah retired:
 4. **Phase 2C** — Claim Letter PDF dari data Claim Workflow. ✅
 5. **Phase R1** — rewire OFF ↔ Claim No Claim sync. ✅
 6. **Phase R2** — Claim Summary + Kwitansi Claim PDF. ✅
-7. **Phase R3 (next)** — Principal Payment + Outstanding:
+7. **Phase R3** — Principal Payment + Outstanding (Mei 2026). ✅
    `claim_payment` API/UI, Monitor Outstanding dashboard berbasis
    `remainingAmount = max(totalClaim - totalPaid, 0)`, transisi
    `Submitted to Principal` → `Partially Paid` / `Paid` berbasis total
-   pembayaran masuk.
-8. **Phase R4** — Close Workflow: transisi `Paid` → `Closed` dengan
+   pembayaran masuk. Lihat section "Phase R3" di bawah.
+8. **Phase R4 (next)** — Close Workflow: transisi `Paid` → `Closed` dengan
    gate `remainingAmount = 0` dan dokumen lengkap.
 9. **Phase R5** — Reporting / Export.
 10. **Phase R6** — Hardening (perf, audit retention, RBAC review).
 
-### Future R3 — Principal Payment + Outstanding
+## Phase R3 — Principal Payment + Outstanding
 
-Untuk dipertimbangkan saat membangun R3:
+Phase R3 menggantikan Excel sheet `PAID` dan `MONITOR OUTSTANDING`.
+Implementasi tidak menggunakan PEKA/EC/CN sebagai gate; pembayaran murni
+berdasarkan total `claim_payment` yang masih aktif (non-voided).
 
-- Endpoint `POST /api/claim-workflow/[id]/payments` untuk role
-  admin/claim:
-  - Body: `paymentDate`, `paymentAmount`, `paymentType`, `paymentNote`,
-    optional `proofPath` (upload bisa menyusul).
-  - Insert ke `claim_payment`, hitung ulang `totalPaid` dan
-    `remainingAmount`, dan otomatis transisi status workflow:
-    `Submitted to Principal` / `Partially Paid` → `Partially Paid` jika
-    `totalPaid > 0 AND totalPaid < totalClaim`; → `Paid` jika
-    `totalPaid >= totalClaim`. Audit `payment_recorded` plus transisi
-    audit yang sesuai.
-- Outstanding dashboard berbasis filter status + `remainingAmount > 0`
-  dan deadline (kalau dimodelkan). Tidak butuh EC/CN.
-- Payment endpoint **tidak boleh** mensyaratkan EC/CN.
+### Schema additions
+
+`claim_payment` mendapat tiga kolom void untuk soft-delete koreksi:
+
+- `voided_at INTEGER` — timestamp saat row di-void.
+- `voided_by TEXT` — actor user id yang melakukan void.
+- `void_reason TEXT` — alasan void (wajib non-empty).
+
+`scripts/init-db.mjs` menambah kolom-kolom tsb idempotent. Active payment
+didefinisikan sebagai `voided_at IS NULL`. Hard delete tidak diizinkan.
+
+### Helpers
+
+`lib/claim-workflow/calculations.ts` menambah helper berikut:
+
+- `isActivePayment(payment)` — true bila `voided_at` null.
+- `sumActivePayments(payments)` — total nominal active payment.
+- `derivePaymentStatus(totalClaim, totalPaid)` — status workflow dari
+  totals (`Submitted to Principal` / `Partially Paid` / `Paid`).
+- `recalcPaymentTotals(totalClaim, payments)` — wrap di atas tiga
+  function di atas; output `totalPaid`, `remainingAmount`, `derivedStatus`.
+- `PAYMENT_ROUNDING_TOLERANCE = 1` — toleransi pembulatan rupiah agar
+  klaim dengan total fraksional (mis. PPN/PPh hasil rounding) tetap
+  bisa mencapai `Paid`.
+
+### Endpoints
+
+`GET /api/claim-workflow/[id]/payments` — read access:
+- Return `payments`, `activePayments`, `voidedPayments`, dan `summary`
+  (totalClaim, totalPaid, remainingAmount, paymentStatus, count fields).
+
+`POST /api/claim-workflow/[id]/payments` — admin/claim only:
+- Body: `paymentDate` (YYYY-MM-DD), `paymentAmount` (>0), optional
+  `paymentType`, `paymentNote`.
+- Validasi: workflow ada, status harus `Submitted to Principal` atau
+  `Partially Paid`, `totalClaim > 0`, `noClaim` ter-assign.
+- Reject overpayment: `paymentAmount > remainingAmount + Rp1` →
+  HTTP 409 code `CLAIM_PAYMENT_OVERPAYMENT`, message:
+  "Pembayaran melebihi sisa outstanding. Overpayment belum didukung."
+- Side effects (transaksi atomic): insert `claim_payment` aktif,
+  recalc `totalPaid`/`remainingAmount`, update `claim_workflow.status`
+  via `derivePaymentStatus`, audit `payment_created`, dan optional
+  `payment_status_recalculated` jika status berubah.
+
+`POST /api/claim-workflow/[id]/payments/[paymentId]/void` — admin/claim only:
+- Body: `reason` (wajib non-empty, max 500 karakter).
+- Reject: workflow Closed, payment tidak ditemukan, payment sudah
+  pernah di-void.
+- Side effects (transaksi atomic): set `voided_at`/`voided_by`/
+  `void_reason`, recalc totals + status (status bisa turun balik dari
+  `Paid` → `Partially Paid` → `Submitted to Principal`), audit
+  `payment_voided` + optional `payment_status_recalculated`.
+
+`GET /api/claim-workflow/outstanding` — list claim workflows yang masih
+punya `remainingAmount > 0`. Status yang ikut: `Submitted to Principal`,
+`Partially Paid`, `Outstanding`, plus legacy PEKA agar tidak hilang dari
+monitoring. Output: `outstanding[]` (id, claimWorkflowNo, noClaim,
+principleName, status, totalClaim, totalPaid, remainingAmount,
+submittedToPrincipalAt, latestPaymentDate, daysOutstanding,
+offBatchId/offNoPengajuan) dan `summary` (workflowCount, totalClaim,
+totalPaid, totalOutstanding).
+
+### Detail endpoint additions
+
+`GET /api/claim-workflow/[id]` sekarang juga mengembalikan:
+
+- `payments`, `activePayments`, `voidedPayments`.
+- `paymentSummary` dengan field totalClaim/totalPaid/remainingAmount/
+  paymentStatus/paymentCount/activePaymentCount/voidedPaymentCount.
+- `canRecordPayment` — true untuk admin/claim ketika status
+  `Submitted to Principal` atau `Partially Paid` dan `remainingAmount > 0`.
+- `canVoidPayment` — true untuk admin/claim ketika status bukan
+  `Closed`.
+
+`workflow.totalPaid` dan `workflow.remainingAmount` di response selalu
+hasil recalc fresh dari list payment, bukan dari kolom cache. Ini
+mencegah drift kalau ada payment yang baru saja di-insert/void di luar
+endpoint payment biasa (mis. via seed).
+
+### Status route protection
+
+`POST /api/claim-workflow/[id]/status` hanya menangani tiga aksi:
+`mark_ready`, `return_to_draft`, `submit_to_principal`. Aksi tidak
+dikenal direspon HTTP 400 `CLAIM_WORKFLOW_INVALID_ACTION`. Status
+`Partially Paid` / `Paid` **tidak boleh** di-set lewat endpoint ini —
+mereka di-derive otomatis oleh route payment supaya `totalPaid` dan
+`status` tidak pernah drift.
+
+### UI changes
+
+Detail page `/claim-workflow/[id]`:
+
+- Section baru "Pembayaran Principal / Paid":
+  - Summary cards (Total Claim, Total Paid, Remaining/Outstanding,
+    Payment Status).
+  - Form input pembayaran (date, amount, type, note) hanya muncul untuk
+    admin/claim ketika `canRecordPayment`. Pesan jelas saat tidak bisa:
+    klaim sudah lunas / workflow closed / belum submitted ke principal.
+  - Tabel payment dengan kolom Tanggal, Nominal, Jenis, Catatan,
+    Status (Active/Voided), Action (button Void untuk admin/claim).
+  - Void prompt alasan via `window.prompt`; alasan kosong ditolak.
+  - Voided row tampil dengan strike-through dan badge merah.
+
+List page `/claim-workflow`:
+
+- Card metric "Outstanding" sekarang memakai jumlah dari
+  `/api/claim-workflow/outstanding` (akurat berbasis `remainingAmount`).
+- Section baru "Monitor Outstanding" di atas tabel utama menampilkan
+  ringkasan + tabel klaim yang masih punya saldo.
+- Tab `All` / `Outstanding` / `Paid / Closed` untuk filter cepat tabel
+  utama.
+
+### Audit actions
+
+- `payment_created` — metadata: `paymentId`, `paymentDate`,
+  `paymentAmount`, `paymentType`, `previousTotalPaid`, `newTotalPaid`,
+  `previousRemainingAmount`, `newRemainingAmount`, `previousStatus`,
+  `newStatus`.
+- `payment_voided` — metadata: `paymentId`, `voidReason`, `voidedAmount`,
+  plus pasangan totals/status yang sama dengan `payment_created`.
+- `payment_status_recalculated` — opsional, ditulis terpisah saat
+  status workflow berubah karena pembuatan/void payment. Berisi
+  `trigger` (`payment_created` / `payment_voided`), `paymentId`,
+  `totalClaim`, `totalPaid`, `remainingAmount`.
+
+### Demo seed
+
+`scripts/seed-demo-workflows.mjs` sudah meng-cover skenario berikut
+untuk Claim Workflow:
+
+- `Submitted to Principal` (totalPaid = 0).
+- `Partially Paid` (1 payment, totalPaid = 50% totalClaim).
+- `Paid` (totalPaid = totalClaim).
+- `Outstanding` (label monitoring, totalPaid = 0).
+- `Closed` (post-Paid, totalPaid = totalClaim).
+
+Status `Partially Paid` / `Paid` / `Closed` me-insert row `claim_payment`
+sehingga UI dan endpoint outstanding menampilkan data realistis.
 
 ### Future R4 — Close Workflow
 
-- Endpoint `POST /api/claim-workflow/[id]/close` untuk admin/claim.
-- Gate: `status = Paid`, `remainingAmount = 0`, dokumen lengkap, audit
-  lengkap, optional final note.
-- Audit `close_workflow`. Set `closed_at`.
+Tetap deferred. Gate: `status = Paid`, `remainingAmount = 0`, semua
+dokumen klaim ada, audit lengkap. Tidak ada dependensi PEKA/EC/CN.
 
 ## Important Warnings
 

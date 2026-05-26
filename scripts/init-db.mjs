@@ -334,6 +334,9 @@ const statements = [
     payment_note TEXT,
     proof_path TEXT,
     created_by TEXT,
+    voided_at INTEGER,
+    voided_by TEXT,
+    void_reason TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id)
@@ -451,6 +454,12 @@ const migrations = [
   `ALTER TABLE claim_workflow ADD COLUMN receipt_pdf_path TEXT;`,
   `ALTER TABLE claim_workflow ADD COLUMN receipt_generated_at INTEGER;`,
   `ALTER TABLE claim_workflow ADD COLUMN receipt_generated_by TEXT;`,
+  // Phase R3 — Principal Payment + Outstanding:
+  // Tambahkan kolom void untuk koreksi pembayaran tanpa hard delete.
+  // Active payment didefinisikan sebagai voided_at IS NULL.
+  `ALTER TABLE claim_payment ADD COLUMN voided_at INTEGER;`,
+  `ALTER TABLE claim_payment ADD COLUMN voided_by TEXT;`,
+  `ALTER TABLE claim_payment ADD COLUMN void_reason TEXT;`,
 ];
 
 for (const sql of migrations) {
@@ -480,6 +489,7 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_workflow_id ON claim_workflow_item(claim_workflow_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_off_batch_item_id ON claim_workflow_item(off_batch_item_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_payment_workflow_id ON claim_payment(claim_workflow_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_payment_voided_at ON claim_payment(voided_at);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_workflow_id ON claim_audit_log(claim_workflow_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_created_at ON claim_audit_log(created_at);`,
 ];

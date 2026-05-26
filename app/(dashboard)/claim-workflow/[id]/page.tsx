@@ -70,17 +70,45 @@ type AuditRow = {
   createdAt: string | Date;
 };
 
+type Payment = {
+  id: string;
+  paymentDate: string;
+  paymentAmount: number;
+  paymentType?: string | null;
+  paymentNote?: string | null;
+  createdBy?: string | null;
+  voidedAt?: string | Date | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
+  createdAt: string | Date;
+};
+
+type PaymentSummary = {
+  totalClaim: number;
+  totalPaid: number;
+  remainingAmount: number;
+  paymentStatus: string;
+  paymentCount: number;
+  activePaymentCount: number;
+  voidedPaymentCount: number;
+};
+
 type DetailResult = {
   ok?: boolean;
   error?: string;
   workflow?: Workflow;
   items?: WorkflowItem[];
-  payments?: unknown[];
+  payments?: Payment[];
+  activePayments?: Payment[];
+  voidedPayments?: Payment[];
+  paymentSummary?: PaymentSummary;
   canEditItems?: boolean;
   canGenerateClaimLetter?: boolean;
   canGenerateSummary?: boolean;
   canGenerateReceipt?: boolean;
   canAssignNoClaim?: boolean;
+  canRecordPayment?: boolean;
+  canVoidPayment?: boolean;
 };
 
 type EditDraft = {
@@ -146,11 +174,15 @@ export default function ClaimWorkflowDetailPage() {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [items, setItems] = useState<WorkflowItem[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
   const [canEditItems, setCanEditItems] = useState(false);
   const [canGenerateClaimLetter, setCanGenerateClaimLetter] = useState(false);
   const [canGenerateSummary, setCanGenerateSummary] = useState(false);
   const [canGenerateReceipt, setCanGenerateReceipt] = useState(false);
   const [canAssignNoClaim, setCanAssignNoClaim] = useState(false);
+  const [canRecordPayment, setCanRecordPayment] = useState(false);
+  const [canVoidPayment, setCanVoidPayment] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditError, setAuditError] = useState("");
@@ -165,6 +197,14 @@ export default function ClaimWorkflowDetailPage() {
   const [noClaimDraft, setNoClaimDraft] = useState("");
   const [noClaimSaving, setNoClaimSaving] = useState(false);
   const [noClaimEditing, setNoClaimEditing] = useState(false);
+  const [paymentDraft, setPaymentDraft] = useState({
+    paymentDate: new Date().toISOString().slice(0, 10),
+    paymentAmount: "",
+    paymentType: "Transfer",
+    paymentNote: "",
+  });
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [voidingId, setVoidingId] = useState("");
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -181,11 +221,15 @@ export default function ClaimWorkflowDetailPage() {
       }
       setWorkflow(result.workflow);
       setItems(result.items || []);
+      setPayments(result.payments || []);
+      setPaymentSummary(result.paymentSummary || null);
       setCanEditItems(Boolean(result.canEditItems));
       setCanGenerateClaimLetter(Boolean(result.canGenerateClaimLetter));
       setCanGenerateSummary(Boolean(result.canGenerateSummary));
       setCanGenerateReceipt(Boolean(result.canGenerateReceipt));
       setCanAssignNoClaim(Boolean(result.canAssignNoClaim));
+      setCanRecordPayment(Boolean(result.canRecordPayment));
+      setCanVoidPayment(Boolean(result.canVoidPayment));
       // Sinkronkan draft input dengan nilai No Claim terbaru, kecuali user
       // sedang mengetik (noClaimEditing true).
       if (!noClaimEditing) {
@@ -457,6 +501,110 @@ export default function ClaimWorkflowDetailPage() {
       setMessage(errorMessage);
     } finally {
       setNoClaimSaving(false);
+    }
+  };
+
+  const submitPayment = async () => {
+    const amount = Number(paymentDraft.paymentAmount);
+    if (!paymentDraft.paymentDate || !/^\d{4}-\d{2}-\d{2}$/.test(paymentDraft.paymentDate)) {
+      toast.error("Tanggal bayar wajib diisi (YYYY-MM-DD).");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Nominal bayar harus lebih dari 0.");
+      return;
+    }
+    setPaymentSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/claim-workflow/${id}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentDate: paymentDraft.paymentDate,
+          paymentAmount: amount,
+          paymentType: paymentDraft.paymentType.trim() || null,
+          paymentNote: paymentDraft.paymentNote.trim() || null,
+        }),
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        statusChanged?: boolean;
+        workflow?: { status?: string };
+      };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal mencatat pembayaran.");
+      }
+      const successMessage = result.statusChanged
+        ? `Pembayaran tersimpan. Status berubah menjadi ${result.workflow?.status || ""}.`
+        : "Pembayaran tersimpan.";
+      toast.success(successMessage);
+      setMessage(successMessage);
+      setPaymentDraft({
+        paymentDate: new Date().toISOString().slice(0, 10),
+        paymentAmount: "",
+        paymentType: paymentDraft.paymentType,
+        paymentNote: "",
+      });
+      await loadDetail();
+    } catch (saveError) {
+      const errorMessage = saveError instanceof Error
+        ? saveError.message
+        : "Gagal mencatat pembayaran.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setPaymentSaving(false);
+    }
+  };
+
+  const voidPayment = async (paymentId: string) => {
+    if (typeof window === "undefined") return;
+    const reason = window.prompt(
+      "Alasan void pembayaran (wajib diisi):",
+      "",
+    );
+    if (reason === null) return;
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      toast.error("Alasan void wajib diisi.");
+      return;
+    }
+    setVoidingId(paymentId);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/claim-workflow/${id}/payments/${paymentId}/void`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: trimmed }),
+        },
+      );
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        statusChanged?: boolean;
+        workflow?: { status?: string };
+      };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal void pembayaran.");
+      }
+      const successMessage = result.statusChanged
+        ? `Pembayaran di-void. Status kembali ke ${result.workflow?.status || ""}.`
+        : "Pembayaran di-void.";
+      toast.success(successMessage);
+      setMessage(successMessage);
+      await loadDetail();
+    } catch (voidError) {
+      const errorMessage = voidError instanceof Error
+        ? voidError.message
+        : "Gagal void pembayaran.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setVoidingId("");
     }
   };
 
@@ -953,6 +1101,182 @@ export default function ClaimWorkflowDetailPage() {
             </table>
           </div>
         )}
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-white">Pembayaran Principal / Paid</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Catat pembayaran yang masuk dari principal. Dukungan partial
+              payment, tidak boleh overpayment. Void dipakai untuk koreksi tanpa hard-delete.
+            </p>
+          </div>
+        </div>
+
+        {paymentSummary && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-xs font-semibold text-slate-500">Total Claim</p>
+              <p className="mt-2 text-sm font-bold text-white">{rupiah(paymentSummary.totalClaim)}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+              <p className="text-xs font-semibold text-emerald-300">Total Paid</p>
+              <p className="mt-2 text-sm font-bold text-emerald-200">{rupiah(paymentSummary.totalPaid)}</p>
+            </div>
+            <div className={`rounded-xl border p-3 ${paymentSummary.remainingAmount > 0 ? "border-amber-500/30 bg-amber-500/5" : "border-emerald-500/30 bg-emerald-500/5"}`}>
+              <p className={`text-xs font-semibold ${paymentSummary.remainingAmount > 0 ? "text-amber-300" : "text-emerald-300"}`}>Remaining / Outstanding</p>
+              <p className={`mt-2 text-sm font-bold ${paymentSummary.remainingAmount > 0 ? "text-amber-200" : "text-emerald-200"}`}>{rupiah(paymentSummary.remainingAmount)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-xs font-semibold text-slate-500">Payment Status</p>
+              <p className="mt-2 text-sm font-bold text-white">{displayClaimStatusLabel(paymentSummary.paymentStatus)}</p>
+              <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-500">
+                {paymentSummary.activePaymentCount} active · {paymentSummary.voidedPaymentCount} voided
+              </p>
+            </div>
+          </div>
+        )}
+
+        {canRecordPayment ? (
+          <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+            <h3 className="text-sm font-semibold text-white">Catat Pembayaran Baru</h3>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-300">
+                Tanggal Bayar
+                <input
+                  type="date"
+                  value={paymentDraft.paymentDate}
+                  onChange={(event) => setPaymentDraft({ ...paymentDraft, paymentDate: event.target.value })}
+                  disabled={paymentSaving}
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-300">
+                Nominal Bayar
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={paymentDraft.paymentAmount}
+                  onChange={(event) => setPaymentDraft({ ...paymentDraft, paymentAmount: event.target.value })}
+                  disabled={paymentSaving}
+                  placeholder={paymentSummary ? String(paymentSummary.remainingAmount) : "0"}
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-right font-mono text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-300">
+                Jenis Pembayaran
+                <input
+                  type="text"
+                  value={paymentDraft.paymentType}
+                  onChange={(event) => setPaymentDraft({ ...paymentDraft, paymentType: event.target.value })}
+                  disabled={paymentSaving}
+                  placeholder="Transfer / Tunai / Giro"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-300">
+                Catatan
+                <input
+                  type="text"
+                  value={paymentDraft.paymentNote}
+                  onChange={(event) => setPaymentDraft({ ...paymentDraft, paymentNote: event.target.value })}
+                  disabled={paymentSaving}
+                  placeholder="Optional"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                disabled={paymentSaving}
+                onClick={() => void submitPayment()}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {paymentSaving ? "Menyimpan..." : "Catat Pembayaran"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-slate-500">
+            {workflow.status === claimWorkflowStatuses.paid
+              ? "Klaim sudah lunas."
+              : workflow.status === claimWorkflowStatuses.closed
+                ? "Workflow sudah closed."
+                : workflow.status === claimWorkflowStatuses.submittedToPrincipal ||
+                  workflow.status === claimWorkflowStatuses.partiallyPaid
+                  ? "View-only. Hanya admin atau claim yang dapat mencatat pembayaran."
+                  : "Pembayaran hanya bisa diinput setelah Submitted to Principal."}
+          </p>
+        )}
+
+        <div className="mt-5 overflow-x-auto rounded-xl border border-white/10">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-black/40 text-xs uppercase tracking-wider text-slate-500">
+              <tr>
+                <th scope="col" className="px-4 py-2 font-semibold">Tanggal</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">Nominal</th>
+                <th scope="col" className="px-4 py-2 font-semibold">Jenis</th>
+                <th scope="col" className="px-4 py-2 font-semibold">Catatan</th>
+                <th scope="col" className="px-4 py-2 font-semibold">Status</th>
+                <th scope="col" className="px-4 py-2 font-semibold">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {payments.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-500">
+                    Belum ada pembayaran tercatat.
+                  </td>
+                </tr>
+              ) : (
+                payments.map((payment) => {
+                  const voided = payment.voidedAt !== null && payment.voidedAt !== undefined;
+                  return (
+                    <tr key={payment.id} className={voided ? "text-slate-500" : "text-slate-300"}>
+                      <td className="whitespace-nowrap px-4 py-2 font-mono">{payment.paymentDate}</td>
+                      <td className={`whitespace-nowrap px-4 py-2 text-right font-semibold tabular-nums ${voided ? "line-through" : "text-white"}`}>
+                        {rupiah(Number(payment.paymentAmount || 0))}
+                      </td>
+                      <td className="px-4 py-2">{payment.paymentType || "-"}</td>
+                      <td className="px-4 py-2">
+                        {payment.paymentNote || "-"}
+                        {voided && payment.voidReason && (
+                          <p className="mt-1 text-xs text-rose-300">Void: {payment.voidReason}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          voided
+                            ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                        }`}>
+                          {voided ? "Voided" : "Active"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        {!voided && canVoidPayment ? (
+                          <button
+                            type="button"
+                            disabled={voidingId === payment.id}
+                            onClick={() => void voidPayment(payment.id)}
+                            className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-bold text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-50"
+                          >
+                            {voidingId === payment.id ? "Memproses..." : "Void"}
+                          </button>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">

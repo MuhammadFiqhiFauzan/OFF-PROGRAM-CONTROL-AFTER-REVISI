@@ -11,6 +11,7 @@ import {
 import {
     canActorReadClaimWorkflow,
     claimWorkflowStatuses,
+    recalcPaymentTotals,
     requireClaimSession,
 } from "@/lib/claim-workflow";
 
@@ -48,7 +49,7 @@ export async function GET(_request: Request, context: Context) {
             .select()
             .from(claimPayment)
             .where(eq(claimPayment.claimWorkflowId, id))
-            .orderBy(asc(claimPayment.createdAt));
+            .orderBy(asc(claimPayment.paymentDate), asc(claimPayment.createdAt));
         // Resolve display name untuk No Claim assignor agar UI tidak harus
         // join sendiri. Aman: kalau noClaimAssignedBy NULL, lewati query.
         let noClaimAssignedByName: string | null = null;
@@ -77,12 +78,32 @@ export async function GET(_request: Request, context: Context) {
         const canGenerateReceipt = canManageClaim && docGenerationAllowed;
         const canAssignNoClaim = canManageClaim;
 
+        // Phase R3 — Principal Payment + Outstanding:
+        // Hitung totals payment dari list aktif/non-voided supaya UI dan
+        // gating tombol payment selalu konsisten dengan perhitungan
+        // backend (tidak bergantung pada nilai cache di kolom workflow
+        // yang mungkin sedikit lag dari list payment terbaru).
+        const totalClaim = Number(row.workflow.totalClaim || 0);
+        const paymentTotals = recalcPaymentTotals(totalClaim, payments);
+        const activePayments = payments.filter((p) => p.voidedAt === null);
+        const voidedPayments = payments.filter((p) => p.voidedAt !== null);
+        const paymentAllowed = (
+            row.workflow.status === claimWorkflowStatuses.submittedToPrincipal ||
+            row.workflow.status === claimWorkflowStatuses.partiallyPaid
+        );
+        const canRecordPayment = canManageClaim && paymentAllowed && paymentTotals.remainingAmount > 0;
+        const canVoidPayment = canManageClaim && row.workflow.status !== claimWorkflowStatuses.closed;
+
         return NextResponse.json({
             ok: true,
             workflow: {
                 ...row.workflow,
                 offNoPengajuan: row.offNoPengajuan,
                 noClaimAssignedByName,
+                // Cache totals tetap dibaca oleh UI lama; juga override dengan
+                // hasil recalc agar konsisten.
+                totalPaid: paymentTotals.totalPaid,
+                remainingAmount: paymentTotals.remainingAmount,
             },
             offBatch: {
                 id: row.workflow.offBatchId,
@@ -90,11 +111,24 @@ export async function GET(_request: Request, context: Context) {
             },
             items,
             payments,
+            activePayments,
+            voidedPayments,
+            paymentSummary: {
+                totalClaim,
+                totalPaid: paymentTotals.totalPaid,
+                remainingAmount: paymentTotals.remainingAmount,
+                paymentStatus: row.workflow.status,
+                paymentCount: payments.length,
+                activePaymentCount: activePayments.length,
+                voidedPaymentCount: voidedPayments.length,
+            },
             canEditItems: canManageClaim,
             canGenerateClaimLetter,
             canGenerateSummary,
             canGenerateReceipt,
             canAssignNoClaim,
+            canRecordPayment,
+            canVoidPayment,
         });
     } catch (error) {
         console.error("[CLAIM WORKFLOW DETAIL ERROR]", error);

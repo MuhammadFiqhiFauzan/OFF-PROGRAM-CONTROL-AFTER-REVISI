@@ -341,10 +341,19 @@ export const claimPayment = sqliteTable("claim_payment", {
     paymentNote: text("payment_note"),
     proofPath: text("proof_path"),
     createdBy: text("created_by"),
+    // Phase R3 — Principal Payment + Outstanding:
+    // Void adalah pengganti hard delete untuk koreksi pembayaran.
+    // Active payment didefinisikan `voided_at IS NULL`. totalPaid hanya
+    // menjumlahkan active payment. Audit log mencatat alasan void di
+    // metadata + `void_reason` agar trace lengkap.
+    voidedAt: integer("voided_at", { mode: "timestamp" }),
+    voidedBy: text("voided_by"),
+    voidReason: text("void_reason"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 }, (table) => ({
     workflowIdx: index("idx_claim_payment_workflow_id").on(table.claimWorkflowId),
+    voidedAtIdx: index("idx_claim_payment_voided_at").on(table.voidedAt),
 }));
 
 // Catatan cleanup PEKA (Mei 2026):

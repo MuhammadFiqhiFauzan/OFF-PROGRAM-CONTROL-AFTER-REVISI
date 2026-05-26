@@ -1,4 +1,5 @@
-import type { ClaimAmountCalculation } from "./types";
+import { claimWorkflowStatuses } from "./constants";
+import type { ClaimAmountCalculation, ClaimPaymentRow } from "./types";
 
 function finiteAmount(value: number): number {
     return Number.isFinite(value) ? value : 0;
@@ -36,8 +37,8 @@ export function calculateClaimAmount(
 }
 
 /**
- * Outstanding tidak boleh negatif; overpayment belum dimodelkan di Phase
- * 2B. Phase ini sengaja melakukan clamp ke 0 agar nilai outstanding selalu
+ * Outstanding tidak boleh negatif; overpayment belum dimodelkan.
+ * Phase ini sengaja melakukan clamp ke 0 agar nilai outstanding selalu
  * bermakna untuk monitoring.
  *
  * TODO: Future overpayment support harus pakai field terpisah, bukan
@@ -47,4 +48,83 @@ export function calculateClaimAmount(
  */
 export function calculateRemainingAmount(totalClaim: number, totalPaid: number): number {
     return Math.max(finiteAmount(totalClaim) - finiteAmount(totalPaid), 0);
+}
+
+// =============================================================================
+// Phase R3 — Principal Payment + Outstanding
+// =============================================================================
+
+/**
+ * Active payment didefinisikan sebagai `voidedAt IS NULL`. Helper ini
+ * tidak melihat status workflow; void hanya mengeluarkan baris dari
+ * perhitungan totalPaid tanpa hard-delete row supaya audit trail tetap
+ * lengkap.
+ */
+export function isActivePayment(payment: Pick<ClaimPaymentRow, "voidedAt">): boolean {
+    return payment.voidedAt === null || payment.voidedAt === undefined;
+}
+
+/**
+ * Sum nominal active payment. Nilai non-finite atau negatif diabaikan
+ * untuk mencegah drift kalau ada payment dengan amount NaN secara tidak
+ * sengaja.
+ */
+export function sumActivePayments(
+    payments: ReadonlyArray<Pick<ClaimPaymentRow, "paymentAmount" | "voidedAt">>,
+): number {
+    return payments.reduce((total, row) => {
+        if (!isActivePayment(row)) return total;
+        const amount = finiteAmount(Number(row.paymentAmount || 0));
+        if (amount <= 0) return total;
+        return total + amount;
+    }, 0);
+}
+
+/**
+ * Toleransi rounding untuk perbandingan totalPaid vs totalClaim. Sumber
+ * pembayaran di lapangan kadang dibulatkan ke rupiah penuh sehingga
+ * angka 12.345.678,49 vs 12.345.678 tidak boleh memblokir status `Paid`.
+ * Toleransi 1 rupiah cukup karena kalkulasi pajak existing juga sudah
+ * dibulatkan ke rupiah penuh (lihat `calculateClaimAmount`).
+ */
+export const PAYMENT_ROUNDING_TOLERANCE = 1;
+
+/**
+ * Derive status workflow dari totals. Tidak menyentuh DB / context.
+ *
+ * Rule:
+ * - totalPaid <= 0  → tetap di status sumber (Submitted to Principal kalau
+ *   belum ada pembayaran apapun). Caller bertanggung jawab mempertahankan
+ *   status sumber jika hasil derive `submittedToPrincipal` sementara
+ *   workflow masih Draft (mis. caller harus reject perubahan).
+ * - 0 < totalPaid < totalClaim → `Partially Paid`.
+ * - totalPaid >= totalClaim - tolerance → `Paid`.
+ */
+export function derivePaymentStatus(
+    totalClaim: number,
+    totalPaid: number,
+    tolerance: number = PAYMENT_ROUNDING_TOLERANCE,
+): string {
+    const claim = finiteAmount(totalClaim);
+    const paid = finiteAmount(totalPaid);
+    if (paid <= 0) return claimWorkflowStatuses.submittedToPrincipal;
+    if (paid + tolerance >= claim && claim > 0) return claimWorkflowStatuses.paid;
+    return claimWorkflowStatuses.partiallyPaid;
+}
+
+/**
+ * Recalc semua angka payment-related dari list payment + totalClaim.
+ * Mengembalikan totalPaid (sum active), remainingAmount (clamped >= 0),
+ * dan status yang akan dipakai oleh route untuk update workflow.
+ */
+export function recalcPaymentTotals(
+    totalClaim: number,
+    payments: ReadonlyArray<Pick<ClaimPaymentRow, "paymentAmount" | "voidedAt">>,
+): { totalPaid: number; remainingAmount: number; derivedStatus: string } {
+    const totalPaid = sumActivePayments(payments);
+    return {
+        totalPaid,
+        remainingAmount: calculateRemainingAmount(totalClaim, totalPaid),
+        derivedStatus: derivePaymentStatus(totalClaim, totalPaid),
+    };
 }
