@@ -48,15 +48,146 @@ Claim Workflow begins after that flow is finished. PEKA, EC, CN, and post-submis
 
 ## Creation Gate
 
-A Claim Workflow draft may be created from an OFF batch only when all conditions are true:
+A Claim Workflow draft may be created from an OFF batch only when the OFF
+batch has reached `omStatus = "Approved"`. Phase R1 deliberately decoupled
+Claim Workflow creation from OFF Completed so that claim users can prepare
+tax editing, assign No Claim, and generate the Claim Letter PDF in parallel
+with the Finance/Final verification work that still happens on the OFF
+side.
 
-- `off_batch.status = "Completed"`
-- `off_batch.finance_status = "Paid"` (`financeStatus` in Drizzle)
-- `off_batch.final_status = "Completed"` (`finalStatus` in Drizzle)
+- Required: `off_batch.om_status = "Approved"` (`omStatus` in Drizzle).
+- Not required at creation time: `off_batch.status = "Completed"`,
+  `off_batch.finance_status = "Paid"`, or `off_batch.final_status = "Completed"`.
 
 Only one `claim_workflow` is allowed for an `offBatchId`.
 
-Creation is an explicit privilege boundary: only a resolved OFF role of `admin` or `claim` may create a Claim Workflow from OFF. A user resolved as `staff` must never create one, even if broad or custom application RBAC data contains a create permission.
+Creation is an explicit privilege boundary: only a resolved OFF role of
+`admin` or `claim` may create a Claim Workflow from OFF. A user resolved as
+`staff` must never create one, even if broad or custom application RBAC
+data contains a create permission.
+
+OFF Completed (`final-claim` action `complete`) now requires the matching
+Claim Workflow to have a `noClaim` value, and every `off_batch_item`
+under the batch to have its `no_claim` synced. See Phase R1 below.
+
+## Phase R1 — Rewire OFF ↔ Claim No Claim
+
+Phase R1 unifies the No Claim source-of-truth at the Claim Workflow header
+and synchronises it down to OFF items, instead of asking Claim users to
+type No Claim manually inside the OFF Final Claim screen.
+
+### Schema additions
+
+`claim_workflow` gains three new columns:
+
+- `no_claim TEXT` — main No Claim for this Claim Workflow.
+- `no_claim_assigned_at INTEGER` — timestamp of last assignment.
+- `no_claim_assigned_by TEXT` — actor user id of last assignment.
+
+A partial unique index `idx_claim_workflow_no_claim_unique` enforces
+uniqueness of `no_claim` across `claim_workflow` rows, but only when
+`no_claim IS NOT NULL AND no_claim <> ''`. NULL values may repeat freely
+(many drafts without a No Claim). Backend rejects empty strings before
+writing.
+
+`scripts/init-db.mjs` is updated to add the columns and index to fresh
+local DBs, and to ALTER existing DBs without dropping data.
+
+### Endpoint: assign / update No Claim
+
+`PATCH /api/claim-workflow/[id]/no-claim` — `admin`/`claim` only.
+
+Request body:
+
+```json
+{ "noClaim": "09/SUPER-GCPI/02/2026" }
+```
+
+Validation:
+
+- `noClaim` must be a non-empty string after trim, max 120 characters.
+- `noClaim` must be unique across `claim_workflow` (other rows). The
+  endpoint pre-checks and also catches the SQLite UNIQUE constraint as a
+  defensive fallback for race conditions.
+- The Claim Workflow must exist; the actor must have access.
+
+Side effects (single transaction):
+
+1. Update `claim_workflow` with `noClaim`, `noClaimAssignedAt`,
+   `noClaimAssignedBy`, `updatedAt`.
+2. `UPDATE off_batch_item SET no_claim = ? WHERE batch_id = ?` for the
+   linked `off_batch_id` so every OFF item under the batch is synced.
+3. Insert audit `no_claim_assigned` (metadata: previousNoClaim,
+   newNoClaim, offBatchId, assignedBy).
+4. Insert audit `no_claim_synced_to_off` (metadata: previousNoClaim,
+   newNoClaim, offBatchId, syncedItemCount, assignedBy).
+
+If any step fails, the transaction rolls back and neither the workflow
+header nor the OFF items are updated.
+
+### Mark Ready validation (Phase R1 additions)
+
+`POST /api/claim-workflow/[id]/status` action `mark_ready` keeps the
+existing item/total checks and adds two more required-fields checks
+before allowing `Draft` or `Need Revision` → `Ready to Submit`:
+
+- `claim_workflow.no_claim` must be present (after trim).
+- `claim_workflow.claim_letter_pdf_path` must be present.
+
+If either is missing the route returns `422` with code
+`CLAIM_WORKFLOW_NO_CLAIM_REQUIRED` or `CLAIM_WORKFLOW_CLAIM_LETTER_REQUIRED`
+respectively. `mark_ready` does **not** auto-generate the PDF; the user
+must hit the Claim Letter generation endpoint first.
+
+### Claim Letter PDF generation in Draft / Need Revision
+
+`POST /api/claim-workflow/[id]/claim-letter` is now allowed from `Draft`
+and `Need Revision` (in addition to `Ready to Submit` and
+`Submitted to Principal`) so the user can satisfy the Mark Ready PDF
+prerequisite without first transitioning the workflow. Validation on
+items/totals stays the same.
+
+### OFF Completed gate (Phase R1 additions)
+
+`POST /api/off-program-control/batches/[id]/final-claim` action `complete`
+keeps the existing rules (Finance Paid, payments have proofs, totals
+match) and adds:
+
+- A Claim Workflow must exist for the OFF batch
+  (`claim_workflow.off_batch_id`). Otherwise `409` with code
+  `OFF_FINAL_CLAIM_WORKFLOW_REQUIRED`.
+- The Claim Workflow must have `no_claim` assigned. Otherwise `409` with
+  code `OFF_FINAL_NO_CLAIM_REQUIRED`.
+- Every `off_batch_item` row that has a `noSurat` must have a non-empty
+  `no_claim`. Otherwise `409` with code `OFF_FINAL_NO_CLAIM_NOT_SYNCED`.
+
+OFF Completed does **not** require Claim Workflow to be `Submitted to
+Principal`. The two workflows progress independently; the only crossover
+is the No Claim sync.
+
+The body field `claimRefs[].noClaim` is no longer used by the backend
+(the OFF item `no_claim` is read from the row already synced from Claim
+Workflow). Existing callers can keep sending it, but it has no effect.
+The OFF Final Claim UI now renders the No Claim column read-only and
+shows a hint to assign / update No Claim in Claim Workflow.
+
+### Status separation
+
+PEKA / EC / CN / payment / closed lifecycle remains exclusively in
+`claim_workflow.status`. OFF status fields stay limited to OFF approval
++ Finance + final-verification states. This was already a guardrail, and
+Phase R1 reaffirms it because the new cross-link via No Claim could
+otherwise tempt future contributors to push Claim status into OFF.
+
+### UI changes
+
+- Claim Workflow detail page (`/claim-workflow/[id]`) gains a "No Claim"
+  section that displays the value and assignment metadata when present,
+  and exposes input + Assign/Update buttons for `admin`/`claim`. Other
+  roles see read-only.
+- OFF Final Claim form (`/off-program-control` Claim tab → final claim
+  panel) shows the No Claim column read-only with a hint pointing at
+  Claim Workflow as the source of truth.
 
 ## Legacy Mapping
 

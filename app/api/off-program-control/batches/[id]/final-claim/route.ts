@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { offBatch, offBatchItem } from "@/db/schema";
+import { claimWorkflow, offBatch, offBatchItem } from "@/db/schema";
 import {
   canActorPerformOffAction,
   canOpenFinalClaim,
@@ -138,10 +138,64 @@ export async function POST(request: Request, context: Context) {
       );
     }
 
+    // Phase R1 — Rewire OFF ↔ Claim No Claim:
+    // Sumber kebenaran No Claim adalah claim_workflow.no_claim, bukan input
+    // manual per item di body. Validasi:
+    //   1. Claim Workflow untuk OFF batch ini sudah ada.
+    //   2. claim_workflow.no_claim sudah di-assign (non-empty).
+    //   3. Semua off_batch_item dengan noSurat sudah punya no_claim hasil
+    //      sync dari endpoint /api/claim-workflow/[id]/no-claim.
+    // OFF Completed TIDAK perlu menunggu Claim Workflow Submitted to
+    // Principal — rule kerja antar workflow tetap terpisah.
+    const [linkedWorkflow] = await db
+      .select({
+        id: claimWorkflow.id,
+        claimWorkflowNo: claimWorkflow.claimWorkflowNo,
+        noClaim: claimWorkflow.noClaim,
+        status: claimWorkflow.status,
+      })
+      .from(claimWorkflow)
+      .where(eq(claimWorkflow.offBatchId, id));
+    if (!linkedWorkflow) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "OFF_FINAL_CLAIM_WORKFLOW_REQUIRED",
+          error:
+            "Claim Workflow untuk OFF batch ini belum dibuat. Buat Claim Workflow terlebih dahulu.",
+        },
+        { status: 409 },
+      );
+    }
+    const workflowNoClaim = String(linkedWorkflow.noClaim || "").trim();
+    if (!workflowNoClaim) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "OFF_FINAL_NO_CLAIM_REQUIRED",
+          error: `Claim Workflow ${linkedWorkflow.claimWorkflowNo} belum memiliki No Claim. Assign No Claim di Claim Workflow terlebih dahulu.`,
+        },
+        { status: 409 },
+      );
+    }
+    const itemsMissingNoClaim = data.items
+      .filter((item) => String(item.noSurat || "").trim())
+      .filter((item) => !String(item.noClaim || "").trim())
+      .map((item) => String(item.noSurat || "").trim());
+    if (itemsMissingNoClaim.length > 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "OFF_FINAL_NO_CLAIM_NOT_SYNCED",
+          error: `No Claim belum tersinkron ke OFF item. Re-assign No Claim di Claim Workflow ${linkedWorkflow.claimWorkflowNo} untuk men-sync ulang. No Surat tanpa noClaim: ${itemsMissingNoClaim.join(", ")}`,
+        },
+        { status: 409 },
+      );
+    }
+
     type ClaimRef = {
       itemId: string;
       noSurat: string;
-      noClaim: string;
       finalKwt: boolean;
       finalSkp: boolean;
       finalFp: boolean;
@@ -153,11 +207,13 @@ export async function POST(request: Request, context: Context) {
       finalCompletenessNote: string;
     };
 
+    // Body tetap menerima claimRefs untuk checklist final per item.
+    // Field `noClaim` di body sengaja diabaikan — sumber kebenaran adalah
+    // claim_workflow.no_claim yang sudah ter-sync.
     const sanitizedClaimRefs: ClaimRef[] = claimRefs.map(
       (ref: Record<string, unknown>) => ({
         itemId: String(ref.itemId || "").trim(),
         noSurat: String(ref.noSurat || "").trim(),
-        noClaim: String(ref.noClaim || "").trim(),
         finalKwt: ref.finalKwt === true || ref.finalKwt === "true",
         finalSkp: ref.finalSkp === true || ref.finalSkp === "true",
         finalFp: ref.finalFp === true || ref.finalFp === "true",
@@ -173,22 +229,6 @@ export async function POST(request: Request, context: Context) {
     const claimRefMap = new Map<string, ClaimRef>(
       sanitizedClaimRefs.map((ref): [string, ClaimRef] => [ref.itemId, ref]),
     );
-
-    // Validasi: setiap item yang punya noSurat wajib punya noClaim
-    const missingNoClaim = data.items
-      .filter((item) => String(item.noSurat || "").trim())
-      .filter((item) => !claimRefMap.get(item.id)?.noClaim)
-      .map((item) => String(item.noSurat || "").trim());
-
-    if (missingNoClaim.length > 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: `No Claim wajib diisi untuk No Surat: ${missingNoClaim.join(", ")}`,
-        },
-        { status: 400 },
-      );
-    }
 
     // Validasi: setiap item minimal harus punya checklist final yang dianggap cukup
     const missingChecklist = data.items
@@ -218,7 +258,8 @@ export async function POST(request: Request, context: Context) {
         return db
           .update(offBatchItem)
           .set({
-            noClaim: ref.noClaim,
+            // No Claim TIDAK ditulis dari body. Tetap dipakai dari
+            // off_batch_item.no_claim hasil sync claim_workflow.
             finalKwt: ref.finalKwt,
             finalSkp: ref.finalSkp,
             finalFp: ref.finalFp,
@@ -257,6 +298,9 @@ export async function POST(request: Request, context: Context) {
         totalPaid: paymentSummary.totalPaid,
         paymentCount: data.payments.length,
         claimRefs: sanitizedClaimRefs,
+        claimWorkflowId: linkedWorkflow.id,
+        claimWorkflowNo: linkedWorkflow.claimWorkflowNo,
+        claimWorkflowNoClaim: workflowNoClaim,
       },
     });
     const updated = await getBatchWithItems(id);

@@ -24,7 +24,12 @@ function isPathInsideLettersDir(targetPath: string): boolean {
 }
 
 function generationAllowed(status: string) {
-    return status === claimWorkflowStatuses.readyToSubmit ||
+    // Phase R1: PDF wajib di-generate sebelum mark_ready, jadi generation
+    // harus diizinkan saat Draft / Need Revision juga. Tetap diizinkan saat
+    // Ready to Submit / Submitted to Principal untuk regenerate.
+    return status === claimWorkflowStatuses.draft ||
+        status === claimWorkflowStatuses.needRevision ||
+        status === claimWorkflowStatuses.readyToSubmit ||
         status === claimWorkflowStatuses.submittedToPrincipal;
 }
 
@@ -33,7 +38,7 @@ function validateGeneration(
     items: Array<typeof claimWorkflowItem.$inferSelect>,
 ) {
     if (!generationAllowed(workflow.status)) {
-        return "Claim Letter PDF hanya dapat dibuat saat status Ready to Submit atau Submitted to Principal.";
+        return "Claim Letter PDF tidak dapat dibuat pada status workflow saat ini.";
     }
     if (items.length === 0) return "Claim Letter PDF tidak dapat dibuat: workflow belum memiliki item.";
     if (!(Number(workflow.totalClaim || 0) > 0)) return "Claim Letter PDF tidak dapat dibuat: Total Claim harus lebih dari 0.";

@@ -56,14 +56,14 @@ export async function POST(request: NextRequest, context: Context) {
         if (!batch) {
             return NextResponse.json({ ok: false, error: "OFF batch not found" }, { status: 404 });
         }
-        if (
-            batch.status !== claimWorkflowOffRequirements.status ||
-            batch.financeStatus !== claimWorkflowOffRequirements.financeStatus ||
-            batch.finalStatus !== claimWorkflowOffRequirements.finalStatus
-        ) {
+        // Phase R1: Claim Workflow boleh dibuat setelah OFF OM Approved.
+        // Tidak perlu menunggu Finance Paid atau Final Completed lagi.
+        // OFF Completed tetap butuh No Claim Claim Workflow + sync ke
+        // off_batch_item.no_claim, divalidasi di route final-claim.
+        if (batch.omStatus !== claimWorkflowOffRequirements.omStatus) {
             return NextResponse.json({
                 ok: false,
-                error: "Claim Workflow hanya dapat dibuat setelah OFF Completed, Finance Paid, dan Final Completed.",
+                error: "Claim Workflow hanya dapat dibuat setelah OFF OM Approved.",
             }, { status: 409 });
         }
 

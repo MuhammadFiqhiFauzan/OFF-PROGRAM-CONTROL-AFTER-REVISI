@@ -513,6 +513,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0,
         hasPdf: false,
         hasSubmittedAt: false,
+        hasNoClaim: false,
     },
     {
         key: "need_revision",
@@ -521,6 +522,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0,
         hasPdf: false,
         hasSubmittedAt: false,
+        hasNoClaim: false,
     },
     {
         key: "ready_to_submit",
@@ -529,6 +531,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: false,
+        hasNoClaim: true,
     },
     {
         key: "submitted_to_principal",
@@ -537,6 +540,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: true,
+        hasNoClaim: true,
     },
     {
         key: "waiting_peka",
@@ -545,6 +549,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: true,
+        hasNoClaim: true,
     },
     {
         key: "ec_received",
@@ -553,6 +558,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: true,
+        hasNoClaim: true,
     },
     {
         key: "cn_received",
@@ -561,6 +567,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: true,
+        hasNoClaim: true,
     },
     {
         key: "partially_paid",
@@ -569,6 +576,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 0.5,
         hasPdf: true,
         hasSubmittedAt: true,
+        hasNoClaim: true,
     },
     {
         key: "paid",
@@ -577,6 +585,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 1,
         hasPdf: true,
         hasSubmittedAt: true,
+        hasNoClaim: true,
     },
     {
         key: "closed",
@@ -585,6 +594,7 @@ const CLAIM_WORKFLOW_CONFIGS = [
         paidFraction: 1,
         hasPdf: true,
         hasSubmittedAt: true,
+        hasNoClaim: true,
         isClosed: true,
     },
 ];
@@ -645,6 +655,12 @@ async function tryGenerateClaimLetterPdf(workflow) {
 async function insertClaimWorkflow(seq, config, offBatch, principle) {
     const id = randomUUID();
     const claimWorkflowNo = `DEMO-CLAIM-${String(seq).padStart(3, "0")}-${principle.code}`;
+    // Phase R1: noClaim utama disimpan di claim_workflow dan disinkronkan
+    // ke off_batch_item.no_claim. Demo memakai pola DEMO-NOCLAIM-{seq}/...
+    // supaya jelas bukan No Claim production.
+    const noClaim = config.hasNoClaim
+        ? `DEMO-NOCLAIM-${String(seq).padStart(3, "0")}/${principle.code}/${String(now.getFullYear())}`
+        : null;
 
     // Item dari OFF batch sumber. DPP = nominal item.
     const ppnRate = 11; // standar PPN saat ini
@@ -699,18 +715,30 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             id, off_batch_id, claim_workflow_no, principle_code, principle_name, status,
             total_dpp, total_ppn, total_pph, total_claim, total_paid, remaining_amount,
             submitted_to_principal_at, claim_letter_pdf_path, claim_letter_generated_at,
-            claim_letter_generated_by, closed_at, created_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            claim_letter_generated_by,
+            no_claim, no_claim_assigned_at, no_claim_assigned_by,
+            closed_at, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
             id, offBatch.batchId, claimWorkflowNo, principle.code, principle.name, config.status,
             totalDpp, totalPpn, totalPph, totalClaim, totalPaid, remainingAmount,
             config.hasSubmittedAt ? ms(6) : null,
             pdfPath, pdfGeneratedAt,
             pdfPath ? ACTOR_ID : null,
+            noClaim, noClaim ? ms(8) : null, noClaim ? ACTOR_ID : null,
             config.isClosed ? ms(1) : null,
             ACTOR_ID, ms(10), ms(1),
         ],
     });
+
+    // Sync noClaim ke semua off_batch_item milik OFF batch sumber claim ini.
+    // Ini meniru efek transaksi `PATCH /api/claim-workflow/[id]/no-claim`.
+    if (noClaim) {
+        await db.execute({
+            sql: `UPDATE off_batch_item SET no_claim = ?, updated_at = ? WHERE batch_id = ?`,
+            args: [noClaim, ms(8), offBatch.batchId],
+        });
+    }
 
     for (const item of items) {
         await db.execute({
@@ -755,6 +783,35 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             toStatus: "Ready to Submit",
             note: "DEMO seed",
             at: ms(8),
+        });
+    }
+    if (noClaim) {
+        auditEvents.push({
+            action: "no_claim_assigned",
+            fromStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
+            toStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
+            note: "DEMO seed: No Claim utama di-assign.",
+            at: ms(8),
+            metadataExtra: {
+                previousNoClaim: null,
+                newNoClaim: noClaim,
+                offBatchId: offBatch.batchId,
+                assignedBy: ACTOR_ID,
+            },
+        });
+        auditEvents.push({
+            action: "no_claim_synced_to_off",
+            fromStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
+            toStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
+            note: "DEMO seed: No Claim disinkronkan ke OFF item.",
+            at: ms(8),
+            metadataExtra: {
+                previousNoClaim: null,
+                newNoClaim: noClaim,
+                offBatchId: offBatch.batchId,
+                syncedItemCount: offBatch.items.length,
+                assignedBy: ACTOR_ID,
+            },
         });
     }
     if (pdfPath) {

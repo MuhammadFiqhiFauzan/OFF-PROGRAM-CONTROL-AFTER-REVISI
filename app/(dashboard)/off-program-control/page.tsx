@@ -533,10 +533,9 @@ function CreateClaimWorkflowButton({
 }) {
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
-  const eligible =
-    batch.status === "Completed" &&
-    batch.financeStatus === "Paid" &&
-    batch.finalStatus === "Completed";
+  // Phase R1: eligibility diturunkan ke OM Approved supaya Claim Workflow
+  // bisa mulai dipersiapkan tanpa menunggu Finance Paid + Final Completed.
+  const eligible = batch.omStatus === "Approved";
 
   if (!canCreate || !eligible) return null;
 
@@ -3928,15 +3927,19 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
       return;
     }
 
+    // Phase R1: noClaim per item dibaca read-only dari hasil sync Claim
+    // Workflow. Kalau masih kosong, beri petunjuk eksplisit untuk
+    // assign No Claim di Claim Workflow terlebih dahulu — bukan minta user
+    // mengisi manual di sini.
     const missingNoClaim = selectedFinalItems
       .filter((item) => item.noSurat)
       .filter((item) => !String(finalClaimRefs[item.id] || "").trim());
 
     if (missingNoClaim.length > 0) {
       setClaimMessage(
-        `No Claim wajib diisi untuk No Surat: ${missingNoClaim
+        `No Claim belum tersinkron dari Claim Workflow untuk No Surat: ${missingNoClaim
           .map((item) => item.noSurat)
-          .join(", ")}`,
+          .join(", ")}. Assign / update No Claim di Claim Workflow terkait, lalu reload halaman ini.`,
       );
       return;
     }
@@ -3973,7 +3976,8 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
         return {
           itemId: item.id,
           noSurat: item.noSurat,
-          noClaim: String(finalClaimRefs[item.id] || "").trim(),
+          // noClaim sengaja TIDAK dikirim. Backend mengabaikan body.noClaim
+          // dan memakai claim_workflow.no_claim sebagai sumber kebenaran.
           finalKwt: cl.finalKwt || false,
           finalSkp: cl.finalSkp || false,
           finalFp: cl.finalFp || false,
@@ -4770,14 +4774,10 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                             <td className="px-3 py-3">
                               <input
                                 value={finalClaimRefs[item.id] || ""}
-                                onChange={(event) =>
-                                  setFinalClaimRefs((current) => ({
-                                    ...current,
-                                    [item.id]: event.target.value,
-                                  }))
-                                }
-                                placeholder="Isi No Claim"
-                                className="w-full min-w-[160px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-mono text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                                readOnly
+                                placeholder="Sync dari Claim Workflow"
+                                title="No Claim disinkronkan otomatis dari Claim Workflow. Assign / update No Claim di halaman Claim Workflow."
+                                className="w-full min-w-[160px] cursor-not-allowed rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-sm font-mono text-slate-300 outline-none placeholder:text-slate-600"
                               />
                             </td>
                             <td className="px-3 py-3 min-w-[300px]">
@@ -4906,9 +4906,11 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               <Panel title="Form Verifikasi Final Claim" icon={ClipboardCheck}>
                 <InfoNote>
                   Claim mengecek bukti pembayaran, kesesuaian total pembayaran,
-                  dan mengisi No Claim per No Surat. Jika kelengkapan belum
-                  lengkap, gunakan pengingat web untuk SM & SPV. Jika sesuai,
-                  selesaikan pengajuan.
+                  dan checklist kelengkapan per No Surat. No Claim disinkronkan
+                  otomatis dari Claim Workflow terkait — assign / update No
+                  Claim di halaman Claim Workflow, lalu reload halaman ini.
+                  Jika kelengkapan belum lengkap, gunakan pengingat web untuk
+                  SM & SPV. Jika sesuai, selesaikan pengajuan.
                 </InfoNote>
                 <div className="mt-4">
                   <label className="block">

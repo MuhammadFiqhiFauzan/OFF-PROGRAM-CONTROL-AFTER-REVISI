@@ -18,8 +18,17 @@ export type ClaimWorkflowStatus =
 
 export const claimWorkflowStatusList = Object.values(claimWorkflowStatuses);
 
+/**
+ * Phase R1 — Rewire OFF ↔ Claim No Claim:
+ * Claim Workflow boleh dibuat setelah OFF OM Approved. Tidak perlu menunggu
+ * OFF Completed lagi. Persyaratan minimum dipersempit ke `omStatus = Approved`
+ * sehingga claim user bisa mempersiapkan tax editing dan generate claim
+ * letter PDF tanpa harus menunggu Finance Paid + Final Completed.
+ *
+ * OFF Completed tetap punya rule terpisah: butuh Finance Paid + No Claim
+ * Claim Workflow + sync ke off_batch_item.no_claim. Lihat
+ * app/api/off-program-control/batches/[id]/final-claim/route.ts.
+ */
 export const claimWorkflowOffRequirements = {
-    status: "Completed",
-    financeStatus: "Paid",
-    finalStatus: "Completed",
+    omStatus: "Approved",
 } as const;

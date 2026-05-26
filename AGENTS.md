@@ -81,12 +81,51 @@ Status final di `finalStatus`:
 
 ### 2B. Claim Workflow ke Principal
 
-`claim_workflow` baru boleh dibuat oleh role admin/claim **hanya jika**
-OFF Batch sumbernya memenuhi `claimWorkflowOffRequirements`:
+`claim_workflow` baru boleh dibuat oleh role admin/claim **hanya jika** OFF
+Batch sumbernya memenuhi `claimWorkflowOffRequirements`:
 
-- `offBatch.status === "Completed"`
-- `offBatch.financeStatus === "Paid"`
-- `offBatch.finalStatus === "Completed"`
+- `offBatch.omStatus === "Approved"` (status OM hasil approval di
+  OFF Program Control)
+
+Jadi Claim Workflow boleh disiapkan sejak OFF OM Approved, tidak perlu
+menunggu Finance Paid + Final Completed. Hubungan ke OFF Completed
+ditangani lewat **No Claim**, bukan lewat status sumber Claim Workflow.
+
+#### No Claim utama
+
+Phase R1 — Rewire OFF ↔ Claim No Claim:
+
+- No Claim utama disimpan di `claim_workflow.noClaim` (kolom
+  `no_claim`). Saat di-assign via `PATCH /api/claim-workflow/[id]/no-claim`
+  oleh role admin/claim, transaksi yang sama men-sync nilai itu ke semua
+  `off_batch_item.noClaim` pada OFF batch terkait. Empty string ditolak
+  di backend; partial unique index
+  `idx_claim_workflow_no_claim_unique` memastikan tidak ada dua
+  Claim Workflow yang punya No Claim sama.
+- Audit yang ditulis: `no_claim_assigned` dan `no_claim_synced_to_off`
+  di `claim_audit_log`.
+- Mark Ready (`mark_ready`) tetap wajib menulis Ready to Submit dan
+  ditambah validasi: `noClaim` harus ada, `claimLetterPdfPath` harus ada,
+  `totalClaim > 0`, dan setiap item DPP/Nilai Klaim > 0.
+- Generate Claim Letter PDF kini diizinkan sejak Draft / Need Revision
+  agar user bisa generate PDF dulu sebelum Mark Ready. Re-generate juga
+  diizinkan saat Ready to Submit / Submitted to Principal.
+
+#### OFF Completed butuh No Claim Claim Workflow
+
+Route `final-claim` di OFF (`POST /api/off-program-control/batches/[id]/final-claim`,
+action `complete`) sekarang menolak request bila salah satu kondisi
+berikut belum terpenuhi (di samping rule existing seperti Finance Paid):
+
+- Claim Workflow untuk OFF batch ini belum dibuat.
+- `claim_workflow.noClaim` belum di-assign.
+- Salah satu `off_batch_item.noClaim` belum tersinkron (NULL/empty).
+
+UI OFF Final Claim sekarang menampilkan No Claim per item sebagai
+read-only — input manual ditiadakan supaya tidak terjadi divergence
+antara Claim Workflow dan OFF.
+
+#### Status Claim Workflow
 
 Setelah dibuat, `claimWorkflow.status` bergerak di antara nilai berikut
 (dari `claimWorkflowStatuses`):

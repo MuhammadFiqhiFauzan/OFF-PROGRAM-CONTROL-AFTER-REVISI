@@ -140,6 +140,7 @@ export async function POST(request: Request, context: Context) {
 
         // Validation untuk mark_ready: workflow harus memiliki item dan
         // total/komponen pajak per item harus konsisten > 0 sebelum dilock.
+        // Phase R1: tambah wajib noClaim dan claimLetterPdfPath sudah ada.
         const items = await db
             .select()
             .from(claimWorkflowItem)
@@ -169,6 +170,21 @@ export async function POST(request: Request, context: Context) {
                     code: "CLAIM_WORKFLOW_ITEM_INVALID",
                     error: "Setiap item harus memiliki DPP dan Nilai Klaim lebih dari 0 sebelum Ready to Submit.",
                     itemId: invalidItem.id,
+                }, { status: 422 });
+            }
+            const noClaim = String(workflow.noClaim || "").trim();
+            if (!noClaim) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_WORKFLOW_NO_CLAIM_REQUIRED",
+                    error: "No Claim wajib diisi sebelum Ready to Submit. Assign No Claim terlebih dahulu.",
+                }, { status: 422 });
+            }
+            if (!workflow.claimLetterPdfPath) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_WORKFLOW_CLAIM_LETTER_REQUIRED",
+                    error: "Claim Letter PDF wajib di-generate sebelum Ready to Submit.",
                 }, { status: 422 });
             }
         }

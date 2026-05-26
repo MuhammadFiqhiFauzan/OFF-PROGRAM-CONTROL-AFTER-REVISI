@@ -284,6 +284,9 @@ const statements = [
     claim_letter_pdf_path TEXT,
     claim_letter_generated_at INTEGER,
     claim_letter_generated_by TEXT,
+    no_claim TEXT,
+    no_claim_assigned_at INTEGER,
+    no_claim_assigned_by TEXT,
     closed_at INTEGER,
     created_by TEXT,
     created_at INTEGER NOT NULL,
@@ -441,6 +444,13 @@ const migrations = [
   `ALTER TABLE claim_workflow ADD COLUMN claim_letter_pdf_path TEXT;`,
   `ALTER TABLE claim_workflow ADD COLUMN claim_letter_generated_at INTEGER;`,
   `ALTER TABLE claim_workflow ADD COLUMN claim_letter_generated_by TEXT;`,
+  // Phase R1 — Rewire OFF ↔ Claim No Claim:
+  // No Claim utama disimpan di claim_workflow dan disinkronkan ke
+  // off_batch_item.no_claim saat di-assign. Lihat
+  // app/api/claim-workflow/[id]/no-claim/route.ts.
+  `ALTER TABLE claim_workflow ADD COLUMN no_claim TEXT;`,
+  `ALTER TABLE claim_workflow ADD COLUMN no_claim_assigned_at INTEGER;`,
+  `ALTER TABLE claim_workflow ADD COLUMN no_claim_assigned_by TEXT;`,
 ];
 
 for (const sql of migrations) {
@@ -457,6 +467,16 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_principle_code ON claim_workflow(principle_code);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_status ON claim_workflow(status);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_created_at ON claim_workflow(created_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_workflow_no_claim ON claim_workflow(no_claim);`,
+  // Partial unique index supaya:
+  //  - banyak baris boleh punya no_claim NULL (workflow yang belum di-assign).
+  //  - empty string tidak boleh disimpan (validasi tetap di backend), tapi
+  //    kalau lolos pun, baris dengan empty string akan dianggap sama dan
+  //    bentrok di unique index ini.
+  //  - dua workflow yang sudah di-assign tidak boleh punya no_claim sama.
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_workflow_no_claim_unique
+    ON claim_workflow(no_claim)
+    WHERE no_claim IS NOT NULL AND no_claim <> '';`,
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_workflow_id ON claim_workflow_item(claim_workflow_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_off_batch_item_id ON claim_workflow_item(off_batch_item_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_payment_workflow_id ON claim_payment(claim_workflow_id);`,

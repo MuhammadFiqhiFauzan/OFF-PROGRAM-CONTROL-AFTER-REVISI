@@ -265,6 +265,15 @@ export const claimWorkflow = sqliteTable("claim_workflow", {
     claimLetterPdfPath: text("claim_letter_pdf_path"),
     claimLetterGeneratedAt: integer("claim_letter_generated_at", { mode: "timestamp" }),
     claimLetterGeneratedBy: text("claim_letter_generated_by"),
+    // No Claim utama untuk Claim Workflow. Disuplai oleh role admin/claim
+    // setelah workflow dibuat. Saat di-set, di-sync ke semua
+    // off_batch_item.no_claim pada OFF batch terkait dalam transaksi yang
+    // sama. Empty string tidak boleh disimpan; gunakan NULL untuk "belum
+    // ada". Lihat partial unique index `idx_claim_workflow_no_claim_unique`
+    // di scripts/init-db.mjs.
+    noClaim: text("no_claim"),
+    noClaimAssignedAt: integer("no_claim_assigned_at", { mode: "timestamp" }),
+    noClaimAssignedBy: text("no_claim_assigned_by"),
     closedAt: integer("closed_at", { mode: "timestamp" }),
     createdBy: text("created_by"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
@@ -273,6 +282,7 @@ export const claimWorkflow = sqliteTable("claim_workflow", {
     principleCodeIdx: index("idx_claim_workflow_principle_code").on(table.principleCode),
     statusIdx: index("idx_claim_workflow_status").on(table.status),
     createdAtIdx: index("idx_claim_workflow_created_at").on(table.createdAt),
+    noClaimIdx: index("idx_claim_workflow_no_claim").on(table.noClaim),
 }));
 
 export const claimWorkflowItem = sqliteTable("claim_workflow_item", {

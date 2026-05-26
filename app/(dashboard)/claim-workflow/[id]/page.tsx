@@ -28,6 +28,10 @@ type Workflow = {
   claimLetterPdfPath?: string | null;
   claimLetterGeneratedAt?: string | Date | null;
   claimLetterGeneratedBy?: string | null;
+  noClaim?: string | null;
+  noClaimAssignedAt?: string | Date | null;
+  noClaimAssignedBy?: string | null;
+  noClaimAssignedByName?: string | null;
   createdAt: string | Date;
 };
 
@@ -66,6 +70,7 @@ type DetailResult = {
   payments?: unknown[];
   canEditItems?: boolean;
   canGenerateClaimLetter?: boolean;
+  canAssignNoClaim?: boolean;
 };
 
 type EditDraft = {
@@ -166,6 +171,7 @@ export default function ClaimWorkflowDetailPage() {
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [canEditItems, setCanEditItems] = useState(false);
   const [canGenerateClaimLetter, setCanGenerateClaimLetter] = useState(false);
+  const [canAssignNoClaim, setCanAssignNoClaim] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditError, setAuditError] = useState("");
@@ -175,6 +181,9 @@ export default function ClaimWorkflowDetailPage() {
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [transitionLoading, setTransitionLoading] = useState<TransitionAction | "">("");
   const [generatingLetter, setGeneratingLetter] = useState(false);
+  const [noClaimDraft, setNoClaimDraft] = useState("");
+  const [noClaimSaving, setNoClaimSaving] = useState(false);
+  const [noClaimEditing, setNoClaimEditing] = useState(false);
   const [pekaPreviews, setPekaPreviews] = useState<PekaMatchPreview[] | null>(null);
   const [pekaSummary, setPekaSummary] = useState<PekaMatchSummary | null>(null);
   const [pekaLoading, setPekaLoading] = useState(false);
@@ -197,6 +206,12 @@ export default function ClaimWorkflowDetailPage() {
       setItems(result.items || []);
       setCanEditItems(Boolean(result.canEditItems));
       setCanGenerateClaimLetter(Boolean(result.canGenerateClaimLetter));
+      setCanAssignNoClaim(Boolean(result.canAssignNoClaim));
+      // Sinkronkan draft input dengan nilai No Claim terbaru, kecuali user
+      // sedang mengetik (noClaimEditing true).
+      if (!noClaimEditing) {
+        setNoClaimDraft(result.workflow.noClaim || "");
+      }
 
       const auditResponse = await fetch(`/api/claim-workflow/${id}/audit`, {
         cache: "no-store",
@@ -221,7 +236,7 @@ export default function ClaimWorkflowDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, noClaimEditing]);
 
   useEffect(() => {
     void loadDetail();
@@ -369,6 +384,48 @@ export default function ClaimWorkflowDetailPage() {
     }
   };
 
+  const submitNoClaim = async () => {
+    const trimmed = noClaimDraft.trim();
+    if (!trimmed) {
+      const blankMessage = "No Claim tidak boleh kosong.";
+      toast.error(blankMessage);
+      setMessage(blankMessage);
+      return;
+    }
+    setNoClaimSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/claim-workflow/${id}/no-claim`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noClaim: trimmed }),
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        sync?: { syncedItemCount?: number };
+      };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal menyimpan No Claim.");
+      }
+      const syncedItemCount = result.sync?.syncedItemCount ?? 0;
+      const successMessage = `No Claim tersimpan dan sync ke ${syncedItemCount} OFF item.`;
+      toast.success(successMessage);
+      setMessage(successMessage);
+      setNoClaimEditing(false);
+      await loadDetail();
+    } catch (saveError) {
+      const errorMessage =
+        saveError instanceof Error
+          ? saveError.message
+          : "Gagal menyimpan No Claim.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setNoClaimSaving(false);
+    }
+  };
+
   const loadPekaMatches = useCallback(async () => {
     if (!id) return;
     setPekaLoading(true);
@@ -482,6 +539,93 @@ export default function ClaimWorkflowDetailPage() {
           {message}
         </div>
       )}
+
+      <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-white">No Claim</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              No Claim utama untuk Claim Workflow ini. Saat di-assign, otomatis sync ke semua OFF item terkait.
+            </p>
+            {workflow.noClaim ? (
+              <div className="mt-3 space-y-1">
+                <p className="font-mono text-base font-bold text-emerald-200">
+                  {workflow.noClaim}
+                </p>
+                {workflow.noClaimAssignedAt && (
+                  <p className="text-xs text-slate-500">
+                    Assigned at {dateText(workflow.noClaimAssignedAt)}
+                    {(workflow.noClaimAssignedByName || workflow.noClaimAssignedBy)
+                      ? ` by ${workflow.noClaimAssignedByName || workflow.noClaimAssignedBy}`
+                      : ""}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-amber-200">
+                Belum di-assign. Wajib di-assign sebelum Mark Ready.
+              </p>
+            )}
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:max-w-md">
+            {canAssignNoClaim ? (
+              noClaimEditing || !workflow.noClaim ? (
+                <>
+                  <input
+                    type="text"
+                    value={noClaimDraft}
+                    onChange={(event) => {
+                      setNoClaimEditing(true);
+                      setNoClaimDraft(event.target.value);
+                    }}
+                    placeholder="Contoh: 09/SUPER-GCPI/02/2026"
+                    disabled={noClaimSaving}
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                  />
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {workflow.noClaim && (
+                      <button
+                        type="button"
+                        disabled={noClaimSaving}
+                        onClick={() => {
+                          setNoClaimEditing(false);
+                          setNoClaimDraft(workflow.noClaim || "");
+                        }}
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
+                      >
+                        Batal
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={noClaimSaving}
+                      onClick={() => void submitNoClaim()}
+                      className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+                    >
+                      {noClaimSaving ? "Menyimpan..." : workflow.noClaim ? "Update No Claim" : "Assign No Claim"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNoClaimEditing(true);
+                    setNoClaimDraft(workflow.noClaim || "");
+                  }}
+                  className="self-end rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-200 transition hover:bg-indigo-500/20"
+                >
+                  Edit No Claim
+                </button>
+              )
+            ) : (
+              <p className="text-xs italic text-slate-500">
+                View-only. Hanya admin atau claim yang dapat assign / update No Claim.
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">

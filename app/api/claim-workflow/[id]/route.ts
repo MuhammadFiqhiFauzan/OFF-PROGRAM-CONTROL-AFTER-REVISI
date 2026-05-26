@@ -6,6 +6,7 @@ import {
     claimWorkflow,
     claimWorkflowItem,
     offBatch,
+    user,
 } from "@/db/schema";
 import {
     canActorReadClaimWorkflow,
@@ -48,17 +49,36 @@ export async function GET(_request: Request, context: Context) {
             .from(claimPayment)
             .where(eq(claimPayment.claimWorkflowId, id))
             .orderBy(asc(claimPayment.createdAt));
+        // Resolve display name untuk No Claim assignor agar UI tidak harus
+        // join sendiri. Aman: kalau noClaimAssignedBy NULL, lewati query.
+        let noClaimAssignedByName: string | null = null;
+        if (row.workflow.noClaimAssignedBy) {
+            const [assignor] = await db
+                .select({ name: user.name })
+                .from(user)
+                .where(eq(user.id, row.workflow.noClaimAssignedBy));
+            noClaimAssignedByName = assignor?.name ?? null;
+        }
         const canManageClaim = actor.role === "admin" || actor.role === "claim";
+        // Phase R1: Claim Letter PDF dapat di-generate sejak Draft / Need
+        // Revision. User wajib generate PDF dulu sebelum Mark Ready, karena
+        // mark_ready memvalidasi `claimLetterPdfPath`. Generation tetap
+        // tersedia di Ready to Submit / Submitted to Principal untuk
+        // mengganti PDF aktif (regenerate skenario kecil).
         const canGenerateClaimLetter = canManageClaim && (
+            row.workflow.status === claimWorkflowStatuses.draft ||
+            row.workflow.status === claimWorkflowStatuses.needRevision ||
             row.workflow.status === claimWorkflowStatuses.readyToSubmit ||
             row.workflow.status === claimWorkflowStatuses.submittedToPrincipal
         );
+        const canAssignNoClaim = canManageClaim;
 
         return NextResponse.json({
             ok: true,
             workflow: {
                 ...row.workflow,
                 offNoPengajuan: row.offNoPengajuan,
+                noClaimAssignedByName,
             },
             offBatch: {
                 id: row.workflow.offBatchId,
@@ -68,6 +88,7 @@ export async function GET(_request: Request, context: Context) {
             payments,
             canEditItems: canManageClaim,
             canGenerateClaimLetter,
+            canAssignNoClaim,
         });
     } catch (error) {
         console.error("[CLAIM WORKFLOW DETAIL ERROR]", error);
