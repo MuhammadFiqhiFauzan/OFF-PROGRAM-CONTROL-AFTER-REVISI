@@ -73,8 +73,8 @@ export function canActorReadClaimAudit(actor: ClaimSessionActor | null): boolean
  * Penting: gate ini SENGAJA tidak fallback ke `canAccess("claim_workflow",
  * "create", ...)`. Walaupun RBAC modular punya action `create`, role staff
  * (dan custom permission) tidak boleh dipakai untuk membuat Claim Workflow
- * dari OFF. No Surat dan komponen pajak akan dipakai matching PEKA/EC/CN
- * di phase berikutnya, jadi pembuatan harus tetap eksklusif admin/claim.
+ * dari OFF. No Surat dan komponen pajak adalah data pajak yang sensitif,
+ * jadi pembuatan harus tetap eksklusif admin/claim.
  */
 export function canActorCreateClaimWorkflow(actor: ClaimSessionActor | null): boolean {
     return isPrivilegedClaimRole(actor);

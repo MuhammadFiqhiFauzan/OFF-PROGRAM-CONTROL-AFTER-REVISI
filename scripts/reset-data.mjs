@@ -36,6 +36,11 @@ if (!filePath || filePath.startsWith("/app/")) {
 
 // Tabel data transaksional yang akan dikosongkan.
 // Order penting karena ada foreign key (child dulu baru parent).
+//
+// Catatan cleanup PEKA (Mei 2026): tabel `claim_peka_report` sudah retired
+// dari skema aktif. Kalau DB lokal lama masih punya tabel itu, baris-baris
+// nya tetap dibersihkan supaya tidak ada residu legacy. Tabel yang tidak
+// ada di DB di-skip secara otomatis.
 const tables = [
     "claim_audit_log",
     "claim_payment",
@@ -52,6 +57,14 @@ const tables = [
 
 const db = createClient({ url: databaseUrl });
 
+async function tableExists(name) {
+    const result = await db.execute({
+        sql: "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        args: [name],
+    });
+    return result.rows.length > 0;
+}
+
 async function main() {
     console.log(`Database: ${databaseUrl}`);
     console.log("");
@@ -61,6 +74,10 @@ async function main() {
 
     let totalDeleted = 0;
     for (const table of tables) {
+        if (!(await tableExists(table))) {
+            console.log(`  [skip] ${table.padEnd(22)} tabel tidak ada (legacy / belum dibuat)`);
+            continue;
+        }
         const before = await db.execute(`SELECT COUNT(*) AS n FROM ${table}`);
         const count = Number(before.rows[0]?.n || 0);
         if (count === 0) {

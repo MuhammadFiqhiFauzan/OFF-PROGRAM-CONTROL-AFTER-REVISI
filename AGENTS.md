@@ -169,13 +169,7 @@ Draft
 Ready to Submit
     ↓ (submit ke principal)
 Submitted to Principal
-    ↓ (menunggu PEKA principal)
-Waiting PEKA
-    ↓
-EC Received
-    ↓
-CN Received
-    ↓ (pembayaran masuk dari principal)
+    ↓ (pembayaran masuk dari principal — R3)
 Partially Paid → Paid
     ↓
 Closed
@@ -184,8 +178,15 @@ Closed
 Status non-linear yang valid:
 
 - `Need Revision` (kembali ke Draft untuk koreksi item/pajak)
-- `Outstanding` (klaim lewat deadline tanpa dibayar)
+- `Outstanding` (klaim lewat deadline tanpa dibayar lengkap)
 - `Cancelled`
+
+Status legacy `Waiting PEKA`, `EC Received`, dan `CN Received` sudah
+**retired** (Mei 2026). Tidak boleh dipakai untuk transisi baru. Lihat
+`docs/CLAIM_WORKFLOW_AI_CONTEXT.md` bagian "Cleanup PEKA / EC / CN" untuk
+detail. UI menampilkan status legacy tersebut sebagai fallback
+`Submitted to Principal` lewat `displayClaimStatusLabel` /
+`isLegacyPekaStatus`.
 
 ### 2C. Aturan Transisi (Berlaku Untuk Kedua Workflow)
 
@@ -326,7 +327,7 @@ Aturan ini tidak boleh dilanggar oleh patch apa pun.
   konfirmasi.
 - Status OFF (mis. `Approved by SM`, `OM Approved`) **bukan** status
   Claim Workflow. Status Claim Workflow (mis. `Submitted to Principal`,
-  `Waiting PEKA`) **bukan** status OFF. Jangan menyamakan.
+  `Partially Paid`, `Closed`) **bukan** status OFF. Jangan menyamakan.
 - Audit OFF ditulis ke `off_audit_log`, audit Claim Workflow ditulis ke
   `claim_audit_log`. Jangan menulis audit Claim ke tabel OFF atau
   sebaliknya.

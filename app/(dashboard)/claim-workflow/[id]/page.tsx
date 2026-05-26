@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { claimWorkflowStatuses } from "@/lib/claim-workflow/constants";
+import {
+  claimWorkflowStatuses,
+  displayClaimStatusLabel,
+  isLegacyPekaStatus,
+} from "@/lib/claim-workflow/constants";
 
 type TransitionAction =
   | "mark_ready"
@@ -53,8 +57,6 @@ type WorkflowItem = {
   pphRate: number;
   pphAmount: number;
   nilaiKlaim: number;
-  ecPeka?: string | null;
-  cnNumber?: string | null;
   status: string;
   note?: string | null;
 };
@@ -88,48 +90,6 @@ type EditDraft = {
   note: string;
 };
 
-type PekaMatchSnapshot = {
-  pekaId: string;
-  ecNumber?: string | null;
-  cnNumber?: string | null;
-  claimNo?: string | null;
-  totalClaim: number;
-  pendingUser?: string | null;
-  leadTime?: number | null;
-  age?: number | null;
-  note?: string | null;
-  sourceFile: string;
-  importedAt?: string | Date | null;
-};
-
-type PekaMatchPreview = {
-  itemId: string;
-  noSurat: string;
-  normalizedNoSurat: string;
-  jenisPromosi?: string | null;
-  periode?: string | null;
-  nilaiKlaim: number;
-  matchedCount: number;
-  status: "unmatched" | "matched" | "duplicate_match";
-  bestMatch?: PekaMatchSnapshot;
-  conflictMatches?: PekaMatchSnapshot[];
-};
-
-type PekaMatchSummary = {
-  itemCount: number;
-  matched: number;
-  unmatched: number;
-  duplicate: number;
-  pekaRowCount: number;
-};
-
-type PekaMatchResult = {
-  ok?: boolean;
-  error?: string;
-  previews?: PekaMatchPreview[];
-  summary?: PekaMatchSummary;
-};
-
 function rupiah(value: number) {
   return `Rp ${Number(value || 0).toLocaleString("id-ID")}`;
 }
@@ -146,6 +106,9 @@ function dateText(value: string | Date) {
   }).format(date);
 }
 
+// Legacy PEKA statuses are displayed in the same tone as Submitted to
+// Principal because the PEKA workflow has been retired. The detail page
+// must not crash on legacy rows but also must not expose any PEKA action.
 function statusTone(status: string) {
   if (status === claimWorkflowStatuses.paid || status === claimWorkflowStatuses.closed) {
     return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
@@ -155,9 +118,15 @@ function statusTone(status: string) {
   }
   if (
     status === claimWorkflowStatuses.submittedToPrincipal ||
-    status === claimWorkflowStatuses.waitingPeka
+    isLegacyPekaStatus(status)
   ) {
     return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  }
+  if (status === claimWorkflowStatuses.partiallyPaid) {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+  }
+  if (status === claimWorkflowStatuses.outstanding) {
+    return "border-orange-500/30 bg-orange-500/10 text-orange-300";
   }
   if (status === claimWorkflowStatuses.readyToSubmit) {
     return "border-indigo-500/30 bg-indigo-500/10 text-indigo-200";
@@ -196,10 +165,6 @@ export default function ClaimWorkflowDetailPage() {
   const [noClaimDraft, setNoClaimDraft] = useState("");
   const [noClaimSaving, setNoClaimSaving] = useState(false);
   const [noClaimEditing, setNoClaimEditing] = useState(false);
-  const [pekaPreviews, setPekaPreviews] = useState<PekaMatchPreview[] | null>(null);
-  const [pekaSummary, setPekaSummary] = useState<PekaMatchSummary | null>(null);
-  const [pekaLoading, setPekaLoading] = useState(false);
-  const [pekaError, setPekaError] = useState("");
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -315,8 +280,9 @@ export default function ClaimWorkflowDetailPage() {
         if (!confirmed) return;
       } else if (action === "return_to_draft") {
         // Backend mewajibkan note non-kosong untuk return_to_draft karena
-        // aksi ini menginvalidasi Claim Letter PDF aktif dan membuka kembali
-        // tax editing. Tolak input kosong di sisi UI sebelum hit API.
+        // aksi ini menginvalidasi tiga dokumen aktif (Claim Letter, Summary,
+        // Kwitansi) dan membuka kembali tax editing. Tolak input kosong di
+        // sisi UI sebelum hit API.
         if (typeof window === "undefined") return;
         const reason = window.prompt(
           "Alasan mengembalikan Claim Workflow ke Draft (wajib diisi):",
@@ -494,29 +460,6 @@ export default function ClaimWorkflowDetailPage() {
     }
   };
 
-  const loadPekaMatches = useCallback(async () => {
-    if (!id) return;
-    setPekaLoading(true);
-    setPekaError("");
-    try {
-      const response = await fetch(`/api/claim-workflow/${id}/peka-matches`, {
-        cache: "no-store",
-      });
-      const result = (await response.json()) as PekaMatchResult;
-      if (!response.ok || !result.ok || !result.previews) {
-        throw new Error(result.error || "Gagal memuat preview PEKA.");
-      }
-      setPekaPreviews(result.previews);
-      setPekaSummary(result.summary || null);
-    } catch (loadError) {
-      setPekaError(
-        loadError instanceof Error ? loadError.message : "Gagal memuat preview PEKA.",
-      );
-    } finally {
-      setPekaLoading(false);
-    }
-  }, [id]);
-
   if (loading) {
     return <div className="px-5 py-12 text-sm text-slate-400">Memuat detail Claim Workflow...</div>;
   }
@@ -533,9 +476,11 @@ export default function ClaimWorkflowDetailPage() {
     ["Remaining Amount", rupiah(workflow.remainingAmount)],
   ];
 
-  // Phase 2B: tombol transisi hanya untuk status Draft / Need Revision
-  // (Mark Ready) dan Ready to Submit (Return to Draft, Submit to Principal).
-  // Status setelah Submitted to Principal belum punya transisi di phase ini.
+  // Status setelah Submitted to Principal belum punya transisi UI di phase
+  // ini — Partially Paid / Paid akan otomatis ditulis lewat payment workflow
+  // (R3). Closed akan diatur lewat close endpoint terpisah (R4). Status
+  // legacy PEKA tidak menyediakan transisi apapun supaya tidak menghidupkan
+  // kembali alur PEKA.
   const transitions: TransitionAction[] =
     workflow.status === claimWorkflowStatuses.draft ||
     workflow.status === claimWorkflowStatuses.needRevision
@@ -543,6 +488,8 @@ export default function ClaimWorkflowDetailPage() {
       : workflow.status === claimWorkflowStatuses.readyToSubmit
         ? ["return_to_draft", "submit_to_principal"]
         : [];
+
+  const showLegacyNotice = isLegacyPekaStatus(workflow.status);
 
   return (
     <div className="w-full space-y-6 pb-12 pt-2">
@@ -566,8 +513,11 @@ export default function ClaimWorkflowDetailPage() {
             )}
           </div>
           <div className="flex flex-col items-end gap-3">
-            <span className={`rounded-full border px-3 py-1.5 text-sm font-bold ${statusTone(workflow.status)}`}>
-              {workflow.status}
+            <span
+              className={`rounded-full border px-3 py-1.5 text-sm font-bold ${statusTone(workflow.status)}`}
+              title={showLegacyNotice ? "Legacy PEKA status — diperlakukan sebagai Submitted to Principal" : undefined}
+            >
+              {displayClaimStatusLabel(workflow.status)}
             </span>
             {canEditItems && transitions.length > 0 && (
               <div className="flex flex-wrap justify-end gap-2">
@@ -600,6 +550,11 @@ export default function ClaimWorkflowDetailPage() {
             </div>
           ))}
         </div>
+        {showLegacyNotice && (
+          <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+            Workflow ini masih memiliki status legacy PEKA ({workflow.status}). Alur PEKA/EC/CN sudah retired; status ini sekarang diperlakukan sebagai Submitted to Principal. Pembayaran principal akan ditangani via Principal Payment workflow (R3).
+          </p>
+        )}
       </section>
 
       {message && (
@@ -868,7 +823,7 @@ export default function ClaimWorkflowDetailPage() {
           </div>
         ) : (
           <div className="max-h-[640px] overflow-auto">
-            <table className="min-w-[1650px] text-left text-sm">
+            <table className="min-w-[1450px] text-left text-sm">
               <thead className="sticky top-0 z-20 bg-[#1a1c23]/95 text-xs uppercase tracking-wider text-slate-500 backdrop-blur supports-[backdrop-filter]:bg-[#1a1c23]/70">
                 <tr className="border-b border-white/10">
                   <th scope="col" className="sticky left-0 z-30 bg-[#1a1c23]/95 px-4 py-3 font-semibold backdrop-blur supports-[backdrop-filter]:bg-[#1a1c23]/70">No Surat</th>
@@ -881,8 +836,6 @@ export default function ClaimWorkflowDetailPage() {
                   <th scope="col" className="px-4 py-3 text-right font-semibold">PPH Rate</th>
                   <th scope="col" className="px-4 py-3 text-right font-semibold">PPH Amount</th>
                   <th scope="col" className="px-4 py-3 text-right font-semibold">Nilai Klaim</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">EC PEKA</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">CN Number</th>
                   <th scope="col" className="px-4 py-3 font-semibold">Status</th>
                   <th scope="col" className="px-4 py-3 font-semibold">Action</th>
                 </tr>
@@ -946,8 +899,6 @@ export default function ClaimWorkflowDetailPage() {
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-300">{rupiah(item.pphAmount)}</td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums text-white">{rupiah(item.nilaiKlaim)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-300">{item.ecPeka || "-"}</td>
-                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-300">{item.cnNumber || "-"}</td>
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs font-semibold text-slate-300">
                           {item.status}
@@ -1001,121 +952,6 @@ export default function ClaimWorkflowDetailPage() {
               </tbody>
             </table>
           </div>
-        )}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23] shadow-lg shadow-black/20">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
-          <div>
-            <h2 className="font-bold text-white">PEKA Preview</h2>
-            <p className="mt-1 text-xs text-slate-400">
-              Pratinjau matching No Surat dengan PEKA report. Phase 3A: preview saja, EC/CN tidak otomatis ditulis ke item.
-            </p>
-            {pekaSummary && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-slate-300">
-                  <span className="font-semibold text-white">{pekaSummary.itemCount}</span> item
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-emerald-300">
-                  <span className="font-semibold">{pekaSummary.matched}</span> matched
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-500/30 bg-slate-500/10 px-2.5 py-1 text-slate-300">
-                  <span className="font-semibold">{pekaSummary.unmatched}</span> unmatched
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-300">
-                  <span className="font-semibold">{pekaSummary.duplicate}</span> duplicate
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-slate-400">
-                  PEKA rows: <span className="font-semibold text-slate-200">{pekaSummary.pekaRowCount}</span>
-                </span>
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            disabled={pekaLoading}
-            onClick={() => void loadPekaMatches()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
-          >
-            {pekaLoading ? "Memuat..." : pekaPreviews ? "Refresh PEKA Matches" : "Load PEKA Matches"}
-          </button>
-        </div>
-        {pekaError && (
-          <div className="mx-5 my-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
-            {pekaError}
-          </div>
-        )}
-        {pekaPreviews && pekaPreviews.length > 0 && (
-          <div className="max-h-[640px] overflow-auto">
-            <table className="min-w-[1200px] text-left text-sm">
-              <thead className="sticky top-0 z-20 bg-[#1a1c23]/95 text-xs uppercase tracking-wider text-slate-500 backdrop-blur supports-[backdrop-filter]:bg-[#1a1c23]/70">
-                <tr className="border-b border-white/10">
-                  <th scope="col" className="sticky left-0 z-30 bg-[#1a1c23]/95 px-4 py-3 font-semibold backdrop-blur supports-[backdrop-filter]:bg-[#1a1c23]/70">No Surat</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">Jenis Promosi</th>
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Nilai Klaim</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">Status</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">EC</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">CN</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">Pending User</th>
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Lead Time</th>
-                  <th scope="col" className="px-4 py-3 font-semibold">Source File</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {pekaPreviews.map((row) => {
-                  const tone =
-                    row.status === "matched"
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                      : row.status === "duplicate_match"
-                        ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-                        : "border-slate-500/30 bg-slate-500/10 text-slate-400";
-                  const label =
-                    row.status === "matched"
-                      ? "Matched"
-                      : row.status === "duplicate_match"
-                        ? `Duplicate (${row.matchedCount})`
-                        : "Belum cocok";
-                  const best = row.bestMatch;
-                  return (
-                    <tr key={row.itemId} className="align-top text-slate-300 transition-colors hover:bg-white/[0.03]">
-                      <td className="sticky left-0 z-10 whitespace-nowrap bg-[#1a1c23] px-4 py-3 font-mono text-slate-100">
-                        {row.noSurat || "-"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-200">{row.jenisPromosi || "-"}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-white">
-                        {rupiah(row.nilaiKlaim)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${tone}`}>
-                          {label}
-                        </span>
-                        {row.status === "duplicate_match" && row.conflictMatches && row.conflictMatches.length > 0 && (
-                          <p className="mt-2 text-xs leading-relaxed text-amber-200">
-                            {row.conflictMatches.length} konflik tambahan, perlu review manual sebelum apply.
-                          </p>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-300">{best?.ecNumber || "-"}</td>
-                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-300">{best?.cnNumber || "-"}</td>
-                      <td className="px-4 py-3 text-slate-300">{best?.pendingUser || "-"}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-300">{best?.leadTime ?? "-"}</td>
-                      <td className="px-4 py-3 text-xs text-slate-400">{best?.sourceFile || "-"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {pekaPreviews && pekaPreviews.length === 0 && (
-          <p className="px-5 py-12 text-center text-sm text-slate-500">
-            Tidak ada item untuk dipratinjau.
-          </p>
-        )}
-        {!pekaPreviews && !pekaError && !pekaLoading && (
-          <p className="px-5 py-12 text-center text-sm text-slate-500">
-            Klik <span className="font-semibold text-slate-300">Load PEKA Matches</span> untuk memuat preview.
-          </p>
         )}
       </section>
 

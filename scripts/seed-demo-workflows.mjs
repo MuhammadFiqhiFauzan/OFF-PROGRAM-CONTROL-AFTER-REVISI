@@ -3,7 +3,7 @@
 //         menjalankan flow approval dari awal.
 // Caller: `node scripts/seed-demo-workflows.mjs` atau `npm run seed:demo`.
 // Side Effects: INSERT/DELETE row dengan prefix DEMO-* di tabel OFF + Claim
-//               Workflow + claim_peka_report + claim_payment + audit log.
+//               Workflow + claim_payment + audit log.
 //               TIDAK menyentuh user/session/account, TIDAK menghapus data
 //               non-demo, TIDAK mengubah status route/UI.
 //
@@ -11,9 +11,9 @@
 // - Refuse jika DATABASE_URL bukan SQLite lokal.
 // - Idempotent: cleanup demo lama berdasarkan prefix sebelum insert.
 // - Semua item identifikasi pakai prefix DEMO-OFF-*, DEMO-CLAIM-*,
-//   DEMO-PEKA-*, DEMO-PAYMENT-*.
-// - Tidak menulis EC/CN ke claim_workflow_item kecuali untuk simulasi
-//   status >= EC Received (read-only demo).
+//   DEMO-PAYMENT-*.
+// - Tidak menulis EC/CN ke claim_workflow_item — workflow PEKA/EC/CN sudah
+//   retired (lihat lib/claim-workflow/constants.ts).
 // - Tidak mengubah API/UI route. Hanya seed data.
 
 import { createClient } from "@libsql/client";
@@ -49,8 +49,6 @@ function isLocalSqlite(url) {
     if (!url.startsWith("file:")) return false;
     const filePath = url.slice("file:".length);
     if (!filePath) return false;
-    // Path produksi container Docker biasanya /app/data/*. Tolak supaya seed
-    // tidak pernah jalan di container production walaupun salah env.
     if (filePath.startsWith("/app/")) return false;
     return true;
 }
@@ -111,7 +109,7 @@ async function ensureTables() {
     const required = [
         "off_batch", "off_batch_item", "off_payment", "off_audit_log",
         "claim_workflow", "claim_workflow_item", "claim_payment",
-        "claim_peka_report", "claim_audit_log",
+        "claim_audit_log",
     ];
     const missing = [];
     for (const name of required) {
@@ -134,7 +132,6 @@ async function cleanupOldDemo() {
     // Kunci dari demo:
     //   off_batch.no_pengajuan LIKE 'DEMO-OFF-%'
     //   claim_workflow.claim_workflow_no LIKE 'DEMO-CLAIM-%'
-    //   claim_peka_report.source_file LIKE 'DEMO-PEKA-%'
     const offBatchIds = await db.execute(
         "SELECT id FROM off_batch WHERE no_pengajuan LIKE 'DEMO-OFF-%'",
     );
@@ -162,11 +159,16 @@ async function cleanupOldDemo() {
     }
     await db.execute("DELETE FROM off_batch WHERE no_pengajuan LIKE 'DEMO-OFF-%'");
 
-    await db.execute("DELETE FROM claim_peka_report WHERE source_file LIKE 'DEMO-PEKA-%'");
+    // Jika tabel legacy claim_peka_report masih ada di DB lokal lama, bersihkan
+    // baris demo PEKA agar tidak menumpuk. Aplikasi sudah tidak menulisnya
+    // lagi, tapi DB lama mungkin masih punya tabel ini.
+    if (await tableExists("claim_peka_report")) {
+        await db.execute("DELETE FROM claim_peka_report WHERE source_file LIKE 'DEMO-PEKA-%'");
+        console.log(`  - claim_peka_report (legacy): prefix DEMO-PEKA-* dibersihkan`);
+    }
 
     console.log(`  - off_batch: ${offIds.length} dihapus`);
     console.log(`  - claim_workflow: ${claimIds.length} dihapus`);
-    console.log(`  - claim_peka_report: prefix DEMO-PEKA-* dibersihkan`);
 }
 
 // =============================================================================
@@ -334,7 +336,7 @@ const OFF_STATUS_CONFIGS = [
 function buildOffItems(prefixSeq, principle, count = 2) {
     // Setiap item: nominal default 5_000_000 + idx*1_500_000 supaya bervariasi.
     // noSurat memakai pola DEMO-CLAIM-{principleCode}-{seq}/{itemNo} agar
-    // mudah dikorelasikan dengan PEKA demo dan claim workflow item.
+    // mudah dikorelasikan dengan claim workflow item.
     const items = [];
     for (let i = 1; i <= count; i += 1) {
         items.push({
@@ -356,7 +358,7 @@ function buildOffItems(prefixSeq, principle, count = 2) {
     return items;
 }
 
-async function insertOffBatch(seq, config, principle, claimIntent = "ownStatus") {
+async function insertOffBatch(seq, config, principle) {
     const batchId = randomUUID();
     const noPengajuan = `DEMO-OFF-${String(seq).padStart(3, "0")}-${principle.code}`;
     const items = buildOffItems(seq, principle, 2);
@@ -484,7 +486,6 @@ async function insertOffBatch(seq, config, principle, claimIntent = "ownStatus")
         });
     }
 
-    // Audit log create + transition utama (tanpa rincian per cabang aksi).
     await db.execute({
         sql: `INSERT INTO off_audit_log (id, batch_id, item_id, actor_id, actor_name, actor_role,
             action, from_status, to_status, note, metadata, created_at)
@@ -504,12 +505,19 @@ async function insertOffBatch(seq, config, principle, claimIntent = "ownStatus")
 // =============================================================================
 // SECTION 5 — definisi demo Claim Workflow per status
 // =============================================================================
+//
+// Status Claim Workflow setelah cleanup PEKA/EC/CN:
+//   Draft -> Need Revision -> Ready to Submit -> Submitted to Principal
+//   -> Partially Paid -> Paid -> Closed
+//   plus Outstanding (monitoring) dan Cancelled.
+//
+// Demo me-cover semua status production di atas. Pembayaran dari principal
+// (Partially Paid / Paid) disimulasikan via claim_payment row.
 
 const CLAIM_WORKFLOW_CONFIGS = [
     {
         key: "draft",
         status: "Draft",
-        applyEcCn: false,
         paidFraction: 0,
         hasPdf: false,
         hasSubmittedAt: false,
@@ -518,7 +526,6 @@ const CLAIM_WORKFLOW_CONFIGS = [
     {
         key: "need_revision",
         status: "Need Revision",
-        applyEcCn: false,
         paidFraction: 0,
         hasPdf: false,
         hasSubmittedAt: false,
@@ -527,7 +534,6 @@ const CLAIM_WORKFLOW_CONFIGS = [
     {
         key: "ready_to_submit",
         status: "Ready to Submit",
-        applyEcCn: false,
         paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: false,
@@ -536,34 +542,6 @@ const CLAIM_WORKFLOW_CONFIGS = [
     {
         key: "submitted_to_principal",
         status: "Submitted to Principal",
-        applyEcCn: false,
-        paidFraction: 0,
-        hasPdf: true,
-        hasSubmittedAt: true,
-        hasNoClaim: true,
-    },
-    {
-        key: "waiting_peka",
-        status: "Waiting PEKA",
-        applyEcCn: false,
-        paidFraction: 0,
-        hasPdf: true,
-        hasSubmittedAt: true,
-        hasNoClaim: true,
-    },
-    {
-        key: "ec_received",
-        status: "EC Received",
-        applyEcCn: true,
-        paidFraction: 0,
-        hasPdf: true,
-        hasSubmittedAt: true,
-        hasNoClaim: true,
-    },
-    {
-        key: "cn_received",
-        status: "CN Received",
-        applyEcCn: true,
         paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: true,
@@ -572,7 +550,6 @@ const CLAIM_WORKFLOW_CONFIGS = [
     {
         key: "partially_paid",
         status: "Partially Paid",
-        applyEcCn: true,
         paidFraction: 0.5,
         hasPdf: true,
         hasSubmittedAt: true,
@@ -581,8 +558,15 @@ const CLAIM_WORKFLOW_CONFIGS = [
     {
         key: "paid",
         status: "Paid",
-        applyEcCn: true,
         paidFraction: 1,
+        hasPdf: true,
+        hasSubmittedAt: true,
+        hasNoClaim: true,
+    },
+    {
+        key: "outstanding",
+        status: "Outstanding",
+        paidFraction: 0,
         hasPdf: true,
         hasSubmittedAt: true,
         hasNoClaim: true,
@@ -590,7 +574,6 @@ const CLAIM_WORKFLOW_CONFIGS = [
     {
         key: "closed",
         status: "Closed",
-        applyEcCn: true,
         paidFraction: 1,
         hasPdf: true,
         hasSubmittedAt: true,
@@ -601,12 +584,11 @@ const CLAIM_WORKFLOW_CONFIGS = [
 
 const CLAIM_STATUS_KNOWN = new Set([
     "Draft", "Need Revision", "Ready to Submit", "Submitted to Principal",
-    "Waiting PEKA", "EC Received", "CN Received", "Partially Paid", "Paid",
-    "Outstanding", "Closed", "Cancelled",
+    "Partially Paid", "Paid", "Outstanding", "Closed", "Cancelled",
 ]);
 
 // Generate PDF stub minimal pakai pdf-lib supaya path yang disimpan ke DB
-// benar-benar valid dan bisa dibuka via /api/claim-workflow/[id]/claim-letter.
+// benar-benar valid dan bisa dibuka via /api/claim-workflow/[id]/...
 // Kalau pdf-lib gagal di-load, kembalikan null dan caller akan log skip.
 async function tryGenerateClaimLetterPdf(workflow) {
     return tryGenerateStubPdf(workflow, {
@@ -693,14 +675,17 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
         : null;
 
     // Item dari OFF batch sumber. DPP = nominal item.
+    // Cleanup PEKA: tidak ada lagi flag applyEcCn — pphRate ditentukan oleh
+    // status workflow saja (Submitted+ pakai 2% sesuai praktik klaim).
     const ppnRate = 11; // standar PPN saat ini
-    const pphRate = config.applyEcCn ? 2 : 0;
+    const usePph = config.hasSubmittedAt || config.status === "Ready to Submit";
+    const pphRate = usePph ? 2 : 0;
     let totalDpp = 0;
     let totalPpn = 0;
     let totalPph = 0;
     let totalClaim = 0;
 
-    const items = offBatch.items.map((it, idx) => {
+    const items = offBatch.items.map((it) => {
         const dpp = it.nominal;
         const calc = calculateClaimAmount(dpp, ppnRate, pphRate);
         totalDpp += dpp;
@@ -720,9 +705,6 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             pphRate,
             pphAmount: calc.pphAmount,
             nilaiKlaim: calc.nilaiKlaim,
-            ecPeka: config.applyEcCn ? `DEMO-EC-${seq}-${idx + 1}` : null,
-            cnNumber: config.applyEcCn && config.status !== "EC Received"
-                ? `DEMO-CN-${seq}-${idx + 1}` : null,
             status: "Draft",
             note: null,
         };
@@ -742,8 +724,6 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             claimWorkflowNo, principleName: principle.name, status: config.status, totalClaim,
         });
         if (pdfPath) pdfGeneratedAt = ms(7);
-        // Phase R2: Summary dan Kwitansi Claim juga wajib sebelum Mark Ready.
-        // Demo me-mirror metadata + stub PDF supaya UI demo realistis.
         summaryPdfPath = await tryGenerateClaimSummaryPdf({
             claimWorkflowNo, principleName: principle.name, status: config.status, totalClaim,
         });
@@ -793,13 +773,13 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             sql: `INSERT INTO claim_workflow_item (
                 id, claim_workflow_id, off_batch_item_id, no_surat, jenis_promosi,
                 periode, outlet, dpp, ppn_rate, ppn_amount, pph_rate, pph_amount, nilai_klaim,
-                nomor_ec_internal, ec_peka, cn_number, status, note, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                status, note, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
                 item.id, id, item.offBatchItemId, item.noSurat, item.jenisPromosi,
                 item.periode, item.outlet, item.dpp, item.ppnRate, item.ppnAmount,
                 item.pphRate, item.pphAmount, item.nilaiKlaim,
-                null, item.ecPeka, item.cnNumber, item.status, item.note,
+                item.status, item.note,
                 ms(10), ms(1),
             ],
         });
@@ -836,8 +816,8 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
     if (noClaim) {
         auditEvents.push({
             action: "no_claim_assigned",
-            fromStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
-            toStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
+            fromStatus: "Draft",
+            toStatus: "Draft",
             note: "DEMO seed: No Claim utama di-assign.",
             at: ms(8),
             metadataExtra: {
@@ -849,8 +829,8 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
         });
         auditEvents.push({
             action: "no_claim_synced_to_off",
-            fromStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
-            toStatus: config.status === "Ready to Submit" ? "Draft" : "Draft",
+            fromStatus: "Draft",
+            toStatus: "Draft",
             note: "DEMO seed: No Claim disinkronkan ke OFF item.",
             at: ms(8),
             metadataExtra: {
@@ -901,7 +881,7 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             at: ms(6),
         });
     }
-    if (["Waiting PEKA", "EC Received", "CN Received", "Partially Paid", "Paid", "Closed"].includes(config.status)) {
+    if (["Partially Paid", "Paid", "Outstanding", "Closed"].includes(config.status)) {
         auditEvents.push({
             action: "demo_seed_advance_status",
             fromStatus: "Submitted to Principal",
@@ -964,129 +944,7 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
 }
 
 // =============================================================================
-// SECTION 6 — PEKA demo rows
-// =============================================================================
-
-async function insertPekaDemo(claimWorkflowsByKey) {
-    // Skenario PEKA:
-    //   1. matched: ambil item pertama dari claim "submitted_to_principal"
-    //   2. unmatched: noSurat acak yang tidak ada di claim mana pun
-    //   3. duplicate_match: dua row PEKA dengan noSuratRd sama -> menyentuh
-    //      item pertama dari claim "waiting_peka"
-    //   4. CN missing: matched ke item kedua "submitted_to_principal", EC ada
-    //      tapi CN kosong
-    //   5. Pending: matched ke item pertama claim "ready_to_submit", isi
-    //      pendingUser/leadTime/age
-    const submittedClaim = claimWorkflowsByKey.submitted_to_principal;
-    const waitingClaim = claimWorkflowsByKey.waiting_peka;
-    const readyClaim = claimWorkflowsByKey.ready_to_submit;
-
-    const peka = [];
-    const importedAt = ms(2);
-    function pushPeka(over) {
-        peka.push({
-            id: randomUUID(),
-            sourceFile: "DEMO-PEKA-REPORT.xlsx",
-            claimNo: null,
-            jenisKlaim: "Promo Off",
-            rdName: "RD Demo",
-            periode: `${isoDate(60)} - ${isoDate(30)}`,
-            noSuratRd: null,
-            totalClaim: 0,
-            cnNumber: null,
-            requestor: "Requestor Demo",
-            lastProcessedDate: isoDate(2),
-            pendingUser: null,
-            leadTime: null,
-            age: null,
-            note: null,
-            ecNumber: null,
-            importedAt,
-            ...over,
-        });
-    }
-
-    if (submittedClaim?.items?.[0]) {
-        pushPeka({
-            claimNo: "DEMO-PEKA-CLAIM-001",
-            noSuratRd: submittedClaim.items[0].noSurat,
-            totalClaim: submittedClaim.items[0].nilaiKlaim,
-            ecNumber: "DEMO-EC-MATCHED-001",
-            cnNumber: "DEMO-CN-MATCHED-001",
-            note: "Matched scenario: 1 PEKA cocok 1 item.",
-        });
-    }
-    pushPeka({
-        claimNo: "DEMO-PEKA-CLAIM-002",
-        noSuratRd: "DEMO-PEKA-NOMATCH/999",
-        totalClaim: 1_500_000,
-        ecNumber: "DEMO-EC-NOMATCH",
-        cnNumber: null,
-        note: "Unmatched scenario: tidak ada item klaim untuk No Surat ini.",
-    });
-    if (waitingClaim?.items?.[0]) {
-        pushPeka({
-            claimNo: "DEMO-PEKA-CLAIM-003A",
-            noSuratRd: waitingClaim.items[0].noSurat,
-            totalClaim: waitingClaim.items[0].nilaiKlaim,
-            ecNumber: "DEMO-EC-DUP-A",
-            cnNumber: "DEMO-CN-DUP-A",
-            note: "Duplicate scenario A.",
-        });
-        pushPeka({
-            claimNo: "DEMO-PEKA-CLAIM-003B",
-            noSuratRd: waitingClaim.items[0].noSurat,
-            totalClaim: waitingClaim.items[0].nilaiKlaim + 100_000,
-            ecNumber: "DEMO-EC-DUP-B",
-            cnNumber: "DEMO-CN-DUP-B",
-            note: "Duplicate scenario B (perlu review manual).",
-        });
-    }
-    if (submittedClaim?.items?.[1]) {
-        pushPeka({
-            claimNo: "DEMO-PEKA-CLAIM-004",
-            noSuratRd: submittedClaim.items[1].noSurat,
-            totalClaim: submittedClaim.items[1].nilaiKlaim,
-            ecNumber: "DEMO-EC-CN-MISSING",
-            cnNumber: null,
-            note: "CN missing scenario: EC ada, CN kosong.",
-        });
-    }
-    if (readyClaim?.items?.[0]) {
-        pushPeka({
-            claimNo: "DEMO-PEKA-CLAIM-005",
-            noSuratRd: readyClaim.items[0].noSurat,
-            totalClaim: readyClaim.items[0].nilaiKlaim,
-            ecNumber: "DEMO-EC-PENDING",
-            cnNumber: null,
-            pendingUser: "Demo Reviewer",
-            leadTime: 5,
-            age: 3,
-            note: "Pending scenario: pendingUser/leadTime/age terisi.",
-        });
-    }
-
-    for (const row of peka) {
-        if (!row.noSuratRd) continue;
-        await db.execute({
-            sql: `INSERT INTO claim_peka_report (
-                id, source_file, claim_no, jenis_klaim, rd_name, periode, no_surat_rd,
-                total_claim, cn_number, requestor, last_processed_date, pending_user,
-                lead_time, age, note, ec_number, imported_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            args: [
-                row.id, row.sourceFile, row.claimNo, row.jenisKlaim, row.rdName,
-                row.periode, row.noSuratRd, row.totalClaim, row.cnNumber, row.requestor,
-                row.lastProcessedDate, row.pendingUser, row.leadTime, row.age, row.note,
-                row.ecNumber, row.importedAt,
-            ],
-        });
-    }
-    return peka.length;
-}
-
-// =============================================================================
-// SECTION 7 — main runner
+// SECTION 6 — main runner
 // =============================================================================
 
 async function main() {
@@ -1104,13 +962,13 @@ async function main() {
         console.log(`  - ${batch.noPengajuan.padEnd(28)} ${config.status}`);
     }
 
-    console.log("[seed-demo] Insert OFF batches sumber Claim Workflow (semua Completed)...");
-    const completedConfig = OFF_STATUS_CONFIGS.find((c) => c.key === "completed");
+    console.log("[seed-demo] Insert OFF batches sumber Claim Workflow (semua OM Approved)...");
+    const omApprovedConfig = OFF_STATUS_CONFIGS.find((c) => c.key === "om_approved");
     const claimSourceBatches = [];
     for (let i = 0; i < CLAIM_WORKFLOW_CONFIGS.length; i += 1) {
         const seq = OFF_STATUS_CONFIGS.length + 1 + i;
         const principle = pickPrinciple(i);
-        const batch = await insertOffBatch(seq, completedConfig, principle);
+        const batch = await insertOffBatch(seq, omApprovedConfig, principle);
         claimSourceBatches.push(batch);
         console.log(`  - ${batch.noPengajuan.padEnd(28)} (untuk claim ${CLAIM_WORKFLOW_CONFIGS[i].key})`);
     }
@@ -1135,23 +993,18 @@ async function main() {
         console.log(`  - ${claim.claimWorkflowNo.padEnd(28)} ${config.status}${claim.hasPdf ? " [PDF]" : ""}`);
     }
 
-    console.log("[seed-demo] Insert PEKA demo rows...");
-    const pekaCount = await insertPekaDemo(claimResults);
-    console.log(`  - ${pekaCount} PEKA rows (5 skenario: matched, unmatched, duplicate, CN missing, pending)`);
-
     console.log("");
     console.log("==================================================");
     console.log("[seed-demo] Selesai.");
     console.log(`  OFF batches               : ${OFF_STATUS_CONFIGS.length + claimSourceBatches.length} (${OFF_STATUS_CONFIGS.length} status coverage + ${claimSourceBatches.length} sumber claim)`);
     console.log(`  Claim Workflow records    : ${Object.keys(claimResults).length}`);
-    console.log(`  PEKA report rows          : ${pekaCount}`);
     console.log(`  Claim Letter PDF generated: ${pdfCount}`);
-    console.log(`  Status future di-skip     : ${skippedFutureCount}`);
+    console.log(`  Status non-listed         : ${skippedFutureCount}`);
     console.log("");
     console.log("Verifikasi UI:");
     console.log("  /off-program-control");
     console.log("  /claim-workflow");
-    console.log("  /claim-workflow/<id>  (Load PEKA Matches untuk preview)");
+    console.log("  /claim-workflow/<id>  (lihat dokumen Claim Letter, Summary, Kwitansi)");
     console.log("==================================================");
 }
 

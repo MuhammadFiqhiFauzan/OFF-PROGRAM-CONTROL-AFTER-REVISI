@@ -313,9 +313,6 @@ const statements = [
     pph_rate REAL NOT NULL DEFAULT 0,
     pph_amount REAL NOT NULL DEFAULT 0,
     nilai_klaim REAL NOT NULL DEFAULT 0,
-    nomor_ec_internal TEXT,
-    ec_peka TEXT,
-    cn_number TEXT,
     status TEXT NOT NULL DEFAULT 'Draft',
     note TEXT,
     created_at INTEGER NOT NULL DEFAULT 0,
@@ -323,6 +320,11 @@ const statements = [
     FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id),
     FOREIGN KEY (off_batch_item_id) REFERENCES off_batch_item(id)
   );`,
+  // Catatan cleanup PEKA (Mei 2026):
+  // - Kolom legacy nomor_ec_internal/ec_peka/cn_number sengaja TIDAK di-DROP
+  //   pada DB lokal lama supaya tidak destruktif. Aplikasi sudah tidak
+  //   menulisnya lagi. Untuk DB baru, fresh schema di atas sudah tanpa
+  //   kolom-kolom tersebut.
   `CREATE TABLE IF NOT EXISTS claim_payment (
     id TEXT PRIMARY KEY,
     claim_workflow_id TEXT NOT NULL,
@@ -335,25 +337,6 @@ const statements = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id)
-  );`,
-  `CREATE TABLE IF NOT EXISTS claim_peka_report (
-    id TEXT PRIMARY KEY,
-    source_file TEXT NOT NULL,
-    claim_no TEXT,
-    jenis_klaim TEXT,
-    rd_name TEXT,
-    periode TEXT,
-    no_surat_rd TEXT,
-    total_claim REAL NOT NULL DEFAULT 0,
-    cn_number TEXT,
-    requestor TEXT,
-    last_processed_date TEXT,
-    pending_user TEXT,
-    lead_time REAL,
-    age REAL,
-    note TEXT,
-    ec_number TEXT,
-    imported_at INTEGER NOT NULL
   );`,
   `CREATE TABLE IF NOT EXISTS claim_audit_log (
     id TEXT PRIMARY KEY,

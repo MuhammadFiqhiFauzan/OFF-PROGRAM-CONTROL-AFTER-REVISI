@@ -299,6 +299,16 @@ export const claimWorkflow = sqliteTable("claim_workflow", {
     noClaimIdx: index("idx_claim_workflow_no_claim").on(table.noClaim),
 }));
 
+// Catatan cleanup PEKA (Mei 2026):
+// - Kolom `nomor_ec_internal`, `ec_peka`, dan `cn_number` adalah artefak
+//   workflow PEKA/EC/CN yang sekarang sudah retired. Mereka dihapus dari
+//   skema aktif Drizzle agar route handler tidak bisa lagi membaca/menulis
+//   field tsb. Database SQLite lokal lama mungkin masih punya kolom-kolom
+//   tersebut secara fisik; itu aman selama tidak ada lagi kode aplikasi
+//   yang membacanya. Untuk dev yang ingin DB bersih, jalankan reset:
+//     node scripts/reset-data.mjs
+//     node scripts/init-db.mjs
+//     npm run seed:demo
 export const claimWorkflowItem = sqliteTable("claim_workflow_item", {
     id: text("id").primaryKey(),
     claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
@@ -313,9 +323,6 @@ export const claimWorkflowItem = sqliteTable("claim_workflow_item", {
     pphRate: real("pph_rate").notNull().default(0),
     pphAmount: real("pph_amount").notNull().default(0),
     nilaiKlaim: real("nilai_klaim").notNull().default(0),
-    nomorEcInternal: text("nomor_ec_internal"),
-    ecPeka: text("ec_peka"),
-    cnNumber: text("cn_number"),
     status: text("status").notNull().default("Draft"),
     note: text("note"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
@@ -340,25 +347,12 @@ export const claimPayment = sqliteTable("claim_payment", {
     workflowIdx: index("idx_claim_payment_workflow_id").on(table.claimWorkflowId),
 }));
 
-export const claimPekaReport = sqliteTable("claim_peka_report", {
-    id: text("id").primaryKey(),
-    sourceFile: text("source_file").notNull(),
-    claimNo: text("claim_no"),
-    jenisKlaim: text("jenis_klaim"),
-    rdName: text("rd_name"),
-    periode: text("periode"),
-    noSuratRd: text("no_surat_rd"),
-    totalClaim: real("total_claim").notNull().default(0),
-    cnNumber: text("cn_number"),
-    requestor: text("requestor"),
-    lastProcessedDate: text("last_processed_date"),
-    pendingUser: text("pending_user"),
-    leadTime: real("lead_time"),
-    age: real("age"),
-    note: text("note"),
-    ecNumber: text("ec_number"),
-    importedAt: integer("imported_at", { mode: "timestamp" }).notNull()
-});
+// Catatan cleanup PEKA (Mei 2026):
+// - Tabel `claim_peka_report` dihapus dari skema aktif. Workflow PEKA/EC/CN
+//   sudah retired; lihat `lib/claim-workflow/constants.ts` untuk status
+//   production yang baru. SQLite lama mungkin masih memiliki tabel ini
+//   secara fisik (DROP tidak otomatis dijalankan agar tidak destruktif);
+//   itu aman selama aplikasi tidak lagi merujuk ke tabel tersebut.
 
 export const claimAuditLog = sqliteTable("claim_audit_log", {
     id: text("id").primaryKey(),

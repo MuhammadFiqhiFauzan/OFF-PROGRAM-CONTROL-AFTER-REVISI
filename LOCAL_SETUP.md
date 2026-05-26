@@ -96,8 +96,8 @@ Kredensial yang dibuat:
 ### 8. (Opsional) Seed demo data UI
 
 Untuk mengisi seluruh stage OFF Program Control dan Claim Workflow dengan data
-contoh supaya UI bisa langsung diuji per status (termasuk PEKA preview, Claim
-Letter PDF, dan claim payment), jalankan:
+contoh supaya UI bisa langsung diuji per status (Claim Letter PDF, Summary,
+Kwitansi Claim, dan claim payment), jalankan:
 
 ```powershell
 node scripts/seed-demo-workflows.mjs
@@ -171,27 +171,52 @@ Flow lengkap dari **Draft sampai Completed** (7 step approval) sudah diimplement
 ### Claim Workflow (current implemented flow)
 
 ```
-OFF Completed
+OFF OM Approved
   -> Create Claim Workflow
-  -> Draft
-  -> Edit DPP / PPN / PPH
-  -> Ready to Submit
+  -> Draft / Need Revision
+  -> Edit DPP / PPN / PPH (BASE)
+  -> Assign No Claim (sync ke OFF item)
   -> Generate Claim Letter PDF
-  -> Submitted to Principal
+  -> Generate Claim Summary PDF
+  -> Generate Kwitansi Claim PDF
+  -> Mark Ready (Ready to Submit)
+  -> Submit to Principal
 ```
 
-### Masih ditunda (deferred)
+Pembayaran dari principal (Partially Paid → Paid → Closed) dan dashboard
+Outstanding masuk roadmap berikutnya (R3 Principal Payment + Outstanding,
+R4 Close Workflow).
 
-Status berikut belum diimplementasi di build saat ini:
+### Cleanup PEKA / EC / CN
 
-- Waiting PEKA
-- EC Received
-- CN Received
-- Partially Paid
-- Paid
-- Closed
+Workflow lama yang sempat memiliki tahap `Waiting PEKA`, `EC Received`,
+`CN Received`, beserta import REPORT PEKA / matching EC-CN sudah **retired**
+dari core production. Aplikasi tidak lagi:
 
-Tabel database-nya sudah disiapkan, tapi endpoint dan UI-nya masuk fase pengembangan berikutnya.
+- Mengimpor file PEKA atau menampilkan "Load PEKA Matches".
+- Mensyaratkan EC/CN sebagai gate `Mark Ready`, payment, outstanding,
+  atau close.
+- Menampilkan tombol transisi `Waiting PEKA` / `EC Received` /
+  `CN Received`.
+
+Database lokal lama yang masih punya tabel `claim_peka_report` atau kolom
+`ec_peka` / `cn_number` di `claim_workflow_item` tetap aman: aplikasi
+tidak lagi membaca/menulis ke sana. Untuk DB bersih, reset:
+
+```powershell
+node scripts/reset-data.mjs
+node scripts/init-db.mjs
+npm run seed:demo
+```
+
+### Roadmap berikutnya
+
+- **R3** — Principal Payment + Outstanding (input pembayaran dari
+  principal lewat `claim_payment`, dashboard Monitor Outstanding).
+- **R4** — Close Workflow (transisi `Paid` → `Closed`, gating dengan
+  `remainingAmount = 0`).
+- **R5** — Reporting / Export.
+- **R6** — Hardening.
 
 ## Struktur Folder Penting
 
@@ -256,7 +281,9 @@ Endpoint `/api/admin/bootstrap` hanya jalan saat tabel `user` masih kosong. Kare
 Tombol generate hanya tampil kalau dua syarat terpenuhi:
 
 - **Role** user harus `admin` atau `claim` (staff tidak bisa generate).
-- **Status** claim workflow harus `Ready to Submit` atau `Submitted to Principal`. Pada status `Draft` tombol sengaja disembunyikan karena nilai tax belum dikunci.
+- **Status** claim workflow ada di `Draft`, `Need Revision`,
+  `Ready to Submit`, atau `Submitted to Principal`. Aturan yang sama
+  berlaku untuk Claim Summary dan Kwitansi Claim.
 
 Kalau tombol tidak muncul padahal role & status sudah benar, refresh halaman supaya state claim workflow ter-fetch ulang.
 
