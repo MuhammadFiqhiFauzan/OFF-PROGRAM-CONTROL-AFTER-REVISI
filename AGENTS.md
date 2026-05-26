@@ -106,10 +106,43 @@ Phase R1 — Rewire OFF ↔ Claim No Claim:
   di `claim_audit_log`.
 - Mark Ready (`mark_ready`) tetap wajib menulis Ready to Submit dan
   ditambah validasi: `noClaim` harus ada, `claimLetterPdfPath` harus ada,
-  `totalClaim > 0`, dan setiap item DPP/Nilai Klaim > 0.
+  **`summaryPdfPath` harus ada (Phase R2)**, **`receiptPdfPath` harus ada
+  (Phase R2)**, `totalClaim > 0`, dan setiap item DPP/Nilai Klaim > 0.
 - Generate Claim Letter PDF kini diizinkan sejak Draft / Need Revision
   agar user bisa generate PDF dulu sebelum Mark Ready. Re-generate juga
   diizinkan saat Ready to Submit / Submitted to Principal.
+
+#### Tiga Dokumen Klaim (Phase R2)
+
+Claim Workflow harus menghasilkan tiga dokumen sebelum Ready to Submit.
+Semuanya disimpan sebagai metadata kolom di `claim_workflow` (Option A,
+bukan tabel `claim_workflow_document`):
+
+- `claim_letter_pdf_path` + `claim_letter_generated_at` + `claim_letter_generated_by`
+- `summary_pdf_path` + `summary_generated_at` + `summary_generated_by` (R2 baru)
+- `receipt_pdf_path` + `receipt_generated_at` + `receipt_generated_by` (R2 baru)
+
+File aktif:
+- Claim Letter → `runtime/claim-workflow/letters/`
+- Summary → `runtime/claim-workflow/summaries/`
+- Kwitansi Claim → `runtime/claim-workflow/receipts/`
+
+Aturan:
+- Generate POST hanya admin/claim. GET/download mengikuti `canActorReadClaimWorkflow`.
+- Window status untuk generate ketiga dokumen: `Draft`, `Need Revision`,
+  `Ready to Submit`, `Submitted to Principal`.
+- Kwitansi Claim **bukan** payment receipt dari principal. Tidak menunggu
+  `claim_payment`. Dipasangkan dengan Claim Letter dan Summary saat
+  paket dokumen klaim dikirim ke principal.
+- `return_to_draft` menghapus dan invalidate ketiga dokumen secara
+  atomic: file di disk dihapus best-effort, kolom path direset NULL,
+  audit metadata berisi `invalidatedClaimLetterPdfPath`,
+  `invalidatedSummaryPdfPath`, `invalidatedReceiptPdfPath`.
+- Audit action baru: `claim_summary_generated`, `claim_receipt_generated`.
+
+Future: tabel `claim_workflow_document` akan dipertimbangkan kalau
+business minta full versioning/compliance lintas regenerate (saat ini
+tidak ada).
 
 #### OFF Completed butuh No Claim Claim Workflow
 

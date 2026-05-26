@@ -265,6 +265,20 @@ export const claimWorkflow = sqliteTable("claim_workflow", {
     claimLetterPdfPath: text("claim_letter_pdf_path"),
     claimLetterGeneratedAt: integer("claim_letter_generated_at", { mode: "timestamp" }),
     claimLetterGeneratedBy: text("claim_letter_generated_by"),
+    // Phase R2 — Claim Documents:
+    // Claim Workflow wajib menghasilkan tiga dokumen sebelum Mark Ready:
+    // Claim Letter (Phase 2C, kolom di atas), Claim Summary, dan Kwitansi
+    // Claim. Pola sama dengan Claim Letter: 1 PDF aktif per tipe, file
+    // disimpan di folder runtime/claim-workflow/{summaries|receipts}, dan
+    // metadata aktif disimpan di kolom-kolom di bawah ini. Versioning
+    // historis tidak dimodelkan di phase ini; jejaknya tetap di
+    // claim_audit_log via metadata `previousPdfPath`/`invalidated*`.
+    summaryPdfPath: text("summary_pdf_path"),
+    summaryGeneratedAt: integer("summary_generated_at", { mode: "timestamp" }),
+    summaryGeneratedBy: text("summary_generated_by"),
+    receiptPdfPath: text("receipt_pdf_path"),
+    receiptGeneratedAt: integer("receipt_generated_at", { mode: "timestamp" }),
+    receiptGeneratedBy: text("receipt_generated_by"),
     // No Claim utama untuk Claim Workflow. Disuplai oleh role admin/claim
     // setelah workflow dibuat. Saat di-set, di-sync ke semua
     // off_batch_item.no_claim pada OFF batch terkait dalam transaksi yang

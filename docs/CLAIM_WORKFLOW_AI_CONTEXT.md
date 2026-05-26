@@ -189,6 +189,141 @@ otherwise tempt future contributors to push Claim status into OFF.
   panel) shows the No Claim column read-only with a hint pointing at
   Claim Workflow as the source of truth.
 
+## Phase R2 — Claim Documents
+
+Phase R2 introduces two new mandatory PDFs alongside the existing Claim
+Letter, so Claim Workflow always ships a complete document package:
+
+1. Claim Letter (Phase 2C, unchanged file layout, but now generatable
+   from `Draft` / `Need Revision` per Phase R1).
+2. Claim Summary (R2 new).
+3. Kwitansi Claim — pre-submission receipt (R2 new).
+
+The Kwitansi Claim is not a principal payment receipt. It is a
+distributor-side document that accompanies the Claim Letter + Summary
+when the claim package is sent to the principal. It does **not** depend
+on `claim_payment`.
+
+### Architecture decision
+
+Phase R2 follows Option A: extend `claim_workflow` with column metadata
+for each document. We deliberately do **not** introduce a separate
+`claim_workflow_document` table yet; the existing pattern for Claim
+Letter is mirrored 1:1 per document type. If business later asks for
+full per-document versioning, regeneration history, or signature
+attestation across all old PDFs, the `claim_workflow_document` table
+should be revisited.
+
+### Schema additions
+
+Six nullable columns on `claim_workflow`:
+
+- `summary_pdf_path TEXT`
+- `summary_generated_at INTEGER`
+- `summary_generated_by TEXT`
+- `receipt_pdf_path TEXT`
+- `receipt_generated_at INTEGER`
+- `receipt_generated_by TEXT`
+
+`scripts/init-db.mjs` adds matching `ALTER TABLE` migrations idempotent
+with the existing pattern.
+
+### File storage
+
+- Claim Letter → `runtime/claim-workflow/letters/{safe}-claim-letter-{timestamp}.pdf`
+  (existing, unchanged).
+- Claim Summary → `runtime/claim-workflow/summaries/{safe}-summary-{timestamp}.pdf`.
+- Kwitansi Claim → `runtime/claim-workflow/receipts/{safe}-receipt-{timestamp}.pdf`.
+
+Each route validates that the persisted path resolves inside its own
+directory (`isPathInsideSummaryDir`, `isPathInsideReceiptDir`) before
+serving or deleting the file. Paths outside the allowed directory are
+refused with 400.
+
+### Endpoints
+
+- `POST /api/claim-workflow/[id]/summary` — admin/claim only. Generates
+  the Summary PDF, atomically updates `summary_pdf_path` /
+  `summary_generated_at` / `summary_generated_by`, and writes a
+  `claim_summary_generated` audit row in the same transaction. The new
+  PDF is written to disk first; if the transaction rolls back the new
+  file is deleted. After commit the previous active PDF (if any) is
+  deleted best-effort.
+- `GET /api/claim-workflow/[id]/summary` — `canActorReadClaimWorkflow`
+  gate. Streams the active PDF inline.
+- `POST /api/claim-workflow/[id]/receipt` — admin/claim only, same
+  semantics. Audit action `claim_receipt_generated`.
+- `GET /api/claim-workflow/[id]/receipt` — viewer access, mirrors the
+  Summary GET.
+
+### Generation window
+
+Same as Claim Letter post-R1: `Draft`, `Need Revision`,
+`Ready to Submit`, `Submitted to Principal`. Other statuses return 409.
+This lets users generate / regenerate before Mark Ready and replace a
+PDF after submission if the principal asks for a clean copy.
+
+### Mark Ready validation (R2 additions)
+
+`mark_ready` keeps the Phase R1 checks and now also requires:
+
+- `summary_pdf_path` is present (`CLAIM_WORKFLOW_SUMMARY_REQUIRED`).
+- `receipt_pdf_path` is present (`CLAIM_WORKFLOW_RECEIPT_REQUIRED`).
+
+The complete Mark Ready prerequisite set is therefore:
+
+- `noClaim` present
+- `claimLetterPdfPath` present
+- `summaryPdfPath` present
+- `receiptPdfPath` present
+- `totalClaim > 0`
+- Every item `dpp > 0` and `nilaiKlaim > 0`
+- At least one item
+
+### `return_to_draft` invalidation (R2 additions)
+
+When a workflow is returned to Draft, all three documents are now
+invalidated atomically:
+
+- DB columns reset to NULL: `claim_letter_pdf_path` / `summary_pdf_path` /
+  `receipt_pdf_path` (plus their `*_generated_at` and `*_generated_by`
+  pairs).
+- Files on disk are deleted best-effort, only when the path resolves
+  inside the corresponding allowed directory.
+- Audit metadata records the previous paths under
+  `invalidatedClaimLetterPdfPath`, `invalidatedSummaryPdfPath`, and
+  `invalidatedReceiptPdfPath` for traceability.
+
+This avoids any stale "valid" PDF from being shipped to the principal
+after the underlying tax/items have been revised in Draft.
+
+### Audit actions added
+
+- `claim_summary_generated` — metadata: `pdfPath`, `itemCount`,
+  `totalClaim`, `noClaim`, `generatedBy`, optional `previousPdfPath`.
+- `claim_receipt_generated` — metadata: same fields as Summary.
+- The existing `return_to_draft` audit row also carries the new
+  `invalidatedSummaryPdfPath` / `invalidatedReceiptPdfPath` fields.
+
+### Detail page UI
+
+The detail page now exposes a single "Dokumen Klaim" section with three
+cards (Claim Letter, Claim Summary, Kwitansi Claim). Each card shows
+generated/not-generated badge, generated timestamp (when present),
+"Open PDF" link (when present), and "Generate" / "Regenerate" button for
+admin/claim. Staff sees read-only with no action buttons. A reminder
+message under the section flags that all three documents are required
+for Mark Ready while the workflow is in `Draft` or `Need Revision`.
+
+### Demo seed
+
+`scripts/seed-demo-workflows.mjs` now generates stub PDFs for Summary
+and Kwitansi Claim alongside the Claim Letter for any demo workflow at
+`Ready to Submit` or beyond, mirroring the Phase R1 noClaim seed
+pattern. Stub PDFs use the `runtime/claim-workflow/{summaries,receipts}`
+directories. Demo audit rows include `claim_summary_generated` and
+`claim_receipt_generated` events when the stubs succeed.
+
 ## Legacy Mapping
 
 | Previous file/workbook role | Web foundation mapping |

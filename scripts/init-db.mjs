@@ -284,6 +284,12 @@ const statements = [
     claim_letter_pdf_path TEXT,
     claim_letter_generated_at INTEGER,
     claim_letter_generated_by TEXT,
+    summary_pdf_path TEXT,
+    summary_generated_at INTEGER,
+    summary_generated_by TEXT,
+    receipt_pdf_path TEXT,
+    receipt_generated_at INTEGER,
+    receipt_generated_by TEXT,
     no_claim TEXT,
     no_claim_assigned_at INTEGER,
     no_claim_assigned_by TEXT,
@@ -451,6 +457,17 @@ const migrations = [
   `ALTER TABLE claim_workflow ADD COLUMN no_claim TEXT;`,
   `ALTER TABLE claim_workflow ADD COLUMN no_claim_assigned_at INTEGER;`,
   `ALTER TABLE claim_workflow ADD COLUMN no_claim_assigned_by TEXT;`,
+  // Phase R2 — Claim Documents:
+  // Tiga dokumen wajib (Claim Letter dari Phase 2C, plus Summary dan
+  // Kwitansi Claim) disimpan sebagai metadata kolom di claim_workflow.
+  // File aktif tersimpan di runtime/claim-workflow/{summaries,receipts}
+  // dan dilindungi path-validator yang sama dengan Claim Letter.
+  `ALTER TABLE claim_workflow ADD COLUMN summary_pdf_path TEXT;`,
+  `ALTER TABLE claim_workflow ADD COLUMN summary_generated_at INTEGER;`,
+  `ALTER TABLE claim_workflow ADD COLUMN summary_generated_by TEXT;`,
+  `ALTER TABLE claim_workflow ADD COLUMN receipt_pdf_path TEXT;`,
+  `ALTER TABLE claim_workflow ADD COLUMN receipt_generated_at INTEGER;`,
+  `ALTER TABLE claim_workflow ADD COLUMN receipt_generated_by TEXT;`,
 ];
 
 for (const sql of migrations) {

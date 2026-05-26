@@ -65,12 +65,16 @@ export async function GET(_request: Request, context: Context) {
         // mark_ready memvalidasi `claimLetterPdfPath`. Generation tetap
         // tersedia di Ready to Submit / Submitted to Principal untuk
         // mengganti PDF aktif (regenerate skenario kecil).
-        const canGenerateClaimLetter = canManageClaim && (
+        // Phase R2: aturan window yang sama dipakai untuk Summary & Receipt.
+        const docGenerationAllowed = (
             row.workflow.status === claimWorkflowStatuses.draft ||
             row.workflow.status === claimWorkflowStatuses.needRevision ||
             row.workflow.status === claimWorkflowStatuses.readyToSubmit ||
             row.workflow.status === claimWorkflowStatuses.submittedToPrincipal
         );
+        const canGenerateClaimLetter = canManageClaim && docGenerationAllowed;
+        const canGenerateSummary = canManageClaim && docGenerationAllowed;
+        const canGenerateReceipt = canManageClaim && docGenerationAllowed;
         const canAssignNoClaim = canManageClaim;
 
         return NextResponse.json({
@@ -88,6 +92,8 @@ export async function GET(_request: Request, context: Context) {
             payments,
             canEditItems: canManageClaim,
             canGenerateClaimLetter,
+            canGenerateSummary,
+            canGenerateReceipt,
             canAssignNoClaim,
         });
     } catch (error) {

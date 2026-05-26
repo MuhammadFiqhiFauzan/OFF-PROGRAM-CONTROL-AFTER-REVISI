@@ -11,10 +11,24 @@ import {
 } from "@/lib/claim-workflow";
 
 const CLAIM_LETTERS_DIR = path.resolve(process.cwd(), "runtime", "claim-workflow", "letters");
+const SUMMARY_DIR = path.resolve(process.cwd(), "runtime", "claim-workflow", "summaries");
+const RECEIPT_DIR = path.resolve(process.cwd(), "runtime", "claim-workflow", "receipts");
+
+function isPathInsideDir(targetPath: string, baseDir: string): boolean {
+    const resolved = path.resolve(targetPath);
+    return resolved === baseDir || resolved.startsWith(baseDir + path.sep);
+}
 
 function isPathInsideLettersDir(targetPath: string): boolean {
-    const resolved = path.resolve(targetPath);
-    return resolved === CLAIM_LETTERS_DIR || resolved.startsWith(CLAIM_LETTERS_DIR + path.sep);
+    return isPathInsideDir(targetPath, CLAIM_LETTERS_DIR);
+}
+
+function isPathInsideSummaryDir(targetPath: string): boolean {
+    return isPathInsideDir(targetPath, SUMMARY_DIR);
+}
+
+function isPathInsideReceiptDir(targetPath: string): boolean {
+    return isPathInsideDir(targetPath, RECEIPT_DIR);
 }
 
 type Context = { params: Promise<{ id: string }> };
@@ -187,6 +201,23 @@ export async function POST(request: Request, context: Context) {
                     error: "Claim Letter PDF wajib di-generate sebelum Ready to Submit.",
                 }, { status: 422 });
             }
+            // Phase R2: Summary dan Kwitansi Claim juga wajib sebelum
+            // Ready to Submit. Ketiganya membentuk paket dokumen klaim ke
+            // principal.
+            if (!workflow.summaryPdfPath) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_WORKFLOW_SUMMARY_REQUIRED",
+                    error: "Claim Summary PDF wajib di-generate sebelum Ready to Submit.",
+                }, { status: 422 });
+            }
+            if (!workflow.receiptPdfPath) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_WORKFLOW_RECEIPT_REQUIRED",
+                    error: "Kwitansi Claim PDF wajib di-generate sebelum Ready to Submit.",
+                }, { status: 422 });
+            }
         }
 
         const now = new Date();
@@ -197,13 +228,29 @@ export async function POST(request: Request, context: Context) {
         if (action === "submit_to_principal") {
             updatePayload.submittedToPrincipalAt = now;
         }
+        // Phase R2: return_to_draft menginvalidate ketiga dokumen sekaligus
+        // (Claim Letter, Summary, Kwitansi Claim) karena tax editing
+        // dibuka kembali dan perubahan item bisa membuat dokumen lama
+        // tidak konsisten dengan data terbaru.
         const invalidatedClaimLetterPdfPath = action === "return_to_draft"
             ? workflow.claimLetterPdfPath
+            : null;
+        const invalidatedSummaryPdfPath = action === "return_to_draft"
+            ? workflow.summaryPdfPath
+            : null;
+        const invalidatedReceiptPdfPath = action === "return_to_draft"
+            ? workflow.receiptPdfPath
             : null;
         if (action === "return_to_draft") {
             updatePayload.claimLetterPdfPath = null;
             updatePayload.claimLetterGeneratedAt = null;
             updatePayload.claimLetterGeneratedBy = null;
+            updatePayload.summaryPdfPath = null;
+            updatePayload.summaryGeneratedAt = null;
+            updatePayload.summaryGeneratedBy = null;
+            updatePayload.receiptPdfPath = null;
+            updatePayload.receiptGeneratedAt = null;
+            updatePayload.receiptGeneratedBy = null;
         }
 
         const auditMetadata = {
@@ -215,6 +262,8 @@ export async function POST(request: Request, context: Context) {
             remainingAmount: Number(workflow.remainingAmount || 0),
             itemCount: items.length,
             ...(invalidatedClaimLetterPdfPath ? { invalidatedClaimLetterPdfPath } : {}),
+            ...(invalidatedSummaryPdfPath ? { invalidatedSummaryPdfPath } : {}),
+            ...(invalidatedReceiptPdfPath ? { invalidatedReceiptPdfPath } : {}),
         };
 
         // Status transition + audit ditulis atomic agar tidak pernah ada
@@ -237,12 +286,24 @@ export async function POST(request: Request, context: Context) {
 
         // Setelah transaksi sukses, hapus PDF yang sudah di-invalidate supaya
         // file di disk tidak menumpuk. Audit log tetap menyimpan path lama
-        // di field `invalidatedClaimLetterPdfPath` untuk kebutuhan trace.
+        // di field `invalidated*` untuk kebutuhan trace.
         if (
             invalidatedClaimLetterPdfPath &&
             isPathInsideLettersDir(invalidatedClaimLetterPdfPath)
         ) {
             await unlink(invalidatedClaimLetterPdfPath).catch(() => {});
+        }
+        if (
+            invalidatedSummaryPdfPath &&
+            isPathInsideSummaryDir(invalidatedSummaryPdfPath)
+        ) {
+            await unlink(invalidatedSummaryPdfPath).catch(() => {});
+        }
+        if (
+            invalidatedReceiptPdfPath &&
+            isPathInsideReceiptDir(invalidatedReceiptPdfPath)
+        ) {
+            await unlink(invalidatedReceiptPdfPath).catch(() => {});
         }
 
         const [updated] = await db

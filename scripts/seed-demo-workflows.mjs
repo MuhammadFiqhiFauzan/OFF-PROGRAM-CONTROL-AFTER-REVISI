@@ -609,16 +609,46 @@ const CLAIM_STATUS_KNOWN = new Set([
 // benar-benar valid dan bisa dibuka via /api/claim-workflow/[id]/claim-letter.
 // Kalau pdf-lib gagal di-load, kembalikan null dan caller akan log skip.
 async function tryGenerateClaimLetterPdf(workflow) {
+    return tryGenerateStubPdf(workflow, {
+        kind: "claim-letter",
+        title: "DEMO CLAIM LETTER",
+        subjectSuffix: "(DEMO)",
+        directory: "letters",
+        filenameSuffix: "demo",
+    });
+}
+
+async function tryGenerateClaimSummaryPdf(workflow) {
+    return tryGenerateStubPdf(workflow, {
+        kind: "summary",
+        title: "DEMO CLAIM SUMMARY",
+        subjectSuffix: "(DEMO Summary)",
+        directory: "summaries",
+        filenameSuffix: "summary-demo",
+    });
+}
+
+async function tryGenerateClaimReceiptPdf(workflow) {
+    return tryGenerateStubPdf(workflow, {
+        kind: "receipt",
+        title: "DEMO KWITANSI CLAIM",
+        subjectSuffix: "(DEMO Receipt)",
+        directory: "receipts",
+        filenameSuffix: "receipt-demo",
+    });
+}
+
+async function tryGenerateStubPdf(workflow, options) {
     try {
         const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.setTitle(`Surat Claim ${workflow.claimWorkflowNo}`);
-        pdfDoc.setSubject(`Claim Letter - ${workflow.principleName} (DEMO)`);
+        pdfDoc.setTitle(`${options.title} ${workflow.claimWorkflowNo}`);
+        pdfDoc.setSubject(`${options.title} - ${workflow.principleName} ${options.subjectSuffix}`);
         pdfDoc.setCreator("AccAPI Claim Workflow Demo Seed");
         const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
         const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
         const page = pdfDoc.addPage([595.28, 841.89]);
-        page.drawText("DEMO CLAIM LETTER", {
+        page.drawText(options.title, {
             x: 48, y: 780, size: 18, font: bold, color: rgb(0.1, 0.13, 0.2),
         });
         page.drawText(`No: ${workflow.claimWorkflowNo}`, {
@@ -640,14 +670,14 @@ async function tryGenerateClaimLetterPdf(workflow) {
             x: 48, y: 635, size: 10, font, color: rgb(0.4, 0.45, 0.5),
         });
         const bytes = await pdfDoc.save();
-        const dir = join(process.cwd(), "runtime", "claim-workflow", "letters");
+        const dir = join(process.cwd(), "runtime", "claim-workflow", options.directory);
         mkdirSync(dir, { recursive: true });
         const safe = workflow.claimWorkflowNo.replace(/[^a-zA-Z0-9._-]+/g, "-");
-        const filePath = join(dir, `${safe}-demo.pdf`);
+        const filePath = join(dir, `${safe}-${options.filenameSuffix}.pdf`);
         writeFileSync(filePath, bytes);
         return filePath;
     } catch (error) {
-        console.warn(`  [warn] PDF generation gagal untuk ${workflow.claimWorkflowNo}: ${error?.message || error}`);
+        console.warn(`  [warn] PDF ${options.kind} stub gagal untuk ${workflow.claimWorkflowNo}: ${error?.message || error}`);
         return null;
     }
 }
@@ -703,11 +733,25 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
 
     let pdfPath = null;
     let pdfGeneratedAt = null;
+    let summaryPdfPath = null;
+    let summaryGeneratedAt = null;
+    let receiptPdfPath = null;
+    let receiptGeneratedAt = null;
     if (config.hasPdf) {
         pdfPath = await tryGenerateClaimLetterPdf({
             claimWorkflowNo, principleName: principle.name, status: config.status, totalClaim,
         });
         if (pdfPath) pdfGeneratedAt = ms(7);
+        // Phase R2: Summary dan Kwitansi Claim juga wajib sebelum Mark Ready.
+        // Demo me-mirror metadata + stub PDF supaya UI demo realistis.
+        summaryPdfPath = await tryGenerateClaimSummaryPdf({
+            claimWorkflowNo, principleName: principle.name, status: config.status, totalClaim,
+        });
+        if (summaryPdfPath) summaryGeneratedAt = ms(7);
+        receiptPdfPath = await tryGenerateClaimReceiptPdf({
+            claimWorkflowNo, principleName: principle.name, status: config.status, totalClaim,
+        });
+        if (receiptPdfPath) receiptGeneratedAt = ms(7);
     }
 
     await db.execute({
@@ -716,15 +760,19 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             total_dpp, total_ppn, total_pph, total_claim, total_paid, remaining_amount,
             submitted_to_principal_at, claim_letter_pdf_path, claim_letter_generated_at,
             claim_letter_generated_by,
+            summary_pdf_path, summary_generated_at, summary_generated_by,
+            receipt_pdf_path, receipt_generated_at, receipt_generated_by,
             no_claim, no_claim_assigned_at, no_claim_assigned_by,
             closed_at, created_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
             id, offBatch.batchId, claimWorkflowNo, principle.code, principle.name, config.status,
             totalDpp, totalPpn, totalPph, totalClaim, totalPaid, remainingAmount,
             config.hasSubmittedAt ? ms(6) : null,
             pdfPath, pdfGeneratedAt,
             pdfPath ? ACTOR_ID : null,
+            summaryPdfPath, summaryGeneratedAt, summaryPdfPath ? ACTOR_ID : null,
+            receiptPdfPath, receiptGeneratedAt, receiptPdfPath ? ACTOR_ID : null,
             noClaim, noClaim ? ms(8) : null, noClaim ? ACTOR_ID : null,
             config.isClosed ? ms(1) : null,
             ACTOR_ID, ms(10), ms(1),
@@ -822,6 +870,26 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             note: null,
             at: ms(7),
             metadataExtra: { claimLetterPdfPath: pdfPath, demo: true },
+        });
+    }
+    if (summaryPdfPath) {
+        auditEvents.push({
+            action: "claim_summary_generated",
+            fromStatus: config.status === "Ready to Submit" ? "Ready to Submit" : "Submitted to Principal",
+            toStatus: config.status === "Ready to Submit" ? "Ready to Submit" : "Submitted to Principal",
+            note: null,
+            at: ms(7),
+            metadataExtra: { pdfPath: summaryPdfPath, demo: true },
+        });
+    }
+    if (receiptPdfPath) {
+        auditEvents.push({
+            action: "claim_receipt_generated",
+            fromStatus: config.status === "Ready to Submit" ? "Ready to Submit" : "Submitted to Principal",
+            toStatus: config.status === "Ready to Submit" ? "Ready to Submit" : "Submitted to Principal",
+            note: null,
+            at: ms(7),
+            metadataExtra: { pdfPath: receiptPdfPath, demo: true },
         });
     }
     if (config.hasSubmittedAt) {

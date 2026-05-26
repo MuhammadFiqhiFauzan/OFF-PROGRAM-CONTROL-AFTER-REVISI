@@ -28,6 +28,12 @@ type Workflow = {
   claimLetterPdfPath?: string | null;
   claimLetterGeneratedAt?: string | Date | null;
   claimLetterGeneratedBy?: string | null;
+  summaryPdfPath?: string | null;
+  summaryGeneratedAt?: string | Date | null;
+  summaryGeneratedBy?: string | null;
+  receiptPdfPath?: string | null;
+  receiptGeneratedAt?: string | Date | null;
+  receiptGeneratedBy?: string | null;
   noClaim?: string | null;
   noClaimAssignedAt?: string | Date | null;
   noClaimAssignedBy?: string | null;
@@ -70,6 +76,8 @@ type DetailResult = {
   payments?: unknown[];
   canEditItems?: boolean;
   canGenerateClaimLetter?: boolean;
+  canGenerateSummary?: boolean;
+  canGenerateReceipt?: boolean;
   canAssignNoClaim?: boolean;
 };
 
@@ -171,6 +179,8 @@ export default function ClaimWorkflowDetailPage() {
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [canEditItems, setCanEditItems] = useState(false);
   const [canGenerateClaimLetter, setCanGenerateClaimLetter] = useState(false);
+  const [canGenerateSummary, setCanGenerateSummary] = useState(false);
+  const [canGenerateReceipt, setCanGenerateReceipt] = useState(false);
   const [canAssignNoClaim, setCanAssignNoClaim] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -181,6 +191,8 @@ export default function ClaimWorkflowDetailPage() {
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [transitionLoading, setTransitionLoading] = useState<TransitionAction | "">("");
   const [generatingLetter, setGeneratingLetter] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [generatingReceipt, setGeneratingReceipt] = useState(false);
   const [noClaimDraft, setNoClaimDraft] = useState("");
   const [noClaimSaving, setNoClaimSaving] = useState(false);
   const [noClaimEditing, setNoClaimEditing] = useState(false);
@@ -206,6 +218,8 @@ export default function ClaimWorkflowDetailPage() {
       setItems(result.items || []);
       setCanEditItems(Boolean(result.canEditItems));
       setCanGenerateClaimLetter(Boolean(result.canGenerateClaimLetter));
+      setCanGenerateSummary(Boolean(result.canGenerateSummary));
+      setCanGenerateReceipt(Boolean(result.canGenerateReceipt));
       setCanAssignNoClaim(Boolean(result.canAssignNoClaim));
       // Sinkronkan draft input dengan nilai No Claim terbaru, kecuali user
       // sedang mengetik (noClaimEditing true).
@@ -381,6 +395,60 @@ export default function ClaimWorkflowDetailPage() {
       setMessage(errorMessage);
     } finally {
       setGeneratingLetter(false);
+    }
+  };
+
+  const generateClaimSummary = async () => {
+    setGeneratingSummary(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/claim-workflow/${id}/summary`, {
+        method: "POST",
+      });
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal membuat Claim Summary PDF.");
+      }
+      const successMessage = "Claim Summary PDF berhasil dibuat.";
+      toast.success(successMessage);
+      setMessage(successMessage);
+      await loadDetail();
+    } catch (generateError) {
+      const errorMessage =
+        generateError instanceof Error
+          ? generateError.message
+          : "Gagal membuat Claim Summary PDF.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setGeneratingSummary(false);
+    }
+  };
+
+  const generateClaimReceipt = async () => {
+    setGeneratingReceipt(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/claim-workflow/${id}/receipt`, {
+        method: "POST",
+      });
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal membuat Kwitansi Claim PDF.");
+      }
+      const successMessage = "Kwitansi Claim PDF berhasil dibuat.";
+      toast.success(successMessage);
+      setMessage(successMessage);
+      await loadDetail();
+    } catch (generateError) {
+      const errorMessage =
+        generateError instanceof Error
+          ? generateError.message
+          : "Gagal membuat Kwitansi Claim PDF.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setGeneratingReceipt(false);
     }
   };
 
@@ -628,38 +696,158 @@ export default function ClaimWorkflowDetailPage() {
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-bold text-white">Claim Letter</h2>
+            <h2 className="font-bold text-white">Dokumen Klaim</h2>
             <p className="mt-1 text-sm text-slate-400">
-              {workflow.claimLetterGeneratedAt
-                ? `Generated at ${dateText(workflow.claimLetterGeneratedAt)}`
-                : "Not generated"}
+              Tiga dokumen wajib di-generate sebelum Mark Ready: Claim Letter, Claim Summary, Kwitansi Claim.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {workflow.claimLetterPdfPath && (
-              <a
-                href={`/api/claim-workflow/${id}/claim-letter`}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/10"
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {/* Claim Letter */}
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-white">Claim Letter</h3>
+              <span
+                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  workflow.claimLetterPdfPath
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                }`}
               >
-                Open Claim Letter PDF
-              </a>
-            )}
-            {canGenerateClaimLetter && (
-              <button
-                type="button"
-                disabled={generatingLetter}
-                onClick={() => void generateClaimLetter()}
-                className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                {workflow.claimLetterPdfPath ? "Generated" : "Belum"}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {workflow.claimLetterGeneratedAt
+                ? `Generated at ${dateText(workflow.claimLetterGeneratedAt)}`
+                : "Surat klaim resmi ke principal."}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {workflow.claimLetterPdfPath && (
+                <a
+                  href={`/api/claim-workflow/${id}/claim-letter`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
+                >
+                  Open PDF
+                </a>
+              )}
+              {canGenerateClaimLetter && (
+                <button
+                  type="button"
+                  disabled={generatingLetter}
+                  onClick={() => void generateClaimLetter()}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {generatingLetter
+                    ? "Generating..."
+                    : workflow.claimLetterPdfPath ? "Regenerate" : "Generate"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Claim Summary */}
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-white">Claim Summary</h3>
+              <span
+                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  workflow.summaryPdfPath
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                }`}
               >
-                {generatingLetter ? "Generating..." : "Generate Claim Letter PDF"}
-              </button>
-            )}
+                {workflow.summaryPdfPath ? "Generated" : "Belum"}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {workflow.summaryGeneratedAt
+                ? `Generated at ${dateText(workflow.summaryGeneratedAt)}`
+                : "Ringkasan tabel item dan total klaim."}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {workflow.summaryPdfPath && (
+                <a
+                  href={`/api/claim-workflow/${id}/summary`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
+                >
+                  Open PDF
+                </a>
+              )}
+              {canGenerateSummary && (
+                <button
+                  type="button"
+                  disabled={generatingSummary}
+                  onClick={() => void generateClaimSummary()}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {generatingSummary
+                    ? "Generating..."
+                    : workflow.summaryPdfPath ? "Regenerate" : "Generate"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Kwitansi Claim */}
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-white">Kwitansi Claim</h3>
+              <span
+                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  workflow.receiptPdfPath
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                }`}
+              >
+                {workflow.receiptPdfPath ? "Generated" : "Belum"}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {workflow.receiptGeneratedAt
+                ? `Generated at ${dateText(workflow.receiptGeneratedAt)}`
+                : "Kwitansi pengajuan klaim (pre-submission)."}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {workflow.receiptPdfPath && (
+                <a
+                  href={`/api/claim-workflow/${id}/receipt`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
+                >
+                  Open PDF
+                </a>
+              )}
+              {canGenerateReceipt && (
+                <button
+                  type="button"
+                  disabled={generatingReceipt}
+                  onClick={() => void generateClaimReceipt()}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {generatingReceipt
+                    ? "Generating..."
+                    : workflow.receiptPdfPath ? "Regenerate" : "Generate"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
+
+        {(workflow.status === claimWorkflowStatuses.draft ||
+          workflow.status === claimWorkflowStatuses.needRevision) && (
+          <p className="mt-4 text-xs text-amber-200">
+            Mark Ready memerlukan ketiga dokumen di atas, plus No Claim ter-assign dan Total Claim &gt; 0.
+          </p>
+        )}
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23] shadow-lg shadow-black/20">
