@@ -281,6 +281,9 @@ const statements = [
     total_paid REAL NOT NULL DEFAULT 0,
     remaining_amount REAL NOT NULL DEFAULT 0,
     submitted_to_principal_at INTEGER,
+    claim_letter_pdf_path TEXT,
+    claim_letter_generated_at INTEGER,
+    claim_letter_generated_by TEXT,
     closed_at INTEGER,
     created_by TEXT,
     created_at INTEGER NOT NULL,
@@ -435,6 +438,9 @@ const migrations = [
   `ALTER TABLE claim_workflow_item ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE claim_workflow_item ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE claim_payment ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE claim_workflow ADD COLUMN claim_letter_pdf_path TEXT;`,
+  `ALTER TABLE claim_workflow ADD COLUMN claim_letter_generated_at INTEGER;`,
+  `ALTER TABLE claim_workflow ADD COLUMN claim_letter_generated_by TEXT;`,
 ];
 
 for (const sql of migrations) {

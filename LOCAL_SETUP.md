@@ -9,8 +9,8 @@ Aplikasi terdiri dari dua service:
 
 ## Prasyarat
 
-- Node.js 20+ (sudah teruji dengan v24)
-- Python 3.11+ (sudah teruji dengan 3.14.5)
+- **Node.js 20 LTS atau lebih baru** direkomendasikan untuk stabilitas. Node 24 sudah teruji jalan, tapi bukan rekomendasi paling aman karena masih relatif baru.
+- **Python 3.11 atau 3.12** direkomendasikan untuk stabilitas dependency. Versi yang lebih baru (3.13/3.14) boleh dipakai selama semua paket di `requirements.txt` berhasil di-install.
 - PowerShell
 
 Kalau Python belum ada, install dari https://www.python.org/downloads/ dan centang **Add python.exe to PATH** saat installer berjalan.
@@ -19,13 +19,24 @@ Kalau Python belum ada, install dari https://www.python.org/downloads/ dan centa
 
 Jalankan dari root project (`D:\KULYEAH\AccAPI-main - Copy`).
 
-### 1. Install dependencies frontend
+### 1. Buka folder project
+
+Sebelum menjalankan perintah apapun, pastikan PowerShell sudah berada di root project. Path yang diharapkan: `D:\KULYEAH\AccAPI-main - Copy`.
+
+```powershell
+cd "D:\KULYEAH\AccAPI-main - Copy"
+Get-Location
+```
+
+`Get-Location` harus menampilkan path di atas. Semua step berikutnya berasumsi posisi shell ada di sini.
+
+### 2. Install dependencies frontend
 
 ```powershell
 npm install
 ```
 
-### 2. Setup virtual environment + dependencies backend
+### 3. Setup virtual environment + dependencies backend
 
 ```powershell
 cd python_backend
@@ -37,7 +48,7 @@ cd ..
 
 Catatan: pada mesin yang `python` masih mengarah ke stub Microsoft Store, gunakan `py` (Python launcher). Setelah venv aktif, semua perintah berikutnya pakai `.\.venv\Scripts\python.exe` atau aktifkan venv via `.\.venv\Scripts\Activate.ps1`.
 
-### 3. Pastikan file `.env` ada
+### 4. Pastikan file `.env` ada
 
 File `.env` sudah disiapkan di root project. Kalau belum, salin dari `.env.example`:
 
@@ -47,7 +58,7 @@ Copy-Item .env.example .env
 
 Nilai default `.env` sudah cukup untuk menjalankan lokal di `http://localhost:3000` dan `http://localhost:8000`. Jangan commit file ini.
 
-### 4. Inisialisasi database SQLite
+### 5. Inisialisasi database SQLite
 
 ```powershell
 node scripts/init-db.mjs
@@ -55,7 +66,18 @@ node scripts/init-db.mjs
 
 Output yang diharapkan: `SQLite tables are ready`. File `sqlite.db` akan dibuat di root project.
 
-### 5. Akun login default
+### 6. Verifikasi build & script
+
+Setelah database dibuat, pastikan TypeScript dan script init tidak punya error:
+
+```powershell
+npm.cmd exec tsc -- --noEmit --pretty false
+node --check scripts/init-db.mjs
+```
+
+`tsc --noEmit` harus selesai tanpa diagnostic apapun (tidak ada output error). `node --check` mem-validasi syntax script init-db tanpa menjalankannya. Kalau salah satu gagal, fix dulu sebelum lanjut ke seed.
+
+### 7. Akun login default
 
 Database sudah pre-seeded dengan akun lokal (lihat `scripts/temp-seed-admin.mjs`). Kalau database masih kosong, jalankan:
 
@@ -125,6 +147,65 @@ node scripts/reset-data.mjs
 
 Script ini hanya jalan untuk database lokal (DATABASE_URL `file:sqlite.db`).
 
+## Status Workflow Saat Ini
+
+### OFF Program Control
+
+Flow lengkap dari **Draft sampai Completed** (7 step approval) sudah diimplementasi.
+
+### Claim Workflow (current implemented flow)
+
+```
+OFF Completed
+  -> Create Claim Workflow
+  -> Draft
+  -> Edit DPP / PPN / PPH
+  -> Ready to Submit
+  -> Generate Claim Letter PDF
+  -> Submitted to Principal
+```
+
+### Masih ditunda (deferred)
+
+Status berikut belum diimplementasi di build saat ini:
+
+- Waiting PEKA
+- EC Received
+- CN Received
+- Partially Paid
+- Paid
+- Closed
+
+Tabel database-nya sudah disiapkan, tapi endpoint dan UI-nya masuk fase pengembangan berikutnya.
+
+## Struktur Folder Penting
+
+- `app/` - halaman dan API routes Next.js (App Router)
+- `python_backend/` - service FastAPI (auth, payments, validator, SPPD generator)
+- `lib/` - logic shared (claim-workflow, off-program-control, dll)
+- `db/` - schema Drizzle ORM untuk SQLite
+- `scripts/` - utility dev (init DB, seed user, reset data)
+- `runtime/` - output runtime (PDF kwitansi, bukti pembayaran). Auto-dibuat saat dibutuhkan.
+- `runtime/claim-workflow/letters` - output PDF Surat Claim dari Claim Workflow
+- `sqlite.db` - database SQLite lokal
+
+File yang TIDAK di-commit (lihat `.gitignore`): `.env`, `node_modules/`, `.next/`, `python_backend/.venv/`, `runtime/`, `sqlite.db`.
+
+## Checklist Tes Lokal
+
+Setelah backend & frontend running, jalankan checklist berikut untuk memastikan flow Claim Workflow utuh:
+
+- [ ] Login sebagai **admin** (`admin@local.test`)
+- [ ] Buat atau cek satu OFF Program Control yang sudah berstatus **Completed**
+- [ ] Dari OFF Completed tersebut, **Create Claim Workflow**
+- [ ] Pada status **Draft**, edit nilai **DPP / PPN / PPH**
+- [ ] Mark claim workflow sebagai **Ready to Submit**
+- [ ] Konfirmasi field tax (DPP / PPN / PPH) sudah **terkunci** (tidak bisa diedit lagi setelah Ready)
+- [ ] **Generate Claim Letter PDF**
+- [ ] Buka PDF dan pastikan isinya sesuai
+- [ ] **Submit to Principal** (transisi ke Submitted to Principal)
+- [ ] Logout, login sebagai **staff** (`staff@local.test`), dan konfirmasi staff TIDAK bisa create / edit / generate PDF / melakukan transisi pada Claim Workflow
+
 ## Troubleshooting
 
 ### Port 3000 sudah dipakai
@@ -155,26 +236,21 @@ Ini terjadi kalau memanggil endpoint Better Auth tanpa header `Origin`. Saat log
 
 Endpoint `/api/admin/bootstrap` hanya jalan saat tabel `user` masih kosong. Karena database sudah pre-seeded dengan akun lokal, langsung pakai akun di atas saja. Untuk mengganti password manual, edit script `scripts/temp-seed-admin.mjs` lalu jalankan ulang.
 
-## Status Workflow Saat Ini
+### Tombol "Generate Claim Letter PDF" tidak muncul
 
-Flow OFF Program Control sudah lengkap dari Draft sampai Completed (7 step approval).
+Tombol generate hanya tampil kalau dua syarat terpenuhi:
 
-Flow Claim Workflow saat ini hanya mengimplementasikan transisi awal:
+- **Role** user harus `admin` atau `claim` (staff tidak bisa generate).
+- **Status** claim workflow harus `Ready to Submit` atau `Submitted to Principal`. Pada status `Draft` tombol sengaja disembunyikan karena nilai tax belum dikunci.
 
-```
-Draft -> Ready to Submit -> Submitted to Principal
-```
+Kalau tombol tidak muncul padahal role & status sudah benar, refresh halaman supaya state claim workflow ter-fetch ulang.
 
-Status berikutnya (`Waiting PEKA`, `EC Received`, `CN Received`, `Partially Paid`, `Paid`, `Closed`) belum diimplementasi di build saat ini. Tabel database-nya sudah disiapkan, tapi endpoint dan UI-nya masuk fase pengembangan berikutnya.
+### Claim Letter PDF mengembalikan 404
 
-## Struktur Folder Penting
+Endpoint download PDF butuh file fisik di disk dan path-nya tercatat di metadata claim workflow. Kalau dapat 404:
 
-- `app/` - halaman dan API routes Next.js (App Router)
-- `python_backend/` - service FastAPI (auth, payments, validator, SPPD generator)
-- `lib/` - logic shared (claim-workflow, off-program-control, dll)
-- `db/` - schema Drizzle ORM untuk SQLite
-- `scripts/` - utility dev (init DB, seed user, reset data)
-- `runtime/` - output runtime (PDF kwitansi, bukti pembayaran). Auto-dibuat saat dibutuhkan.
-- `sqlite.db` - database SQLite lokal
+1. Pastikan PDF sudah di-**generate** dulu (klik tombol Generate, jangan langsung Download).
+2. Cek folder `runtime/claim-workflow/letters` di root project. File PDF harus ada di sana.
+3. Cek metadata claim workflow di database, field `claim_letter_pdf_path` harus terisi dengan path relatif ke file PDF tersebut.
 
-File yang TIDAK di-commit (lihat `.gitignore`): `.env`, `node_modules/`, `.next/`, `python_backend/.venv/`, `runtime/`, `sqlite.db`.
+Kalau file ada tapi metadata kosong (atau sebaliknya), generate ulang PDF supaya keduanya sinkron.

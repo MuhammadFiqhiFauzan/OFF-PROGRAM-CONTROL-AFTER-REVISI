@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import {
     canActorReadClaimWorkflow,
+    claimWorkflowStatuses,
     requireClaimSession,
 } from "@/lib/claim-workflow";
 
@@ -47,6 +48,11 @@ export async function GET(_request: Request, context: Context) {
             .from(claimPayment)
             .where(eq(claimPayment.claimWorkflowId, id))
             .orderBy(asc(claimPayment.createdAt));
+        const canManageClaim = actor.role === "admin" || actor.role === "claim";
+        const canGenerateClaimLetter = canManageClaim && (
+            row.workflow.status === claimWorkflowStatuses.readyToSubmit ||
+            row.workflow.status === claimWorkflowStatuses.submittedToPrincipal
+        );
 
         return NextResponse.json({
             ok: true,
@@ -60,7 +66,8 @@ export async function GET(_request: Request, context: Context) {
             },
             items,
             payments,
-            canEditItems: actor.role === "admin" || actor.role === "claim",
+            canEditItems: canManageClaim,
+            canGenerateClaimLetter,
         });
     } catch (error) {
         console.error("[CLAIM WORKFLOW DETAIL ERROR]", error);

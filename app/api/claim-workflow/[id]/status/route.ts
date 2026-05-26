@@ -1,3 +1,5 @@
+import path from "node:path";
+import { unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -7,6 +9,13 @@ import {
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
+
+const CLAIM_LETTERS_DIR = path.resolve(process.cwd(), "runtime", "claim-workflow", "letters");
+
+function isPathInsideLettersDir(targetPath: string): boolean {
+    const resolved = path.resolve(targetPath);
+    return resolved === CLAIM_LETTERS_DIR || resolved.startsWith(CLAIM_LETTERS_DIR + path.sep);
+}
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -162,6 +171,14 @@ export async function POST(request: Request, context: Context) {
         if (action === "submit_to_principal") {
             updatePayload.submittedToPrincipalAt = now;
         }
+        const invalidatedClaimLetterPdfPath = action === "return_to_draft"
+            ? workflow.claimLetterPdfPath
+            : null;
+        if (action === "return_to_draft") {
+            updatePayload.claimLetterPdfPath = null;
+            updatePayload.claimLetterGeneratedAt = null;
+            updatePayload.claimLetterGeneratedBy = null;
+        }
 
         const auditMetadata = {
             totalDpp: Number(workflow.totalDpp || 0),
@@ -171,6 +188,7 @@ export async function POST(request: Request, context: Context) {
             totalPaid: Number(workflow.totalPaid || 0),
             remainingAmount: Number(workflow.remainingAmount || 0),
             itemCount: items.length,
+            ...(invalidatedClaimLetterPdfPath ? { invalidatedClaimLetterPdfPath } : {}),
         };
 
         // Status transition + audit ditulis atomic agar tidak pernah ada
@@ -190,6 +208,16 @@ export async function POST(request: Request, context: Context) {
                 metadata: auditMetadata,
             }, tx);
         });
+
+        // Setelah transaksi sukses, hapus PDF yang sudah di-invalidate supaya
+        // file di disk tidak menumpuk. Audit log tetap menyimpan path lama
+        // di field `invalidatedClaimLetterPdfPath` untuk kebutuhan trace.
+        if (
+            invalidatedClaimLetterPdfPath &&
+            isPathInsideLettersDir(invalidatedClaimLetterPdfPath)
+        ) {
+            await unlink(invalidatedClaimLetterPdfPath).catch(() => {});
+        }
 
         const [updated] = await db
             .select()

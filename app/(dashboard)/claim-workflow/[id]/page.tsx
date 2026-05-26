@@ -25,6 +25,9 @@ type Workflow = {
   totalPaid: number;
   remainingAmount: number;
   submittedToPrincipalAt?: string | Date | null;
+  claimLetterPdfPath?: string | null;
+  claimLetterGeneratedAt?: string | Date | null;
+  claimLetterGeneratedBy?: string | null;
   createdAt: string | Date;
 };
 
@@ -62,6 +65,7 @@ type DetailResult = {
   items?: WorkflowItem[];
   payments?: unknown[];
   canEditItems?: boolean;
+  canGenerateClaimLetter?: boolean;
 };
 
 type EditDraft = {
@@ -119,6 +123,7 @@ export default function ClaimWorkflowDetailPage() {
   const [items, setItems] = useState<WorkflowItem[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [canEditItems, setCanEditItems] = useState(false);
+  const [canGenerateClaimLetter, setCanGenerateClaimLetter] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditError, setAuditError] = useState("");
@@ -127,6 +132,7 @@ export default function ClaimWorkflowDetailPage() {
   const [savingId, setSavingId] = useState("");
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [transitionLoading, setTransitionLoading] = useState<TransitionAction | "">("");
+  const [generatingLetter, setGeneratingLetter] = useState(false);
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -144,6 +150,7 @@ export default function ClaimWorkflowDetailPage() {
       setWorkflow(result.workflow);
       setItems(result.items || []);
       setCanEditItems(Boolean(result.canEditItems));
+      setCanGenerateClaimLetter(Boolean(result.canGenerateClaimLetter));
 
       const auditResponse = await fetch(`/api/claim-workflow/${id}/audit`, {
         cache: "no-store",
@@ -270,6 +277,33 @@ export default function ClaimWorkflowDetailPage() {
     [id, loadDetail, workflow],
   );
 
+  const generateClaimLetter = async () => {
+    setGeneratingLetter(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/claim-workflow/${id}/claim-letter`, {
+        method: "POST",
+      });
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal membuat Claim Letter PDF.");
+      }
+      const successMessage = "Claim Letter PDF berhasil dibuat.";
+      toast.success(successMessage);
+      setMessage(successMessage);
+      await loadDetail();
+    } catch (generateError) {
+      const errorMessage =
+        generateError instanceof Error
+          ? generateError.message
+          : "Gagal membuat Claim Letter PDF.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setGeneratingLetter(false);
+    }
+  };
+
   if (loading) {
     return <div className="px-5 py-12 text-sm text-slate-400">Memuat detail Claim Workflow...</div>;
   }
@@ -361,6 +395,41 @@ export default function ClaimWorkflowDetailPage() {
         </div>
       )}
 
+      <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-white">Claim Letter</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              {workflow.claimLetterGeneratedAt
+                ? `Generated at ${dateText(workflow.claimLetterGeneratedAt)}`
+                : "Not generated"}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {workflow.claimLetterPdfPath && (
+              <a
+                href={`/api/claim-workflow/${id}/claim-letter`}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/10"
+              >
+                Open Claim Letter PDF
+              </a>
+            )}
+            {canGenerateClaimLetter && (
+              <button
+                type="button"
+                disabled={generatingLetter}
+                onClick={() => void generateClaimLetter()}
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {generatingLetter ? "Generating..." : "Generate Claim Letter PDF"}
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
       <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23]">
         <div className="border-b border-white/10 px-5 py-4">
           <h2 className="font-bold text-white">Items</h2>
@@ -379,7 +448,7 @@ export default function ClaimWorkflowDetailPage() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {items.map((item) => {
-                const isEditing = editingId === item.id && draft;
+                const isEditing = editable && editingId === item.id && draft;
                 return (
                   <tr key={item.id} className="text-slate-300">
                     <td className="whitespace-nowrap px-4 py-3 font-mono">{item.noSurat || "-"}</td>

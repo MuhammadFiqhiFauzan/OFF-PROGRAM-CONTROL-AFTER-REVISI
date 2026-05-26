@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Claim Workflow is the post-OFF web module for monitoring claims sent to a principal, PEKA processing, EC/CN receipt, payment, outstanding balances, and final closure. Phase 1 established its isolated foundation; Phase 2A added safe creation navigation, detail display, and draft tax editing. Phase 2B adds controlled status transitions before any future PDF generation.
+Claim Workflow is the post-OFF web module for monitoring claims sent to a principal, PEKA processing, EC/CN receipt, payment, outstanding balances, and final closure. Phase 1 established its isolated foundation; Phase 2A added safe creation navigation, detail display, and draft tax editing. Phase 2B added controlled status transitions, and Phase 2C generates a claim-letter PDF from approved Claim Workflow data.
 
 ## Currently Implemented Phases
 
@@ -26,6 +26,13 @@ Claim Workflow is the post-OFF web module for monitoring claims sent to a princi
 - `submittedToPrincipalAt` is set when `submit_to_principal` succeeds.
 - Item tax editing is locked at API and UI layers once the workflow reaches `Ready to Submit` or `Submitted to Principal`.
 - Audit actions written for each transition: `mark_ready`, `return_to_draft`, `submit_to_principal`.
+
+### Phase 2C - claim letter PDF generation
+- `POST /api/claim-workflow/[id]/claim-letter` generates the claim letter that replaces the old Word mail merge file `SURAT CLAIM GODREJ.docx`.
+- Generation is `admin`/`claim` only and is allowed only from `Ready to Submit` or `Submitted to Principal`, never `Draft` or `Need Revision`.
+- The PDF uses stored Claim Workflow items/totals rather than an Excel filter or Word active record.
+- Generated file metadata is stored on `claim_workflow`, and successful generation writes the `claim_letter_generated` audit action.
+- `GET /api/claim-workflow/[id]/claim-letter` serves the previously generated PDF to actors permitted to view that workflow.
 
 ## Separation From OFF Program Control
 
@@ -56,7 +63,7 @@ Creation is an explicit privilege boundary: only a resolved OFF role of `admin` 
 | Excel `Paid` | Future payment tab backed by `claim_payment` |
 | Excel `Monitoring Outstanding` | Outstanding dashboard/status reporting |
 | Excel `REPORT PEKA` | Future import into `claim_peka_report` and EC/CN matching |
-| Word `SURAT CLAIM GODREJ.docx` | Future PDF claim letter generator |
+| Word `SURAT CLAIM GODREJ.docx` | Replaced by Phase 2C Claim Letter PDF generation |
 
 ## Status Lifecycle
 
@@ -95,8 +102,10 @@ Defined initial statuses:
 - `GET /api/claim-workflow/[id]/audit`: authenticated Claim Workflow audit history.
 - `PATCH /api/claim-workflow/[id]/items/[itemId]`: `admin`/`claim` only; updates `dpp`, `ppnRate`, `pphRate`, and `note` while the workflow is `Draft` or `Need Revision`, then logs `update_item_tax`.
 - `POST /api/claim-workflow/[id]/status`: `admin`/`claim` only; safe status transitions before PDF generation (Phase 2B). See section below.
+- `POST /api/claim-workflow/[id]/claim-letter`: `admin`/`claim` only; creates an A4 claim-letter PDF from a `Ready to Submit` or `Submitted to Principal` workflow and logs `claim_letter_generated`.
+- `GET /api/claim-workflow/[id]/claim-letter`: serves the stored PDF to authorized workflow viewers without regenerating it.
 
-PEKA imports, payment upload/actions, claim-letter PDF generation, and closure APIs are deliberately not implemented yet.
+PEKA imports, EC/CN matching, payment upload/actions, and closure APIs are deliberately not implemented yet.
 
 ## Phase 2A UI
 
@@ -106,7 +115,7 @@ PEKA imports, payment upload/actions, claim-letter PDF generation, and closure A
 
 ## Phase 2B Status Transitions
 
-Phase 2B introduces controlled status transitions so claim users can lock a draft before any future PDF generation. PDF generation, PEKA import, EC/CN matching, payment entry, upload proof, close workflow, and overpayment fields remain intentionally deferred.
+Phase 2B introduced controlled status transitions so claim users can lock a draft before Phase 2C PDF generation. PEKA import, EC/CN matching, payment entry, upload proof, close workflow, and overpayment fields remain intentionally deferred.
 
 ### Endpoint
 
@@ -166,9 +175,13 @@ To resume editing after `Ready to Submit`, an authorized user must first invoke 
 - `Ready to Submit`: header shows `Return to Draft` and `Submit to Principal`. `Submit to Principal` requires an in-page confirmation before the request is sent.
 - All other statuses: no transition buttons are shown in this phase.
 
-### Future Phase 2C
+## Phase 2C Claim Letter PDF
 
-Phase 2C will generate the claim-letter PDF from a workflow that is `Ready to Submit` or `Submitted to Principal`. PDF generation must remain blocked until Phase 2B status control exists, which is what this phase establishes.
+Phase 2C generates an A4 claim-letter PDF as the web replacement for `SURAT CLAIM GODREJ.docx`. It uses persisted `claim_workflow` and `claim_workflow_item` values, including DPP, PPN, PPH, and `nilaiKlaim`; it does not depend on Word mail merge, Excel filters, or `terbilang.xlam`. Generation remains blocked for `Draft` and `Need Revision`.
+
+The detail page displays generation state and a link to the stored PDF after generation. `claim_workflow.claim_letter_pdf_path`, `claim_letter_generated_at`, and `claim_letter_generated_by` store the current generated artifact metadata, while `claim_audit_log.action = "claim_letter_generated"` records each successful generation.
+
+If a generated `Ready to Submit` workflow is returned to `Draft`, its active claim-letter metadata is cleared so a revised draft cannot expose a stale PDF as current. The `return_to_draft` audit metadata retains the invalidated file path for traceability.
 
 ## Calculations
 
@@ -217,21 +230,20 @@ The item update, header aggregate update, and `update_item_tax` audit entry are 
 - A duplicate No Surat override is restricted to resolved `admin` or `claim` roles because No Surat is a future matching key for PEKA, EC, and CN.
 - OFF batch `PATCH` must validate incoming header/item data and duplicate No Surat rules before any mutation, or perform the complete write atomically in a database transaction. A failed validation must not persist header changes while retaining old items.
 
-## Future Phases
+## Implementation Roadmap
 
 1. Phase 1 foundation: isolated tables, initialization SQL, helpers, authenticated base APIs, audit creation event, and monitoring page.
 2. Phase 2A: safe creation action, detail page, and draft/revision item tax editing.
 3. Phase 2B: safe status transitions before PDF generation (`mark_ready`, `return_to_draft`, `submit_to_principal`) with audit and item edit lock after `Ready to Submit`.
-4. Phase 2C: generate claim letter PDF from `Ready to Submit` or `Submitted to Principal`, only after the DPP/PPN/PPH mapping has been verified by users.
+4. Phase 2C implemented: generate claim letter PDF from `Ready to Submit` or `Submitted to Principal` using Claim Workflow database data.
 5. Phase 3: PEKA import/matching.
 6. Phase 4: payment/outstanding (including the dedicated `overpaidAmount` field if business confirms overpayment is in scope).
 7. Phase 5: close workflow + audit hardening.
 
 ### Intentionally Deferred Features
 
-The following are deferred and **must not** be implemented as part of Phase 2B fixes:
+The following remain deferred after Phase 2C:
 
-- PDF generation of the claim letter (Phase 2C).
 - PEKA import (Phase 3).
 - EC/CN matching (Phase 3).
 - Payment entry (Phase 4).
@@ -240,13 +252,13 @@ The following are deferred and **must not** be implemented as part of Phase 2B f
 - `overpaidAmount` field — keep `remainingAmount` clamped to zero until then.
 - Full transactional refactor of OFF Program Control `PATCH` beyond what is already in place.
 
-Do not start PDF generation until users have verified the DPP/PPN/PPH mapping. PDF generation, when added, must only be allowed from `Ready to Submit` or `Submitted to Principal` — never from `Draft` or `Need Revision`.
+Claim-letter PDF generation must only be allowed from `Ready to Submit` or `Submitted to Principal` - never from `Draft` or `Need Revision`.
 
 ## Important Warnings
 
 - Do not put Claim Workflow statuses (`Ready to Submit`, `Submitted to Principal`, `Waiting PEKA`, `EC Received`, `CN Received`, `Partially Paid`, `Paid`, `Closed`) into `off_batch.status`.
 - Do not put PEKA/CN/payment claim statuses into `off_batch.status`.
-- Do not implement PEKA, payment, close, or overpayment lifecycles in Phase 2B.
+- Do not implement PEKA, payment, close, or overpayment lifecycles in Phase 2C.
 - `staff` Claim Workflow permission preset must remain `["view"]` only. Do not re-add `create`, `edit`, `update`, or `submit` to `rolePermissionPresets.staff.claim_workflow`.
 - `canActorCreateClaimWorkflow` must not fall back to broad RBAC `canAccess("claim_workflow", "create", ...)`. Resolved role must be `admin` or `claim`.
 - `remainingAmount` must remain `max(totalClaim - totalPaid, 0)`. Negative outstanding is forbidden in this phase.
@@ -256,4 +268,4 @@ Do not start PDF generation until users have verified the DPP/PPN/PPH mapping. P
 - Do not treat No Surat as globally unique without validation.
 - Do not allow supervisors to force a duplicate No Surat override.
 - OFF item nominal is currently treated as initial DPP until business confirms mapping.
-- PDF generation should wait until tax mapping is verified and should only be allowed from `Ready to Submit` or `Submitted to Principal`, not `Draft`.
+- Claim-letter PDF generation is allowed only from `Ready to Submit` or `Submitted to Principal`, not `Draft`.
