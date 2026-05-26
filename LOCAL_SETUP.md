@@ -93,6 +93,21 @@ Kredensial yang dibuat:
 | claim | `claim@local.test` | `Password123!` |
 | staff | `staff@local.test` | `Password123!` |
 
+### 8. (Opsional) Seed demo data UI
+
+Untuk mengisi seluruh stage OFF Program Control dan Claim Workflow dengan data
+contoh supaya UI bisa langsung diuji per status (termasuk PEKA preview, Claim
+Letter PDF, dan claim payment), jalankan:
+
+```powershell
+node scripts/seed-demo-workflows.mjs
+# atau
+npm run seed:demo
+```
+
+Detail skenario, prefix, dan langkah verifikasi UI ada di
+[`docs/DEMO_DATA.md`](./docs/DEMO_DATA.md). Seed ini local-only dan idempotent.
+
 ## Menjalankan Aplikasi
 
 Butuh dua terminal PowerShell terpisah.
