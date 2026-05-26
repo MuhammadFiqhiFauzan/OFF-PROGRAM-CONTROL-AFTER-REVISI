@@ -1,3 +1,4 @@
+import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
@@ -15,6 +16,13 @@ import {
 export const runtime = "nodejs";
 
 type Context = { params: Promise<{ id: string }> };
+
+const OFF_RUNTIME_DIR = path.resolve(process.cwd(), "runtime", "off-program-control");
+
+function isPathInsideOffRuntimeDir(targetPath: string): boolean {
+    const resolved = path.resolve(targetPath);
+    return resolved === OFF_RUNTIME_DIR || resolved.startsWith(OFF_RUNTIME_DIR + path.sep);
+}
 
 function canPrintWithoutSaving(batch: typeof offBatch.$inferSelect) {
     return !batch.locked && (
@@ -80,6 +88,7 @@ export async function POST(_request: Request, context: Context) {
             headers: {
                 "Content-Type": "application/pdf",
                 "Content-Disposition": `inline; filename="${data.batch.noPengajuan.replace(/[^a-zA-Z0-9]+/g, "-")}-kwitansi.pdf"`,
+                "Cache-Control": "no-store",
             },
         });
     } catch (error) {
@@ -101,12 +110,21 @@ export async function GET(_request: Request, context: Context) {
     if (!data) return NextResponse.json({ ok: false, error: "Batch not found" }, { status: 404 });
     if (!data.batch.receiptPdfPath) return NextResponse.json({ ok: false, error: "PDF kwitansi belum pernah disimpan." }, { status: 404 });
 
+    if (!isPathInsideOffRuntimeDir(data.batch.receiptPdfPath)) {
+        console.error("[OFF RECEIPT PDF] Refusing to serve PDF outside OFF runtime dir", {
+            batchId: id,
+            path: data.batch.receiptPdfPath,
+        });
+        return NextResponse.json({ ok: false, error: "Path PDF kwitansi tidak valid." }, { status: 400 });
+    }
+
     try {
         const file = await readFile(data.batch.receiptPdfPath);
         return new NextResponse(new Uint8Array(file), {
             headers: {
                 "Content-Type": "application/pdf",
                 "Content-Disposition": `inline; filename="${data.batch.noPengajuan.replace(/[^a-zA-Z0-9]+/g, "-")}-kwitansi.pdf"`,
+                "Cache-Control": "no-store",
             },
         });
     } catch {

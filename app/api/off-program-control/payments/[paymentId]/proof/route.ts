@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
+import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { offPayment } from "@/db/schema";
 import { canActorAccessOffData, requireOffSession } from "@/lib/off-program-control";
 
 type Context = { params: Promise<{ paymentId: string }> };
+
+const OFF_RUNTIME_DIR = path.resolve(process.cwd(), "runtime", "off-program-control");
+
+function isPathInsideOffRuntimeDir(targetPath: string): boolean {
+    const resolved = path.resolve(targetPath);
+    return resolved === OFF_RUNTIME_DIR || resolved.startsWith(OFF_RUNTIME_DIR + path.sep);
+}
 
 export async function GET(_request: Request, context: Context) {
     const actor = await requireOffSession();
@@ -19,6 +27,13 @@ export async function GET(_request: Request, context: Context) {
         const [payment] = await db.select().from(offPayment).where(eq(offPayment.id, paymentId));
         if (!payment) return NextResponse.json({ ok: false, error: "Bukti pembayaran tidak ditemukan." }, { status: 404 });
         if (!payment.paymentProofPath) return NextResponse.json({ ok: false, error: "Payment ini belum memiliki file bukti pembayaran." }, { status: 404 });
+        if (!isPathInsideOffRuntimeDir(payment.paymentProofPath)) {
+            console.error("[OFF PAYMENT PROOF] Refusing to serve file outside OFF runtime dir", {
+                paymentId,
+                path: payment.paymentProofPath,
+            });
+            return NextResponse.json({ ok: false, error: "Path bukti pembayaran tidak valid." }, { status: 400 });
+        }
         if (!fs.existsSync(payment.paymentProofPath)) return NextResponse.json({ ok: false, error: "File bukti pembayaran tidak ditemukan di server." }, { status: 404 });
         const stats = fs.statSync(payment.paymentProofPath);
         if (stats.size <= 0) return NextResponse.json({ ok: false, error: "File bukti pembayaran kosong." }, { status: 404 });

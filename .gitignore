@@ -55,9 +55,13 @@ python_backend/data/*.jsonl
 python_backend/output/
 python_backend/output/payments/
 python_backend/output/payments/proofs/
+runtime/
 runtime_logs/
 scratch/
 *.log
+
+# build artifacts
+dist/
 
 # local business documents and spreadsheet/PDF work files
 *.xlsx
