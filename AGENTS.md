@@ -210,6 +210,19 @@ Phase R4 — Close Claim Workflow (Mei 2026):
   ditolak setelah workflow Closed.
 - Tidak butuh PEKA/EC/CN.
 
+Phase R5 — Reporting / Export (Mei 2026):
+- Endpoint JSON dan CSV untuk tiga laporan: Summary, Paid (transaction-
+  based), Outstanding. Path `/api/claim-workflow/reports/<name>` dan
+  `/api/claim-workflow/reports/<name>/export`.
+- Outstanding report selalu menggunakan `remainingAmount = max(totalClaim
+  - totalPaid, 0)` hasil recalc fresh dari `claim_payment` aktif. Tidak
+  pernah trust cache buta.
+- CSV: UTF-8 BOM, RFC 4180 escape, Content-Disposition attachment dengan
+  pola filename `claim-<name>-report-YYYYMMDD.csv`. Angka raw tanpa
+  format Rupiah supaya bisa dianalisa di Excel.
+- UI `/claim-workflow/reports` menampilkan tab + filter ringan. Reports
+  read-only, tidak ada PEKA/EC/CN.
+
 Status legacy `Waiting PEKA`, `EC Received`, dan `CN Received` sudah
 **retired** (Mei 2026). Tidak boleh dipakai untuk transisi baru. Lihat
 `docs/CLAIM_WORKFLOW_AI_CONTEXT.md` bagian "Cleanup PEKA / EC / CN" untuk

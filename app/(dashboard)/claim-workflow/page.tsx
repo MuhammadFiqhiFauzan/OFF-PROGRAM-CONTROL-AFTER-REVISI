@@ -251,17 +251,27 @@ export default function ClaimWorkflowPage() {
   return (
     <div className="w-full space-y-6 pb-12 pt-2">
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#1a1c23] to-[#0f1115] p-7 shadow-2xl">
-        <p className="text-xs font-bold uppercase tracking-[0.24em] text-indigo-300">
-          After OFF Program Control
-        </p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-white">
-          Claim Workflow
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
-          Pengajuan klaim ke principal: BASE → Summary → Paid → Monitor
-          Outstanding. Setiap workflow dibuat dari OFF batch yang sudah OM
-          Approved.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-indigo-300">
+              After OFF Program Control
+            </p>
+            <h1 className="mt-3 text-3xl font-black tracking-tight text-white">
+              Claim Workflow
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
+              Pengajuan klaim ke principal: BASE → Summary → Paid → Monitor
+              Outstanding. Setiap workflow dibuat dari OFF batch yang sudah OM
+              Approved.
+            </p>
+          </div>
+          <Link
+            href="/claim-workflow/reports"
+            className="inline-flex items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-200 transition hover:bg-indigo-500/20"
+          >
+            Reports / Export →
+          </Link>
+        </div>
       </div>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
