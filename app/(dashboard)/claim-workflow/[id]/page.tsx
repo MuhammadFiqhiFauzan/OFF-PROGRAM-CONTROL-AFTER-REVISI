@@ -42,6 +42,9 @@ type Workflow = {
   noClaimAssignedAt?: string | Date | null;
   noClaimAssignedBy?: string | null;
   noClaimAssignedByName?: string | null;
+  closedAt?: string | Date | null;
+  closedBy?: string | null;
+  closeNote?: string | null;
   createdAt: string | Date;
 };
 
@@ -109,6 +112,8 @@ type DetailResult = {
   canAssignNoClaim?: boolean;
   canRecordPayment?: boolean;
   canVoidPayment?: boolean;
+  canClose?: boolean;
+  closeBlockers?: string[];
 };
 
 type EditDraft = {
@@ -183,6 +188,8 @@ export default function ClaimWorkflowDetailPage() {
   const [canAssignNoClaim, setCanAssignNoClaim] = useState(false);
   const [canRecordPayment, setCanRecordPayment] = useState(false);
   const [canVoidPayment, setCanVoidPayment] = useState(false);
+  const [canClose, setCanClose] = useState(false);
+  const [closeBlockers, setCloseBlockers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditError, setAuditError] = useState("");
@@ -205,6 +212,8 @@ export default function ClaimWorkflowDetailPage() {
   });
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [voidingId, setVoidingId] = useState("");
+  const [closeNote, setCloseNote] = useState("");
+  const [closeSaving, setCloseSaving] = useState(false);
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -230,6 +239,8 @@ export default function ClaimWorkflowDetailPage() {
       setCanAssignNoClaim(Boolean(result.canAssignNoClaim));
       setCanRecordPayment(Boolean(result.canRecordPayment));
       setCanVoidPayment(Boolean(result.canVoidPayment));
+      setCanClose(Boolean(result.canClose));
+      setCloseBlockers(result.closeBlockers || []);
       // Sinkronkan draft input dengan nilai No Claim terbaru, kecuali user
       // sedang mengetik (noClaimEditing true).
       if (!noClaimEditing) {
@@ -605,6 +616,50 @@ export default function ClaimWorkflowDetailPage() {
       setMessage(errorMessage);
     } finally {
       setVoidingId("");
+    }
+  };
+
+  const submitClose = async () => {
+    const trimmed = closeNote.trim();
+    if (!trimmed) {
+      toast.error("Catatan close wajib diisi.");
+      return;
+    }
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(
+        "Tutup Claim Workflow ini? Setelah Closed, payment dan transisi status tidak dapat lagi dilakukan.",
+      );
+      if (!confirmed) return;
+    }
+    setCloseSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/claim-workflow/${id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: trimmed }),
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        workflow?: { status?: string };
+      };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal menutup Claim Workflow.");
+      }
+      const successMessage = `Claim Workflow ditutup. Status: ${result.workflow?.status || "Closed"}.`;
+      toast.success(successMessage);
+      setMessage(successMessage);
+      setCloseNote("");
+      await loadDetail();
+    } catch (closeError) {
+      const errorMessage = closeError instanceof Error
+        ? closeError.message
+        : "Gagal menutup Claim Workflow.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setCloseSaving(false);
     }
   };
 
@@ -1277,6 +1332,103 @@ export default function ClaimWorkflowDetailPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-white">Close Workflow</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Tutup Claim Workflow ketika klaim sudah lunas dan dokumen
+              sudah lengkap. Workflow Closed bersifat read-only untuk
+              payment/transition.
+            </p>
+          </div>
+        </div>
+
+        {workflow.status === claimWorkflowStatuses.closed ? (
+          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+            <p className="text-sm font-bold text-emerald-200">Closed</p>
+            {workflow.closedAt && (
+              <p className="mt-1 text-xs text-emerald-300">
+                Closed at {dateText(workflow.closedAt)}
+                {workflow.closedBy ? ` oleh ${workflow.closedBy}` : ""}
+              </p>
+            )}
+            {workflow.closeNote && (
+              <p className="mt-2 text-sm text-slate-200">
+                Catatan: <span className="italic">{workflow.closeNote}</span>
+              </p>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                { label: "Status Paid", ok: workflow.status === claimWorkflowStatuses.paid },
+                { label: "Outstanding = 0", ok: (paymentSummary?.remainingAmount ?? 0) === 0 },
+                { label: "Total Paid >= Total Claim", ok: (paymentSummary?.totalPaid ?? 0) >= (paymentSummary?.totalClaim ?? 0) && (paymentSummary?.totalClaim ?? 0) > 0 },
+                { label: "Active payment >= 1", ok: (paymentSummary?.activePaymentCount ?? 0) > 0 },
+                { label: "No Claim ter-assign", ok: Boolean(workflow.noClaim && String(workflow.noClaim).trim()) },
+                { label: "Claim Letter PDF", ok: Boolean(workflow.claimLetterPdfPath) },
+                { label: "Summary PDF", ok: Boolean(workflow.summaryPdfPath) },
+                { label: "Kwitansi Claim PDF", ok: Boolean(workflow.receiptPdfPath) },
+              ].map((check) => (
+                <div
+                  key={check.label}
+                  className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold ${
+                    check.ok
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                      : "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                  }`}
+                >
+                  <span>{check.label}</span>
+                  <span className="font-mono uppercase tracking-wider">{check.ok ? "OK" : "PENDING"}</span>
+                </div>
+              ))}
+            </div>
+
+            {closeBlockers.length > 0 && (
+              <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+                <p className="font-bold">Belum bisa Close:</p>
+                <ul className="mt-1 list-inside list-disc space-y-0.5">
+                  {closeBlockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
+              <label className="block text-xs font-semibold text-slate-300">
+                Catatan Close (wajib)
+                <textarea
+                  value={closeNote}
+                  onChange={(event) => setCloseNote(event.target.value)}
+                  placeholder="Catatan final verifikasi, mis: dokumen lengkap, payment penuh per ..."
+                  rows={3}
+                  disabled={!canClose || closeSaving}
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                />
+              </label>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-[11px] italic text-slate-500">
+                  {canClose
+                    ? "Semua syarat terpenuhi. Pastikan catatan terisi sebelum Close."
+                    : "Lengkapi syarat di atas untuk mengaktifkan tombol Close."}
+                </p>
+                <button
+                  type="button"
+                  disabled={!canClose || closeSaving || !closeNote.trim()}
+                  onClick={() => void submitClose()}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {closeSaving ? "Menutup..." : "Close Workflow"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">

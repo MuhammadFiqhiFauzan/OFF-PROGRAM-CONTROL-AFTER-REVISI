@@ -212,10 +212,12 @@ npm run seed:demo
 ### Roadmap berikutnya
 
 - **R3** — Principal Payment + Outstanding (input pembayaran dari
-  principal lewat `claim_payment`, dashboard Monitor Outstanding).
-- **R4** — Close Workflow (transisi `Paid` → `Closed`, gating dengan
-  `remainingAmount = 0`).
-- **R5** — Reporting / Export.
+  principal lewat `claim_payment`, dashboard Monitor Outstanding). ✅
+  Implemented.
+- **R4** — Close Workflow (transisi `Paid` → `Closed`, gate
+  `remainingAmount = 0` + dokumen lengkap + active payment + note). ✅
+  Implemented via `POST /api/claim-workflow/[id]/close`.
+- **R5 (next)** — Reporting / Export.
 - **R6** — Hardening.
 
 ## Struktur Folder Penting

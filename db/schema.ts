@@ -289,6 +289,14 @@ export const claimWorkflow = sqliteTable("claim_workflow", {
     noClaimAssignedAt: integer("no_claim_assigned_at", { mode: "timestamp" }),
     noClaimAssignedBy: text("no_claim_assigned_by"),
     closedAt: integer("closed_at", { mode: "timestamp" }),
+    // Phase R4 — Close Claim Workflow:
+    // Metadata aktor + alasan saat workflow ditutup. Close hanya boleh
+    // dilakukan via `POST /api/claim-workflow/[id]/close` setelah semua
+    // gating terpenuhi (status Paid, remainingAmount 0, dokumen lengkap,
+    // No Claim, minimal satu active payment, note non-empty). Lihat
+    // docs/CLAIM_WORKFLOW_AI_CONTEXT.md.
+    closedBy: text("closed_by"),
+    closeNote: text("close_note"),
     createdBy: text("created_by"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull()

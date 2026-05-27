@@ -554,10 +554,141 @@ Phase 3+ telah retired:
    `remainingAmount = max(totalClaim - totalPaid, 0)`, transisi
    `Submitted to Principal` → `Partially Paid` / `Paid` berbasis total
    pembayaran masuk. Lihat section "Phase R3" di bawah.
-8. **Phase R4 (next)** — Close Workflow: transisi `Paid` → `Closed` dengan
-   gate `remainingAmount = 0` dan dokumen lengkap.
-9. **Phase R5** — Reporting / Export.
+8. **Phase R4** — Close Claim Workflow (Mei 2026). ✅ Endpoint
+   `POST /api/claim-workflow/[id]/close` untuk transisi `Paid` →
+   `Closed` dengan gate `remainingAmount = 0`, dokumen lengkap, active
+   payment, dan note wajib. Lihat section "Phase R4" di bawah.
+9. **Phase R5 (next)** — Reporting / Export.
 10. **Phase R6** — Hardening (perf, audit retention, RBAC review).
+
+## Phase R4 — Close Claim Workflow
+
+Phase R4 menyelesaikan lifecycle Claim Workflow. Setelah klaim lunas
+(R3) dan dokumen lengkap (R2), workflow ditutup secara eksplisit lewat
+endpoint dedicated agar:
+
+- Status final `Closed` tidak pernah ditulis lewat status route umum.
+- Recalc fresh `totalPaid` / `remainingAmount` dilakukan ulang di dalam
+  transaksi close — cache di kolom workflow tidak dipercaya buta.
+- Audit `claim_closed` selalu menyertai transisi.
+
+### Schema additions
+
+`claim_workflow` mendapat dua kolom tambahan (kolom `closed_at` sudah
+ada sejak Phase 1):
+
+- `closed_by TEXT` — actor user id yang melakukan close.
+- `close_note TEXT` — catatan final close (max 1000 char, wajib
+  non-empty di API).
+
+`scripts/init-db.mjs` menambah `closed_by` dan `close_note` di fresh
+schema dan via `ALTER TABLE` idempotent. Tidak ada destructive migration.
+
+### Endpoint
+
+`POST /api/claim-workflow/[id]/close` — admin/claim only.
+
+Body:
+```json
+{ "note": "Final verification: payment lunas + dokumen lengkap." }
+```
+
+Validation gates (semua harus terpenuhi, semua dievaluasi di dalam
+transaksi):
+- `note` non-empty (HTTP 400 `CLAIM_CLOSE_NOTE_REQUIRED`).
+- Workflow ada (HTTP 404 `CLAIM_WORKFLOW_NOT_FOUND`).
+- Status saat ini bukan `Closed` (`CLAIM_CLOSE_ALREADY_CLOSED`) dan
+  bukan `Cancelled` (`CLAIM_CLOSE_CANCELLED`).
+- Status saat ini `Paid` (`CLAIM_CLOSE_NOT_PAID`).
+- `totalClaim > 0` (`CLAIM_CLOSE_TOTAL_ZERO`).
+- `noClaim` non-empty (`CLAIM_CLOSE_NO_CLAIM_REQUIRED`).
+- `claim_letter_pdf_path` ada (`CLAIM_CLOSE_CLAIM_LETTER_REQUIRED`).
+- `summary_pdf_path` ada (`CLAIM_CLOSE_SUMMARY_REQUIRED`).
+- `receipt_pdf_path` ada (`CLAIM_CLOSE_RECEIPT_REQUIRED`).
+- Minimal 1 active payment (`CLAIM_CLOSE_NO_ACTIVE_PAYMENT`).
+- Recalc fresh: `totalPaid >= totalClaim`
+  (`CLAIM_CLOSE_TOTAL_PAID_INSUFFICIENT`).
+- Recalc fresh: `remainingAmount = 0`
+  (`CLAIM_CLOSE_OUTSTANDING_NOT_ZERO`).
+
+Transaksi atomic:
+1. Re-read workflow dan list payment.
+2. Recalc totals via `recalcPaymentTotals`.
+3. Validasi gates di atas; transaksi rollback bila salah satu gagal.
+4. Update `claim_workflow`: `status=Closed`, `closed_at=now`,
+   `closed_by=actor.id`, `close_note=note`, plus refresh cache
+   `total_paid` / `remaining_amount` agar konsisten dengan recalc.
+5. Tulis audit `claim_closed` dengan metadata: `previousStatus`,
+   `newStatus`, `totalClaim`, `totalPaid`, `remainingAmount`, `noClaim`,
+   `activePaymentCount`, `summaryPdfPath`, `claimLetterPdfPath`,
+   `receiptPdfPath`. Catatan close masuk ke kolom `note`.
+
+### Detail endpoint additions
+
+`GET /api/claim-workflow/[id]` mengembalikan dua field baru:
+
+- `canClose` — true bila actor admin/claim, semua gate close terpenuhi
+  (recalc fresh).
+- `closeBlockers` — array string urut prioritas yang menjelaskan kenapa
+  belum bisa Close. Contoh:
+  - `"Workflow belum berstatus Paid."`
+  - `"Outstanding belum 0."`
+  - `"Belum ada pembayaran aktif."`
+  - `"No Claim belum diisi."`
+  - `"Summary PDF belum dibuat."`
+  - `"Claim Letter PDF belum dibuat."`
+  - `"Kwitansi Claim PDF belum dibuat."`
+
+`workflow.closedAt`, `workflow.closedBy`, `workflow.closeNote` ikut
+ditampilkan untuk workflow yang sudah Closed.
+
+### UI changes
+
+Detail page `/claim-workflow/[id]` menambah section "Close Workflow":
+
+- Untuk workflow non-Closed:
+  - Checklist visual 8 item (Status Paid / Outstanding 0 / Total Paid
+    >= Total Claim / Active payment >= 1 / No Claim / Claim Letter PDF
+    / Summary PDF / Kwitansi Claim PDF) dengan badge OK/PENDING.
+  - Daftar `closeBlockers` muncul sebagai amber callout.
+  - Textarea catatan close + tombol Close Workflow (disabled saat
+    `canClose` false atau note kosong). Tombol meminta confirm
+    `window.confirm` sebelum hit endpoint.
+- Untuk workflow Closed:
+  - Banner emerald berisi "Closed at ..." + close note.
+  - Form close di-hide.
+
+Workflow Closed juga tidak menampilkan tombol "Catat Pembayaran" atau
+Void (gate `canRecordPayment` / `canVoidPayment` dari R3 sudah
+mempertimbangkan status Closed).
+
+### Audit action
+
+- `claim_closed` — metadata: `previousStatus`, `newStatus`,
+  `totalClaim`, `totalPaid`, `remainingAmount`, `noClaim`,
+  `activePaymentCount`, `summaryPdfPath`, `claimLetterPdfPath`,
+  `receiptPdfPath`. Field `note` audit log berisi catatan close.
+
+### Demo seed
+
+`scripts/seed-demo-workflows.mjs` mengisi workflow `Closed` dengan
+metadata lengkap: `closed_at` ms(1) hari lalu, `closed_by=ACTOR_ID`,
+`close_note="DEMO seed: workflow ditutup karena pembayaran lunas dan
+dokumen lengkap."` Untuk demo `Paid`, semua gate close terpenuhi
+sehingga UI menampilkan tombol Close enabled (tester bisa coba close
+manual). Demo `Partially Paid` sengaja meninggalkan outstanding > 0
+sehingga `closeBlockers` tampil di UI.
+
+### Constraints
+
+- Status route umum (`POST /api/claim-workflow/[id]/status`) tidak
+  menerima action close. Action yang di-support tetap `mark_ready`,
+  `return_to_draft`, `submit_to_principal`.
+- Endpoint payment void otomatis ditolak untuk workflow Closed
+  (R3 sudah mengganjal kasus ini sejak awal lewat
+  `CLAIM_PAYMENT_VOID_CLOSED`).
+- Tidak ada efek samping ke OFF Program Control. OFF Completed tetap
+  rule terpisah.
 
 ## Phase R3 — Principal Payment + Outstanding
 
@@ -703,11 +834,6 @@ untuk Claim Workflow:
 
 Status `Partially Paid` / `Paid` / `Closed` me-insert row `claim_payment`
 sehingga UI dan endpoint outstanding menampilkan data realistis.
-
-### Future R4 — Close Workflow
-
-Tetap deferred. Gate: `status = Paid`, `remainingAmount = 0`, semua
-dokumen klaim ada, audit lengkap. Tidak ada dependensi PEKA/EC/CN.
 
 ## Important Warnings
 

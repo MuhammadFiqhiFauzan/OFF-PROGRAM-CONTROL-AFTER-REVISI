@@ -743,8 +743,9 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             summary_pdf_path, summary_generated_at, summary_generated_by,
             receipt_pdf_path, receipt_generated_at, receipt_generated_by,
             no_claim, no_claim_assigned_at, no_claim_assigned_by,
-            closed_at, created_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            closed_at, closed_by, close_note,
+            created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
             id, offBatch.batchId, claimWorkflowNo, principle.code, principle.name, config.status,
             totalDpp, totalPpn, totalPph, totalClaim, totalPaid, remainingAmount,
@@ -755,6 +756,10 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
             receiptPdfPath, receiptGeneratedAt, receiptPdfPath ? ACTOR_ID : null,
             noClaim, noClaim ? ms(8) : null, noClaim ? ACTOR_ID : null,
             config.isClosed ? ms(1) : null,
+            config.isClosed ? ACTOR_ID : null,
+            config.isClosed
+                ? "DEMO seed: workflow ditutup karena pembayaran lunas dan dokumen lengkap."
+                : null,
             ACTOR_ID, ms(10), ms(1),
         ],
     });

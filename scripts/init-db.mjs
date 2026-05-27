@@ -294,6 +294,8 @@ const statements = [
     no_claim_assigned_at INTEGER,
     no_claim_assigned_by TEXT,
     closed_at INTEGER,
+    closed_by TEXT,
+    close_note TEXT,
     created_by TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -460,6 +462,11 @@ const migrations = [
   `ALTER TABLE claim_payment ADD COLUMN voided_at INTEGER;`,
   `ALTER TABLE claim_payment ADD COLUMN voided_by TEXT;`,
   `ALTER TABLE claim_payment ADD COLUMN void_reason TEXT;`,
+  // Phase R4 — Close Claim Workflow:
+  // closed_at sudah ada di fresh schema sejak Phase 1; tambahkan metadata
+  // closed_by dan close_note untuk audit aktor + alasan close.
+  `ALTER TABLE claim_workflow ADD COLUMN closed_by TEXT;`,
+  `ALTER TABLE claim_workflow ADD COLUMN close_note TEXT;`,
 ];
 
 for (const sql of migrations) {

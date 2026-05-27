@@ -194,6 +194,22 @@ Phase R3 — Principal Payment + Outstanding (Mei 2026):
 - Overpayment ditolak: `paymentAmount > remainingAmount + Rp1` dijawab
   dengan code `CLAIM_PAYMENT_OVERPAYMENT`.
 
+Phase R4 — Close Claim Workflow (Mei 2026):
+- Transisi `Paid` → `Closed` hanya via endpoint dedicated
+  `POST /api/claim-workflow/[id]/close`. Status route umum tidak boleh
+  set `Closed` manual.
+- Close gate (semua harus terpenuhi): actor admin/claim, status Paid,
+  `noClaim` ada, `totalClaim > 0`, minimal 1 active payment, recalc
+  `totalPaid >= totalClaim`, `remainingAmount = 0`, ketiga dokumen klaim
+  PDF (Letter/Summary/Kwitansi) hadir, belum Closed/Cancelled, dan
+  `note` non-empty wajib.
+- Audit `claim_closed` ditulis dalam transaksi yang sama, lengkap dengan
+  totalClaim/totalPaid/remainingAmount/noClaim/activePaymentCount/path
+  ketiga PDF.
+- Closed bersifat read-only untuk payment dan transition. Void payment
+  ditolak setelah workflow Closed.
+- Tidak butuh PEKA/EC/CN.
+
 Status legacy `Waiting PEKA`, `EC Received`, dan `CN Received` sudah
 **retired** (Mei 2026). Tidak boleh dipakai untuk transisi baru. Lihat
 `docs/CLAIM_WORKFLOW_AI_CONTEXT.md` bagian "Cleanup PEKA / EC / CN" untuk

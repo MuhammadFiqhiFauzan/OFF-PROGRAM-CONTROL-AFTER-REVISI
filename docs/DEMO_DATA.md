@@ -101,11 +101,18 @@ Setelah seed selesai:
      (Total Claim, Total Paid, Remaining, Payment Status) dan tabel
      payment. Demo `Partially Paid` / `Paid` / `Closed` punya minimal 1
      row payment active.
+   - Section **Close Workflow** muncul untuk demo selain `Closed`.
+     Demo `Paid` menampilkan checklist penuh "OK" dan tombol Close
+     enabled (R4); demo lain menampilkan blockers.
+   - Demo `Closed` menampilkan banner emerald berisi `closed_at` dan
+     close note.
    - Audit log berisi event `claim_letter_generated`,
      `claim_summary_generated`, `claim_receipt_generated`. Demo
      `Partially Paid` / `Paid` / `Closed` juga punya event
      `payment_created` (via path lain di route lokal — di seed pakai
-     prefix `demo_payment_seeded`).
+     prefix `demo_payment_seeded`). Demo `Closed` punya event
+     `closed_seeded` sebagai fallback audit (production menulis
+     `claim_closed` lewat endpoint dedicated).
 
 ---
 
