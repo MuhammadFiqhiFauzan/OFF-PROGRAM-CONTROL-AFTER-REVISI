@@ -251,6 +251,47 @@ export async function POST(request: Request, context: Context) {
     }
 
     await db.transaction(async (tx) => {
+      // Phase R6 — Race-safety recheck:
+      // Pre-checks di atas dilakukan di luar transaksi sehingga ada
+      // celah teoretis di mana noClaim Claim Workflow / off_batch_item
+      // berubah antara pre-check dan commit OFF Completed. Re-read
+      // status critical (claim_workflow.noClaim + off_batch_item.noClaim)
+      // di dalam transaksi dan rollback jika tidak konsisten lagi.
+      const [tWorkflow] = await tx
+        .select({
+          id: claimWorkflow.id,
+          claimWorkflowNo: claimWorkflow.claimWorkflowNo,
+          noClaim: claimWorkflow.noClaim,
+        })
+        .from(claimWorkflow)
+        .where(eq(claimWorkflow.offBatchId, id));
+      if (!tWorkflow || !String(tWorkflow.noClaim || "").trim()) {
+        // Throw to rollback. Pesan tetap ramah supaya UI bisa hint user
+        // untuk re-assign No Claim.
+        throw Object.assign(
+          new Error(
+            "No Claim Claim Workflow tidak konsisten. Re-assign No Claim lalu coba lagi.",
+          ),
+          { code: "OFF_FINAL_NO_CLAIM_RACE" },
+        );
+      }
+      const txItems = await tx
+        .select({ id: offBatchItem.id, noSurat: offBatchItem.noSurat, noClaim: offBatchItem.noClaim })
+        .from(offBatchItem)
+        .where(eq(offBatchItem.batchId, id));
+      const txItemsMissing = txItems
+        .filter((row) => String(row.noSurat || "").trim())
+        .filter((row) => !String(row.noClaim || "").trim())
+        .map((row) => String(row.noSurat || "").trim());
+      if (txItemsMissing.length > 0) {
+        throw Object.assign(
+          new Error(
+            `No Claim belum tersinkron ke OFF item (race detected). Re-assign No Claim di Claim Workflow ${tWorkflow.claimWorkflowNo}.`,
+          ),
+          { code: "OFF_FINAL_NO_CLAIM_NOT_SYNCED_RACE" },
+        );
+      }
+
       for (const item of data.items) {
         const ref = claimRefMap.get(item.id);
         if (!ref) continue;
@@ -310,6 +351,26 @@ export async function POST(request: Request, context: Context) {
       batch: updated ? publicBatch(updated.batch) : null,
     });
   } catch (error) {
+    // Phase R6 — Race-safety: rollback transaksi melempar Error dengan
+    // properti `code` yang sudah dikenal. Kembalikan 409 supaya UI bisa
+    // render pesan bermakna dan user dapat retry.
+    const code =
+      error && typeof error === "object" && "code" in (error as Record<string, unknown>)
+        ? String((error as Record<string, unknown>).code)
+        : null;
+    if (
+      code === "OFF_FINAL_NO_CLAIM_RACE" ||
+      code === "OFF_FINAL_NO_CLAIM_NOT_SYNCED_RACE"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code,
+          error: error instanceof Error ? error.message : "Konflik No Claim saat finalisasi.",
+        },
+        { status: 409 },
+      );
+    }
     console.error("[OFF FINAL CLAIM ERROR]", error);
     return NextResponse.json(
       { ok: false, error: "Gagal memproses final verification Claim." },

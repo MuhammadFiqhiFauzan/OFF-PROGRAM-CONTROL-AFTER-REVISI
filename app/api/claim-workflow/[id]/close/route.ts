@@ -240,12 +240,30 @@ export async function POST(request: Request, context: Context) {
                 },
             }, tx);
 
+            // Phase R6 — Close response snapshot:
+            // Bangun snapshot response dari nilai yang sudah commit di
+            // transaksi ini, tanpa re-fetch terpisah di luar transaksi.
+            // Hal ini menghindari race kalau ada writer lain (mis. void
+            // payment yang ditolak setelah Closed) berjalan tepat setelah
+            // transaksi close ini commit dan sebelum re-fetch terjadi.
+            const snapshot = {
+                id,
+                status: claimWorkflowStatuses.closed,
+                totalClaim,
+                totalPaid: totals.totalPaid,
+                remainingAmount: totals.remainingAmount,
+                closedAt: now,
+                closedBy: actor.id,
+                closeNote: note,
+            } as const;
+
             return {
                 ok: true,
                 previousStatus,
                 totals,
                 activePaymentCount,
                 closedAt: now,
+                snapshot,
             } as const;
         });
 
@@ -256,26 +274,10 @@ export async function POST(request: Request, context: Context) {
             );
         }
 
-        const [workflow] = await db
-            .select()
-            .from(claimWorkflow)
-            .where(eq(claimWorkflow.id, id));
-
         return NextResponse.json({
             ok: true,
             success: true,
-            workflow: workflow
-                ? {
-                    id: workflow.id,
-                    status: workflow.status,
-                    totalClaim: Number(workflow.totalClaim || 0),
-                    totalPaid: Number(workflow.totalPaid || 0),
-                    remainingAmount: Number(workflow.remainingAmount || 0),
-                    closedAt: workflow.closedAt,
-                    closedBy: workflow.closedBy,
-                    closeNote: workflow.closeNote,
-                }
-                : null,
+            workflow: result.snapshot,
             previousStatus: result.previousStatus,
         });
     } catch (error) {
