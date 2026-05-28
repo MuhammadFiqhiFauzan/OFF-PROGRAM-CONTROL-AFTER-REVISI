@@ -53,7 +53,7 @@ mulai R7b ke depan.
 | Phase | Scope ringkas                                                             | Status   |
 |-------|---------------------------------------------------------------------------|----------|
 | R7a   | Schema additive: `claim_submission` table + kolom baru di workflow/item/payment/audit + backfill default submission. | DONE     |
-| R7b   | API submission CRUD, item assignment, recalc submission totals, default submission tetap valid. | Pending  |
+| R7b   | API submission CRUD, item assignment, recalc submission totals, default submission tetap valid. | DONE     |
 | R7c   | Generate Claim Letter / Summary / Kwitansi PDF per submission. PDF path workflow lama jadi pointer ke primary submission. | Pending  |
 | R7d   | Payment + outstanding pindah ke level submission. `recalcPaymentTotals` per submission. Workflow totals di-derive. | Pending  |
 | R7e   | Close per submission. Workflow `aggregate_status` derived. Reports basis berubah ke submission row. | Pending  |
@@ -185,6 +185,76 @@ Ketiga query harus return 0 setelah backfill sukses.
 - UI: tidak ada perubahan.
 - PDF path / file: tidak dipindah.
 - Audit lama (`claim_audit_log` workflow-scope) tidak diubah.
+
+---
+
+## Phase R7b — Submission grouping + item assignment (DONE)
+
+R7b menambah **API CRUD submission** dan helper recalc, serta minimal
+UI section di detail page. Behavior R1-R6 tetap dipertahankan.
+
+### Endpoint baru
+
+| Endpoint | Method | Akses | Keterangan |
+|----------|--------|-------|------------|
+| `/api/claim-workflow/[id]/submissions` | GET | `canActorReadClaimWorkflow` | List submission per workflow + itemCount per submission. |
+| `/api/claim-workflow/[id]/submissions` | POST | admin/claim, workflow Draft / Need Revision | Buat submission baru dengan scope, scopeLabel, optional noClaim. |
+| `/api/claim-workflow/[id]/submissions/[submissionId]` | GET | read access | Detail submission + items yang ditugaskan. |
+| `/api/claim-workflow/[id]/submissions/[submissionId]` | PATCH | admin/claim | Update scope / scopeLabel / noClaim (dengan partial unique check + sync ke off_batch_item untuk item submission). |
+| `/api/claim-workflow/[id]/submissions/[submissionId]/items` | POST | admin/claim, workflow Draft / Need Revision | Pindahkan satu atau lebih item ke submission target. Recalc totals submission lama + target + workflow aggregate. |
+
+### Helper baru di `lib/claim-workflow/submissions.ts`
+
+- `getWorkflowSubmissions(workflowId, executor?)` — list ordered.
+- `getOrCreateDefaultSubmission(executor, workflow, now?)` — idempotent
+  fallback untuk workflow lama yang belum di-backfill (juga link item
+  + payment yang masih NULL).
+- `recalcSubmissionTotals(executor, submissionId, now?)` — sum dari
+  item ditugaskan, update totalDpp/Ppn/Pph/Claim + remainingAmount.
+  totalPaid submission masih dipertahankan apa adanya (R7d).
+- `recalcWorkflowAggregateFromSubmissions(executor, workflowId, now?)` —
+  sum submissions ke cache `claim_workflow.totalDpp/Ppn/Pph/Claim` +
+  `aggregate_status` mirror dari `status`. totalPaid + remainingAmount
+  workflow tetap pakai formula R3 sampai R7d.
+- `assertSubmissionBelongsToWorkflow(submissionId, workflowId, executor?)` —
+  guard standard.
+- `isSubmissionEditableWorkflowStatus(status)` — true untuk Draft /
+  Need Revision.
+
+### Behavior change kecil (terdokumentasi)
+
+- `PATCH /api/claim-workflow/[id]/items/[itemId]` (edit pajak):
+  - Setelah update item totals, helper `getOrCreateDefaultSubmission`
+    dipanggil bila item belum punya `claim_submission_id`. Kemudian
+    `recalcSubmissionTotals` + `recalcWorkflowAggregateFromSubmissions`
+    dijalankan dalam transaksi yang sama.
+  - Audit `update_item_tax` sekarang membawa `claim_submission_id` +
+    `audit_scope = "submission"` bila terkait submission.
+
+- `PATCH /api/claim-workflow/[id]/no-claim` (legacy route):
+  - Bila workflow punya >1 submission → tolak `409` dengan code
+    `MULTI_SUBMISSION_NO_CLAIM_ROUTE_DISABLED`. User wajib pakai
+    endpoint submission-specific.
+  - Bila workflow punya 1 submission → mirror nilai noClaim ke
+    submission tersebut secara atomic.
+  - Bila workflow belum punya submission (DB lokal lama belum
+    di-backfill) → tetap menulis cache workflow saja.
+
+- `GET /api/claim-workflow/[id]` (detail):
+  - Response sekarang membawa `submissions[]`, `submissionCount`,
+    `hasMultipleSubmissions`, `noClaimList[]`, dan `noClaimDisplay`.
+  - Field workflow lama (`noClaim`, totals, PDF paths, payment)
+    tidak berubah.
+
+### UI
+
+- Detail page menambah section **Claim Submissions / No Claim Groups**
+  read-only table + form create submission untuk admin/claim saat
+  Draft / Need Revision. Kolom **Submission** ditambahkan di tabel
+  item dengan dropdown untuk memindahkan item antar submission saat
+  workflow editable dan ada >1 submission.
+- Banner peringatan: dokumen klaim dan pembayaran principal masih
+  berjalan di workflow-level sampai R7c/R7d.
 
 ---
 

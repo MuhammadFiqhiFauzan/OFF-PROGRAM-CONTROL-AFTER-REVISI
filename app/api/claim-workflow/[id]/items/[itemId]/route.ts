@@ -6,6 +6,9 @@ import {
     calculateClaimAmount,
     calculateRemainingAmount,
     claimWorkflowStatuses,
+    getOrCreateDefaultSubmission,
+    recalcSubmissionTotals,
+    recalcWorkflowAggregateFromSubmissions,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
@@ -84,6 +87,7 @@ export async function PATCH(request: Request, context: Context) {
             totalClaim: Number(workflow.totalClaim || 0),
         };
         let remainingAmount = Number(workflow.remainingAmount || 0);
+        let resolvedSubmissionId: string | null = item.claimSubmissionId ?? null;
 
         await db.transaction(async (tx) => {
             await tx
@@ -91,6 +95,22 @@ export async function PATCH(request: Request, context: Context) {
                 .set({ ...amount, note, updatedAt: now })
                 .where(and(eq(claimWorkflowItem.id, itemId), eq(claimWorkflowItem.claimWorkflowId, id)));
 
+            // Phase R7b — pastikan item terkait submission. Bila item
+            // belum di-link (kasus warisan sebelum migration), fallback ke
+            // default submission. Helper getOrCreateDefaultSubmission
+            // idempotent: kalau sudah ada submission, tidak buat baru.
+            if (!resolvedSubmissionId) {
+                const defaultSubmission = await getOrCreateDefaultSubmission(tx, workflow, now);
+                resolvedSubmissionId = defaultSubmission.id;
+                await tx
+                    .update(claimWorkflowItem)
+                    .set({ claimSubmissionId: defaultSubmission.id, updatedAt: now })
+                    .where(eq(claimWorkflowItem.id, itemId));
+            }
+
+            // Recalc workflow totals dari semua item (tetap dipertahankan
+            // untuk backward-compat dengan route existing yang membaca
+            // cache claim_workflow.totalClaim sebelum R7d).
             const workflowItems = await tx
                 .select()
                 .from(claimWorkflowItem)
@@ -110,8 +130,18 @@ export async function PATCH(request: Request, context: Context) {
                 .update(claimWorkflow)
                 .set({ ...totals, remainingAmount, updatedAt: now })
                 .where(eq(claimWorkflow.id, id));
+
+            // Phase R7b — recalc submission totals + aggregate cache.
+            // Submission totals dipakai oleh UI dan route submission ke
+            // depan; aggregate cache memastikan workflow tetap konsisten.
+            if (resolvedSubmissionId) {
+                await recalcSubmissionTotals(tx, resolvedSubmissionId, now);
+            }
+            await recalcWorkflowAggregateFromSubmissions(tx, id, now);
             await writeClaimAudit({
                 claimWorkflowId: id,
+                claimSubmissionId: resolvedSubmissionId,
+                auditScope: resolvedSubmissionId ? "submission" : "workflow",
                 actor,
                 action: "update_item_tax",
                 fromStatus: workflow.status,
@@ -119,6 +149,7 @@ export async function PATCH(request: Request, context: Context) {
                 note,
                 metadata: {
                     itemId,
+                    submissionId: resolvedSubmissionId,
                     dpp: amount.dpp,
                     ppnRate: amount.ppnRate,
                     pphRate: amount.pphRate,
@@ -130,7 +161,7 @@ export async function PATCH(request: Request, context: Context) {
 
         return NextResponse.json({
             ok: true,
-            item: { ...item, ...amount, note, updatedAt: now },
+            item: { ...item, ...amount, note, updatedAt: now, claimSubmissionId: resolvedSubmissionId },
             totals: {
                 ...totals,
                 totalPaid: workflow.totalPaid,

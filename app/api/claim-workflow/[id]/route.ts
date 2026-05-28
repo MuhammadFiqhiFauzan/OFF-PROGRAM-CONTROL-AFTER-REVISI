@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
+import { asc, count, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
     claimPayment,
+    claimSubmission,
     claimWorkflow,
     claimWorkflowItem,
     offBatch,
@@ -58,6 +59,35 @@ export async function GET(_request: Request, context: Context) {
             .from(claimPayment)
             .where(eq(claimPayment.claimWorkflowId, id))
             .orderBy(asc(claimPayment.paymentDate), asc(claimPayment.createdAt));
+        // Phase R7b — Multi No Claim:
+        // Sertakan daftar `claim_submission` di response detail supaya UI
+        // bisa menampilkan section Submissions tanpa fetch tambahan.
+        // Belum mengganti tampilan workflow-level (noClaim cache, PDF
+        // paths, payment) — itu R7c/R7d.
+        const submissions = await db
+            .select()
+            .from(claimSubmission)
+            .where(eq(claimSubmission.claimWorkflowId, id))
+            .orderBy(asc(claimSubmission.createdAt));
+        const submissionItemCounts = submissions.length > 0
+            ? await db
+                .select({
+                    claimSubmissionId: claimWorkflowItem.claimSubmissionId,
+                    count: count(claimWorkflowItem.id),
+                })
+                .from(claimWorkflowItem)
+                .where(eq(claimWorkflowItem.claimWorkflowId, id))
+                .groupBy(claimWorkflowItem.claimSubmissionId)
+            : [];
+        const submissionItemCountMap = new Map<string, number>();
+        for (const row of submissionItemCounts) {
+            if (row.claimSubmissionId) {
+                submissionItemCountMap.set(row.claimSubmissionId, Number(row.count || 0));
+            }
+        }
+        const noClaimList = submissions
+            .map((s) => s.noClaim)
+            .filter((value): value is string => typeof value === "string" && value.length > 0);
         // Resolve display name untuk No Claim assignor agar UI tidak harus
         // join sendiri. Aman: kalau noClaimAssignedBy NULL, lewati query.
         let noClaimAssignedByName: string | null = null;
@@ -178,6 +208,26 @@ export async function GET(_request: Request, context: Context) {
                 activePaymentCount: activePayments.length,
                 voidedPaymentCount: voidedPayments.length,
             },
+            // Phase R7b — Multi No Claim:
+            // Submissions list selalu disertakan supaya UI bisa render
+            // section Submissions. `submissionCount` dan
+            // `hasMultipleSubmissions` adalah hint cepat untuk UI.
+            // `noClaimDisplay` membantu UI memilih label single vs
+            // multiple tanpa harus join sendiri.
+            submissions: submissions.map((s) => ({
+                ...s,
+                itemCount: submissionItemCountMap.get(s.id) ?? 0,
+            })),
+            submissionCount: submissions.length,
+            hasMultipleSubmissions: submissions.length > 1,
+            noClaimList,
+            noClaimDisplay: submissions.length === 0
+                ? row.workflow.noClaim ?? null
+                : submissions.length === 1
+                    ? noClaimList[0] ?? null
+                    : noClaimList.length > 0
+                        ? `Multiple No Claim (${noClaimList.length})`
+                        : null,
             canEditItems: canManageClaim,
             canGenerateClaimLetter,
             canGenerateSummary,

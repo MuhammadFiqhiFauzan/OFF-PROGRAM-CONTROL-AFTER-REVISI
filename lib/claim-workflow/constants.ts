@@ -161,3 +161,12 @@ export const claimAuditScopes = {
 
 export type ClaimAuditScope =
     (typeof claimAuditScopes)[keyof typeof claimAuditScopes];
+
+/**
+ * Length limits untuk field tekstual yang dipakai oleh banyak route
+ * (legacy `/[id]/no-claim`, submission CRUD R7b, dan endpoint masa
+ * depan R7c–R7e). Disimpan di satu tempat supaya validasi backend tidak
+ * pernah drift antar route bila bisnis menaikkan/menurunkan batas.
+ */
+export const NO_CLAIM_MAX_LENGTH = 120;
+export const SCOPE_LABEL_MAX_LENGTH = 200;

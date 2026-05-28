@@ -250,6 +250,39 @@ Phase R7a — Multi No Claim + Direct Claim Source (Mei 2026, additive):
   dijalankan tanpa backup penuh + persetujuan bisnis.
 - Tidak mengembalikan PEKA / PVT / EC / CN. Status legacy tetap retired.
 
+Phase R7b — Submission grouping + item assignment (Mei 2026, additive):
+- API CRUD submission: `GET/POST /api/claim-workflow/[id]/submissions`
+  dan `GET/PATCH /api/claim-workflow/[id]/submissions/[submissionId]`,
+  plus `POST /api/claim-workflow/[id]/submissions/[submissionId]/items`
+  untuk memindahkan item antar submission. Read-access mengikuti
+  `canActorReadClaimWorkflow`; write hanya admin/claim saat workflow
+  `Draft` atau `Need Revision`.
+- Helper baru di `lib/claim-workflow/submissions.ts`:
+  `getOrCreateDefaultSubmission`, `recalcSubmissionTotals`,
+  `recalcWorkflowAggregateFromSubmissions`,
+  `assertSubmissionBelongsToWorkflow`,
+  `isSubmissionEditableWorkflowStatus`.
+- `PATCH /api/claim-workflow/[id]/items/[itemId]` (edit pajak) sekarang
+  recalc submission totals + workflow aggregate dalam transaksi yang
+  sama. Item yang belum punya `claim_submission_id` di-fallback ke
+  default submission via helper idempotent.
+- Legacy `PATCH /api/claim-workflow/[id]/no-claim` menolak request bila
+  workflow punya >1 submission (`MULTI_SUBMISSION_NO_CLAIM_ROUTE_DISABLED`).
+  Bila workflow punya tepat 1 submission, route tersebut juga mirror
+  ke `claim_submission.noClaim` supaya source-of-truth submission tetap
+  konsisten.
+- Detail API `GET /api/claim-workflow/[id]` mengembalikan `submissions[]`,
+  `submissionCount`, `hasMultipleSubmissions`, `noClaimList`,
+  `noClaimDisplay`. Field workflow lama (noClaim, totals, PDF paths,
+  payment) tidak diubah destruktif.
+- UI claim-workflow detail menambah section "Claim Submissions / No
+  Claim Groups" + dropdown Submission per item. Dokumen, payment, dan
+  close masih workflow-level sampai R7c/R7d.
+- Audit baru memakai kolom `claim_audit_log.claim_submission_id` +
+  `audit_scope`. Audit lama R1-R6 tetap workflow-scope (NULL).
+- Tidak menyentuh PEKA / PVT / EC / CN. Tidak menulis status manual ke
+  Paid / Closed.
+
 Status legacy `Waiting PEKA`, `EC Received`, dan `CN Received` sudah
 **retired** (Mei 2026). Tidak boleh dipakai untuk transisi baru. Lihat
 `docs/CLAIM_WORKFLOW_AI_CONTEXT.md` bagian "Cleanup PEKA / EC / CN" untuk

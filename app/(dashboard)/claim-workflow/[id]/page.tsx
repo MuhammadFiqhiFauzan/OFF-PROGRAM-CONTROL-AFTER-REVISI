@@ -64,7 +64,32 @@ type WorkflowItem = {
   nilaiKlaim: number;
   status: string;
   note?: string | null;
+  // Phase R7b — Multi No Claim: item dapat di-link ke claim_submission.
+  claimSubmissionId?: string | null;
 };
+
+// Phase R7b — Multi No Claim: minimal type untuk daftar submission.
+type Submission = {
+  id: string;
+  claimWorkflowId: string;
+  noClaim?: string | null;
+  scope: string;
+  scopeLabel?: string | null;
+  status: string;
+  totalClaim: number;
+  totalPaid: number;
+  remainingAmount: number;
+  itemCount?: number;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+};
+
+const SUBMISSION_SCOPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "per_pengajuan", label: "Per Pengajuan" },
+  { value: "per_program", label: "Per Program" },
+  { value: "per_toko", label: "Per Toko" },
+  { value: "custom", label: "Custom" },
+];
 
 type AuditRow = {
   id: string;
@@ -110,6 +135,12 @@ type DetailResult = {
   activePayments?: Payment[];
   voidedPayments?: Payment[];
   paymentSummary?: PaymentSummary;
+  // Phase R7b — Multi No Claim
+  submissions?: Submission[];
+  submissionCount?: number;
+  hasMultipleSubmissions?: boolean;
+  noClaimList?: string[];
+  noClaimDisplay?: string | null;
   canEditItems?: boolean;
   canGenerateClaimLetter?: boolean;
   canGenerateSummary?: boolean;
@@ -219,6 +250,17 @@ export default function ClaimWorkflowDetailPage() {
   const [voidingId, setVoidingId] = useState("");
   const [closeNote, setCloseNote] = useState("");
   const [closeSaving, setCloseSaving] = useState(false);
+  // Phase R7b — Multi No Claim:
+  // State minimal untuk section Submissions. Mark Ready / dokumen /
+  // payment masih di workflow-level sampai R7c/R7d.
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [submissionCount, setSubmissionCount] = useState(0);
+  const [hasMultipleSubmissions, setHasMultipleSubmissions] = useState(false);
+  const [createSubmissionScope, setCreateSubmissionScope] = useState("per_pengajuan");
+  const [createSubmissionLabel, setCreateSubmissionLabel] = useState("");
+  const [createSubmissionNoClaim, setCreateSubmissionNoClaim] = useState("");
+  const [creatingSubmission, setCreatingSubmission] = useState(false);
+  const [movingItemId, setMovingItemId] = useState("");
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -246,6 +288,10 @@ export default function ClaimWorkflowDetailPage() {
       setCanVoidPayment(Boolean(result.canVoidPayment));
       setCanClose(Boolean(result.canClose));
       setCloseBlockers(result.closeBlockers || []);
+      // Phase R7b — Multi No Claim: populate submissions list.
+      setSubmissions(result.submissions || []);
+      setSubmissionCount(result.submissionCount ?? (result.submissions?.length ?? 0));
+      setHasMultipleSubmissions(Boolean(result.hasMultipleSubmissions));
       // Sinkronkan draft input dengan nilai No Claim terbaru, kecuali user
       // sedang mengetik (noClaimEditing true).
       if (!noClaimEditing) {
@@ -624,6 +670,71 @@ export default function ClaimWorkflowDetailPage() {
     }
   };
 
+  // Phase R7b - Multi No Claim: handler create submission baru.
+  const submitCreateSubmission = async () => {
+    if (!workflow) return;
+    setCreatingSubmission(true);
+    setMessage("");
+    try {
+      const body: Record<string, string> = { scope: createSubmissionScope };
+      const labelTrimmed = createSubmissionLabel.trim();
+      if (labelTrimmed) body.scopeLabel = labelTrimmed;
+      const noClaimTrimmed = createSubmissionNoClaim.trim();
+      if (noClaimTrimmed) body.noClaim = noClaimTrimmed;
+      const response = await fetch(`/api/claim-workflow/${id}/submissions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal membuat Claim Submission.");
+      }
+      const successMessage = "Claim Submission baru tersimpan. Pindahkan item lewat dropdown di tabel.";
+      toast.success(successMessage);
+      setMessage(successMessage);
+      setCreateSubmissionLabel("");
+      setCreateSubmissionNoClaim("");
+      setCreateSubmissionScope("per_pengajuan");
+      await loadDetail();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Gagal membuat Claim Submission.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setCreatingSubmission(false);
+    }
+  };
+
+  // Phase R7b - Multi No Claim: handler pindahkan item ke submission lain.
+  const moveItemToSubmission = async (itemId: string, targetSubmissionId: string) => {
+    if (!targetSubmissionId) return;
+    setMovingItemId(itemId);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/claim-workflow/${id}/submissions/${targetSubmissionId}/items`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemIds: [itemId] }),
+        },
+      );
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal memindahkan item ke submission.");
+      }
+      toast.success("Item dipindahkan ke submission baru. Totals di-recalc.");
+      await loadDetail();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Gagal memindahkan item ke submission.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setMovingItemId("");
+    }
+  };
+
   const submitClose = async () => {
     const trimmed = closeNote.trim();
     if (!trimmed) {
@@ -864,6 +975,115 @@ export default function ClaimWorkflowDetailPage() {
         </div>
       </section>
 
+      <section className="rounded-2xl border border-indigo-500/20 bg-[#1a1c23] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-white">Claim Submissions / No Claim Groups</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Container No Claim. Satu submission = satu No Claim. Item dipindah antar submission lewat dropdown di tabel item.
+            </p>
+            {hasMultipleSubmissions && (
+              <p className="mt-2 text-xs text-amber-200">
+                Workflow ini memiliki {submissionCount} submission. Update No Claim wajib lewat submission, bukan dari section No Claim di atas.
+              </p>
+            )}
+            <p className="mt-2 text-xs text-slate-500">
+              Catatan transisi R7: Dokumen klaim dan pembayaran principal masih berjalan di workflow-level sampai R7c/R7d.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-black/30 text-xs uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="px-3 py-2">Scope</th>
+                <th className="px-3 py-2">Label</th>
+                <th className="px-3 py-2">No Claim</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2 text-right">Total Claim</th>
+                <th className="px-3 py-2 text-right">Items</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {submissions.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-3 py-4 text-xs italic text-slate-500">
+                    Belum ada submission. Workflow lama otomatis di-backfill via migration R7a.
+                  </td>
+                </tr>
+              ) : (
+                submissions.map((s) => (
+                  <tr key={s.id} className="text-slate-300">
+                    <td className="whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide text-indigo-300">
+                      {s.scope}
+                    </td>
+                    <td className="px-3 py-2 text-xs">{s.scopeLabel || "-"}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-emerald-200">{s.noClaim || "-"}</td>
+                    <td className="px-3 py-2 text-xs">{displayClaimStatusLabel(s.status)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{rupiah(s.totalClaim)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{s.itemCount ?? 0}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {editable && (
+          <div className="mt-5 grid gap-3 rounded-xl border border-white/10 bg-black/20 p-4 sm:grid-cols-4">
+            <div className="sm:col-span-1">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Scope</label>
+              <select
+                value={createSubmissionScope}
+                onChange={(event) => setCreateSubmissionScope(event.target.value)}
+                disabled={creatingSubmission}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+              >
+                {SUBMISSION_SCOPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-1">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Label</label>
+              <input
+                type="text"
+                value={createSubmissionLabel}
+                onChange={(event) => setCreateSubmissionLabel(event.target.value)}
+                placeholder="Mis: Program A / Toko X"
+                disabled={creatingSubmission}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+              />
+            </div>
+            <div className="sm:col-span-1">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">No Claim (opsional)</label>
+              <input
+                type="text"
+                value={createSubmissionNoClaim}
+                onChange={(event) => setCreateSubmissionNoClaim(event.target.value)}
+                placeholder="Boleh kosong"
+                disabled={creatingSubmission}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+              />
+            </div>
+            <div className="sm:col-span-1 sm:flex sm:items-end">
+              <button
+                type="button"
+                disabled={creatingSubmission}
+                onClick={() => void submitCreateSubmission()}
+                className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {creatingSubmission ? "Membuat..." : "Buat Submission"}
+              </button>
+            </div>
+          </div>
+        )}
+        {!canEditItems && (
+          <p className="mt-3 text-xs italic text-slate-500">View-only. Hanya admin atau claim yang dapat membuat atau memindahkan submission.</p>
+        )}
+      </section>
+
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1051,6 +1271,7 @@ export default function ClaimWorkflowDetailPage() {
                   <th scope="col" className="px-4 py-3 text-right font-semibold">PPH Amount</th>
                   <th scope="col" className="px-4 py-3 text-right font-semibold">Nilai Klaim</th>
                   <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+                  <th scope="col" className="px-4 py-3 font-semibold">Submission</th>
                   <th scope="col" className="px-4 py-3 font-semibold">Action</th>
                 </tr>
               </thead>
@@ -1117,6 +1338,39 @@ export default function ClaimWorkflowDetailPage() {
                         <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs font-semibold text-slate-300">
                           {item.status}
                         </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {editable && submissions.length > 1 ? (
+                          <select
+                            value={item.claimSubmissionId || ""}
+                            disabled={movingItemId === item.id}
+                            onChange={(event) => {
+                              const target = event.target.value;
+                              if (target && target !== item.claimSubmissionId) {
+                                void moveItemToSubmission(item.id, target);
+                              }
+                            }}
+                            className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white outline-none focus:border-indigo-500/60 disabled:opacity-50"
+                          >
+                            {!item.claimSubmissionId && (
+                              <option value="">- pilih submission -</option>
+                            )}
+                            {submissions.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.scopeLabel || s.scope}
+                                {s.noClaim ? ` | ${s.noClaim}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            {(() => {
+                              const sub = submissions.find((s) => s.id === item.claimSubmissionId);
+                              if (!sub) return "-";
+                              return sub.noClaim || sub.scopeLabel || sub.scope;
+                            })()}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {isEditing ? (

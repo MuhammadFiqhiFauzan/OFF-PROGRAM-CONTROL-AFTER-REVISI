@@ -10,6 +10,9 @@
  *     terkait, semua dalam satu transaksi.
  *   - Insert dua row audit ke claim_audit_log
  *     (`no_claim_assigned`, `no_claim_synced_to_off`).
+ *   - Phase R7b: bila default submission tunggal sudah ada, kolom
+ *     noClaim di submission tersebut juga ikut di-mirror supaya
+ *     source-of-truth submission konsisten dengan cache workflow.
  *
  * Phase R1 — Rewire OFF ↔ Claim No Claim:
  *   No Claim diinput sekali di Claim Workflow, lalu otomatis ditebar ke OFF
@@ -17,21 +20,29 @@
  *   diketik manual oleh user. Validasi unik ditangani oleh partial unique
  *   index `idx_claim_workflow_no_claim_unique` + pengecekan eksplisit
  *   sebelum write supaya pesan error lebih jelas ke UI.
+ *
+ * Phase R7b — Multi No Claim guard:
+ *   Bila workflow sudah punya >1 submission, route ini menolak request
+ *   dengan code `MULTI_SUBMISSION_NO_CLAIM_ROUTE_DISABLED`. User harus
+ *   menggunakan endpoint submission-specific
+ *   (`PATCH /[id]/submissions/[submissionId]`) untuk mengubah No Claim.
+ *   Hal ini mencegah cache workflow.noClaim tertulis sembarangan saat
+ *   ada multiple No Claim.
  */
 import { NextResponse } from "next/server";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { claimWorkflow, offBatchItem } from "@/db/schema";
+import { claimSubmission, claimWorkflow, offBatchItem } from "@/db/schema";
 import {
     canActorReadClaimWorkflow,
+    claimAuditScopes,
     claimWorkflowStatuses,
+    NO_CLAIM_MAX_LENGTH,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
 
 type Context = { params: Promise<{ id: string }> };
-
-const NO_CLAIM_MAX_LENGTH = 120;
 
 export async function PATCH(request: Request, context: Context) {
     const actor = await requireClaimSession();
@@ -179,6 +190,29 @@ export async function PATCH(request: Request, context: Context) {
                 } as const;
             }
 
+            // Phase R7b — Multi No Claim guard:
+            // Route lama hanya boleh menulis cache `claim_workflow.noClaim`
+            // jika workflow ini hanya punya satu submission (single-No
+            // Claim mode). Bila sudah ada multiple submission, route ini
+            // di-disable supaya cache workflow tidak menabrak nilai dari
+            // submission manapun. User wajib pakai endpoint
+            // `PATCH /[id]/submissions/[submissionId]` untuk update No
+            // Claim per submission.
+            const submissions = await tx
+                .select({ id: claimSubmission.id })
+                .from(claimSubmission)
+                .where(eq(claimSubmission.claimWorkflowId, id));
+            if (submissions.length > 1) {
+                return {
+                    error: {
+                        status: 409,
+                        code: "MULTI_SUBMISSION_NO_CLAIM_ROUTE_DISABLED",
+                        message: "Workflow memiliki beberapa No Claim. Update No Claim lewat submission.",
+                    },
+                } as const;
+            }
+            const targetSubmissionId = submissions[0]?.id ?? null;
+
             const previousNoClaim = workflow.noClaim ?? null;
 
             await tx
@@ -191,6 +225,23 @@ export async function PATCH(request: Request, context: Context) {
                 })
                 .where(eq(claimWorkflow.id, id));
 
+            // Mirror nilai noClaim ke default submission (kalau ada)
+            // supaya source-of-truth submission tetap konsisten dengan
+            // cache workflow. Kasus tidak ada submission masih mungkin
+            // untuk workflow lama yang belum di-backfill — biarkan,
+            // route lama tetap menulis cache supaya R1-R6 tetap jalan.
+            if (targetSubmissionId) {
+                await tx
+                    .update(claimSubmission)
+                    .set({
+                        noClaim,
+                        noClaimAssignedAt: now,
+                        noClaimAssignedBy: actor.id,
+                        updatedAt: now,
+                    })
+                    .where(eq(claimSubmission.id, targetSubmissionId));
+            }
+
             const updateResult = await tx
                 .update(offBatchItem)
                 .set({ noClaim, updatedAt: now })
@@ -201,6 +252,10 @@ export async function PATCH(request: Request, context: Context) {
             await writeClaimAudit(
                 {
                     claimWorkflowId: id,
+                    claimSubmissionId: targetSubmissionId,
+                    auditScope: targetSubmissionId
+                        ? claimAuditScopes.submission
+                        : claimAuditScopes.workflow,
                     actor,
                     action: "no_claim_assigned",
                     fromStatus: workflow.status,
@@ -210,6 +265,8 @@ export async function PATCH(request: Request, context: Context) {
                         newNoClaim: noClaim,
                         offBatchId: workflow.offBatchId,
                         assignedBy: actor.id,
+                        submissionId: targetSubmissionId,
+                        viaLegacyWorkflowRoute: true,
                     },
                 },
                 tx,
@@ -217,6 +274,10 @@ export async function PATCH(request: Request, context: Context) {
             await writeClaimAudit(
                 {
                     claimWorkflowId: id,
+                    claimSubmissionId: targetSubmissionId,
+                    auditScope: targetSubmissionId
+                        ? claimAuditScopes.submission
+                        : claimAuditScopes.workflow,
                     actor,
                     action: "no_claim_synced_to_off",
                     fromStatus: workflow.status,
@@ -227,6 +288,8 @@ export async function PATCH(request: Request, context: Context) {
                         offBatchId: workflow.offBatchId,
                         syncedItemCount,
                         assignedBy: actor.id,
+                        submissionId: targetSubmissionId,
+                        viaLegacyWorkflowRoute: true,
                     },
                 },
                 tx,
@@ -236,6 +299,7 @@ export async function PATCH(request: Request, context: Context) {
                 ok: true,
                 offBatchId: workflow.offBatchId,
                 syncedItemCount,
+                submissionId: targetSubmissionId,
             } as const;
         });
 
@@ -258,6 +322,7 @@ export async function PATCH(request: Request, context: Context) {
             sync: {
                 offBatchId: result.offBatchId,
                 syncedItemCount: result.syncedItemCount,
+                submissionId: result.submissionId,
             },
         });
     } catch (error) {

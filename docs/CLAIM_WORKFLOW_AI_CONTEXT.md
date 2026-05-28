@@ -579,6 +579,17 @@ Phase 3+ telah retired:
     dan rencana R7b–R7f di `docs/R7_MULTI_NO_CLAIM_PLAN.md`.
     R7f (direct kwitansi/manual) **deferred** karena butuh table rebuild
     SQLite + backup penuh.
+12. **Phase R7b** — Submission grouping + item assignment (Mei 2026). ✅
+    API CRUD submission (`/api/claim-workflow/[id]/submissions/...`),
+    helper `getOrCreateDefaultSubmission` /
+    `recalcSubmissionTotals` / `recalcWorkflowAggregateFromSubmissions`
+    di `lib/claim-workflow/submissions.ts`, item edit recalc submission
+    + workflow aggregate, legacy no-claim route reject saat multi
+    submission (`MULTI_SUBMISSION_NO_CLAIM_ROUTE_DISABLED`). Detail GET
+    membawa `submissions[]` + `noClaimDisplay`. UI menambah section
+    "Claim Submissions / No Claim Groups" + dropdown Submission per
+    item. Dokumen / payment / close tetap workflow-level sampai
+    R7c/R7d. Lihat `docs/R7_MULTI_NO_CLAIM_PLAN.md` section "Phase R7b".
 
 ## Phase R4 — Close Claim Workflow
 
