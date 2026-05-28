@@ -590,6 +590,24 @@ Phase 3+ telah retired:
     "Claim Submissions / No Claim Groups" + dropdown Submission per
     item. Dokumen / payment / close tetap workflow-level sampai
     R7c/R7d. Lihat `docs/R7_MULTI_NO_CLAIM_PLAN.md` section "Phase R7b".
+13. **Phase R7c** — Documents per submission (Mei 2026). ✅ Endpoint
+    baru `POST/GET /api/claim-workflow/[id]/submissions/[submissionId]/{claim-letter,summary,receipt}`
+    generate + stream Claim Letter / Summary / Kwitansi PDF per
+    submission. Items difilter `claim_submission_id`. Path file di
+    submission tree
+    `runtime/claim-workflow/{workflowId}/submissions/{submissionId}/{type}/`,
+    helper terpusat di `lib/claim-workflow/document-paths.ts`. Generator
+    `generateClaim{Letter,Summary,Receipt}Pdf` menerima
+    `options.submission` untuk override header + path. Route legacy
+    `POST /[id]/{claim-letter,summary,receipt}` menolak multi-submission
+    dengan `MULTI_SUBMISSION_*_ROUTE_DISABLED`; single-submission
+    mirror atomic ke `claim_submission.{type}PdfPath`. `return_to_draft`
+    invalidate semua PDF submission + workflow cache + unlink file.
+    Audit metadata membawa `workflowId`, `submissionId`, `noClaim`,
+    `itemCount`, `totalClaim`, `documentType`, `filePath`. Mark Ready /
+    Close gate dan reports tetap workflow cache di R7c — akan pindah
+    di R7d/R7e. Lihat `docs/R7_MULTI_NO_CLAIM_PLAN.md` section
+    "Phase R7c".
 
 ## Phase R4 — Close Claim Workflow
 

@@ -54,7 +54,7 @@ mulai R7b ke depan.
 |-------|---------------------------------------------------------------------------|----------|
 | R7a   | Schema additive: `claim_submission` table + kolom baru di workflow/item/payment/audit + backfill default submission. | DONE     |
 | R7b   | API submission CRUD, item assignment, recalc submission totals, default submission tetap valid. | DONE     |
-| R7c   | Generate Claim Letter / Summary / Kwitansi PDF per submission. PDF path workflow lama jadi pointer ke primary submission. | Pending  |
+| R7c   | Generate Claim Letter / Summary / Kwitansi PDF per submission. PDF path workflow lama jadi pointer ke primary submission. | DONE     |
 | R7d   | Payment + outstanding pindah ke level submission. `recalcPaymentTotals` per submission. Workflow totals di-derive. | Pending  |
 | R7e   | Close per submission. Workflow `aggregate_status` derived. Reports basis berubah ke submission row. | Pending  |
 | R7f   | Direct kwitansi / manual source. Butuh table rebuild SQLite (`off_batch_id` → nullable). **Deferred** sampai backup penuh + persetujuan bisnis. | Deferred |
@@ -255,6 +255,111 @@ UI section di detail page. Behavior R1-R6 tetap dipertahankan.
   workflow editable dan ada >1 submission.
 - Banner peringatan: dokumen klaim dan pembayaran principal masih
   berjalan di workflow-level sampai R7c/R7d.
+
+---
+
+## Phase R7c — Documents per submission (DONE)
+
+R7c memindahkan generator Claim Letter / Summary / Kwitansi ke level
+submission. Cache workflow tetap dipertahankan untuk Mark Ready / Close
+gate (akan dipindah di R7d/R7e).
+
+### Endpoint baru
+
+| Endpoint | Method | Akses | Keterangan |
+|----------|--------|-------|------------|
+| `/api/claim-workflow/[id]/submissions/[submissionId]/claim-letter` | POST | admin/claim | Generate Claim Letter PDF per submission. Items difilter `claim_submission_id`. |
+| `/api/claim-workflow/[id]/submissions/[submissionId]/claim-letter` | GET | read access | Stream PDF dari `claim_submission.claimLetterPdfPath`. |
+| `/api/claim-workflow/[id]/submissions/[submissionId]/summary` | POST/GET | admin/claim / read access | Sama untuk Summary. |
+| `/api/claim-workflow/[id]/submissions/[submissionId]/receipt` | POST/GET | admin/claim / read access | Sama untuk Kwitansi. |
+
+### Path layout
+
+```
+runtime/claim-workflow/
+  {workflowId}/submissions/{submissionId}/letter/{slug}-letter-{ts}.pdf
+                                          /summary/{slug}-summary-{ts}.pdf
+                                          /receipt/{slug}-receipt-{ts}.pdf
+  letters/                ← LEGACY workflow-level (pra-R7c)
+  summaries/              ← LEGACY workflow-level
+  receipts/               ← LEGACY workflow-level
+```
+
+- Folder utama submission selalu pakai `submissionId` (immutable).
+- `slug` di-derive dari `slugifyNoClaim(noClaim)`. Bila noClaim NULL/
+  empty, fallback ke `submissionId`.
+- Path validator umum `isPathInsideClaimDocumentRoot` menerima legacy
+  dir maupun submission tree.
+
+### Helper baru di `lib/claim-workflow/document-paths.ts`
+
+- `CLAIM_DOCUMENT_ROOT_DIR`, `LEGACY_DOCUMENT_DIRS`.
+- `getSubmissionDocumentDir(workflowId, submissionId, type)`.
+- `slugifyNoClaim(value)`.
+- `formatDocumentTimestamp(date)`.
+- `buildSubmissionDocumentFilePath({ workflowId, submissionId, type, noClaim, generatedAt })`.
+- `isPathInsideClaimDocumentRoot(path)`.
+- `isPathInsideLegacyDir(path, type)`.
+- `isPathInsideSubmissionDocumentDir({ workflowId, submissionId, type, targetPath })`.
+
+### Constants baru di `lib/claim-workflow/constants.ts`
+
+- `claimDocumentTypes = { letter, summary, receipt }`.
+- `claimDocumentTypeList`, `isClaimDocumentType`, `ClaimDocumentType`.
+
+### PDF generator signature change
+
+`generateClaimLetterPdf(workflow, items, generatedAt, options?)`,
+`generateClaimSummaryPdf(workflow, items, generatedAt, options?)`,
+`generateClaimReceiptPdf(workflow, items, generatedAt, options?)` —
+`options.submission?: ClaimSubmissionRow | null`.
+
+- Bila submission disuplai: header PDF override `noClaim` + totals
+  pakai data submission. Items WAJIB sudah difilter caller. File path
+  ditulis di submission tree.
+- Tanpa submission: legacy workflow-level path + header workflow.
+
+### Behavior change kecil
+
+- `POST /[id]/{claim-letter,summary,receipt}` (legacy):
+  - Multi-submission → 409 `MULTI_SUBMISSION_LETTER_ROUTE_DISABLED` /
+    `..._SUMMARY_..._DISABLED` / `..._RECEIPT_..._DISABLED`.
+  - Single submission → tulis cache workflow + mirror ke submission
+    tunggal (atomic) supaya kedua source-of-truth konsisten.
+  - Workflow tanpa submission → tulis cache workflow saja (audit pakai
+    `audit_scope = "workflow"`).
+- `POST /[id]/status` `return_to_draft`:
+  - Tetap invalidate 3 PDF cache workflow.
+  - **R7c**: juga loop semua submission → reset 3 path PDF + unlink
+    file di submission tree (best-effort).
+  - Audit metadata `invalidatedSubmissionPdfPaths` mencantumkan
+    `{submissionId, type, path}` per file yang di-invalidate.
+
+### Audit
+
+Audit action tetap sama (`claim_letter_generated`, `claim_summary_generated`,
+`claim_receipt_generated`). Metadata baru: `workflowId`, `submissionId`,
+`noClaim`, `itemCount`, `totalClaim`, `documentType`, `filePath`,
+`workflowMirror` (saat lewat route legacy), `viaLegacyWorkflowRoute`.
+
+### UI
+
+Detail page section "Claim Submissions / No Claim Groups" sekarang
+menampilkan **3 chip per submission**: Letter / Summary / Kwitansi.
+Setiap chip:
+- Link "PDF" hijau bila path tersedia (download via endpoint per submission).
+- Tombol "Gen / Re" indigo untuk generate / regenerate (admin/claim,
+  workflow editable, items > 0, totalClaim > 0).
+
+Banner amber di section "Dokumen Klaim" workflow-level mengingatkan user
+bila workflow multi-submission.
+
+### Yang BELUM diubah
+
+- Mark Ready gate (workflow cache).
+- Close gate (workflow cache).
+- Reports / Outstanding (workflow basis).
+- OFF Program Control PDF (terpisah total).
 
 ---
 

@@ -2,7 +2,47 @@ import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { terbilangRupiah } from "@/lib/off-program-control/helpers";
-import type { ClaimWorkflowItemRow, ClaimWorkflowRow } from "./types";
+import { claimDocumentTypes } from "./constants";
+import {
+    buildSubmissionDocumentFilePath,
+    formatDocumentTimestamp,
+} from "./document-paths";
+import type { ClaimSubmissionRow, ClaimWorkflowItemRow, ClaimWorkflowRow } from "./types";
+
+/**
+ * Phase R7c — Documents per submission:
+ * Builder PDF dapat di-panggil di dua mode:
+ *   1. Workflow-level (legacy): hanya `workflow + items`, totals + noClaim
+ *      mengikuti row workflow apa adanya. Path output di legacy dir
+ *      `runtime/claim-workflow/letters/`.
+ *   2. Submission-level (R7c): tambahan `submission` untuk override
+ *      totals + noClaim + claim header. Items WAJIB sudah difilter
+ *      oleh caller agar hanya berisi item yang ditugaskan ke submission.
+ *      Path output di submission tree
+ *      `runtime/claim-workflow/{workflowId}/submissions/{submissionId}/letter/`.
+ *
+ * Mode dipilih lewat optional argument `options.submission`. Tidak ada
+ * breaking change untuk caller workflow-level lama.
+ */
+type EffectiveWorkflowTotals = Pick<
+    ClaimWorkflowRow,
+    "noClaim" | "totalDpp" | "totalPpn" | "totalPph" | "totalClaim"
+>;
+
+function applySubmissionOverrides<T extends ClaimWorkflowRow>(
+    workflow: T,
+    submission: ClaimSubmissionRow | null | undefined,
+): T {
+    if (!submission) return workflow;
+    const override: EffectiveWorkflowTotals = {
+        noClaim: submission.noClaim,
+        totalDpp: Number(submission.totalDpp || 0),
+        totalPpn: Number(submission.totalPpn || 0),
+        totalPph: Number(submission.totalPph || 0),
+        totalClaim: Number(submission.totalClaim || 0),
+    };
+    return { ...workflow, ...override };
+}
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -234,13 +274,32 @@ export async function generateClaimLetterPdf(
     workflow: ClaimWorkflowRow,
     items: ClaimWorkflowItemRow[],
     generatedAt: Date,
+    options: { submission?: ClaimSubmissionRow | null } = {},
 ) {
-    const pdf = await buildClaimLetterPdf(workflow, items, generatedAt);
+    const submission = options.submission ?? null;
+    // Apply submission totals/noClaim ke "effective workflow" supaya
+    // builder existing tetap bisa render header/total tanpa perubahan
+    // signature internal yang besar. Items sudah difilter oleh caller.
+    const effectiveWorkflow = applySubmissionOverrides(workflow, submission);
+    const pdf = await buildClaimLetterPdf(effectiveWorkflow, items, generatedAt);
     if (pdf.byteLength === 0) throw new Error("Claim Letter PDF output is empty.");
-    const directory = path.join(process.cwd(), "runtime", "claim-workflow", "letters");
-    await mkdir(directory, { recursive: true });
-    const timestamp = generatedAt.toISOString().replace(/[-:T]/g, "").slice(0, 14);
-    const filePath = path.join(directory, `${safeFileName(workflow.claimWorkflowNo)}-claim-letter-${timestamp}.pdf`);
+
+    let filePath: string;
+    if (submission) {
+        filePath = buildSubmissionDocumentFilePath({
+            workflowId: workflow.id,
+            submissionId: submission.id,
+            type: claimDocumentTypes.letter,
+            noClaim: submission.noClaim,
+            generatedAt,
+        });
+        await mkdir(path.dirname(filePath), { recursive: true });
+    } else {
+        const directory = path.join(process.cwd(), "runtime", "claim-workflow", "letters");
+        await mkdir(directory, { recursive: true });
+        const timestamp = formatDocumentTimestamp(generatedAt);
+        filePath = path.join(directory, `${safeFileName(workflow.claimWorkflowNo)}-claim-letter-${timestamp}.pdf`);
+    }
     await writeFile(filePath, pdf);
     return { filePath, pdf };
 }

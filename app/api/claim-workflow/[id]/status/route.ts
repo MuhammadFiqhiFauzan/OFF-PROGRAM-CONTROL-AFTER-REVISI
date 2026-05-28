@@ -3,9 +3,12 @@ import { unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { claimWorkflow, claimWorkflowItem } from "@/db/schema";
+import { claimSubmission, claimWorkflow, claimWorkflowItem } from "@/db/schema";
 import {
+    claimAuditScopes,
+    claimDocumentTypes,
     claimWorkflowStatuses,
+    isPathInsideClaimDocumentRoot,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
@@ -29,6 +32,15 @@ function isPathInsideSummaryDir(targetPath: string): boolean {
 
 function isPathInsideReceiptDir(targetPath: string): boolean {
     return isPathInsideDir(targetPath, RECEIPT_DIR);
+}
+
+/**
+ * Phase R7c: bila return_to_draft, hapus juga PDF dari submission tree
+ * (multi-submission). Helper ini terima path apapun yang berada di
+ * bawah `runtime/claim-workflow/` (legacy dir maupun submission tree).
+ */
+function shouldUnlinkClaimDocument(targetPath: string | null | undefined): boolean {
+    return Boolean(targetPath) && isPathInsideClaimDocumentRoot(targetPath as string);
 }
 
 type Context = { params: Promise<{ id: string }> };
@@ -253,7 +265,19 @@ export async function POST(request: Request, context: Context) {
             updatePayload.receiptGeneratedBy = null;
         }
 
-        const auditMetadata = {
+        // Phase R7c — Multi No Claim:
+        // return_to_draft juga harus menginvalidasi seluruh PDF dari
+        // semua submission (Letter / Summary / Kwitansi). Tax editing
+        // dibuka kembali per item -> setiap submission yang mengandalkan
+        // item tersebut perlu di-regenerate. Path lama dikumpulkan untuk
+        // unlink di luar transaksi (pola sama dengan workflow cache).
+        const invalidatedSubmissionPdfPaths: Array<{
+            submissionId: string;
+            type: "letter" | "summary" | "receipt";
+            path: string;
+        }> = [];
+
+        const auditMetadata: Record<string, unknown> = {
             totalDpp: Number(workflow.totalDpp || 0),
             totalPpn: Number(workflow.totalPpn || 0),
             totalPph: Number(workflow.totalPph || 0),
@@ -273,8 +297,64 @@ export async function POST(request: Request, context: Context) {
                 .update(claimWorkflow)
                 .set(updatePayload)
                 .where(eq(claimWorkflow.id, id));
+
+            // Phase R7c: invalidate semua submission PDF saat return.
+            if (action === "return_to_draft") {
+                const submissions = await tx
+                    .select({
+                        id: claimSubmission.id,
+                        claimLetterPdfPath: claimSubmission.claimLetterPdfPath,
+                        summaryPdfPath: claimSubmission.summaryPdfPath,
+                        receiptPdfPath: claimSubmission.receiptPdfPath,
+                    })
+                    .from(claimSubmission)
+                    .where(eq(claimSubmission.claimWorkflowId, id));
+                for (const s of submissions) {
+                    if (s.claimLetterPdfPath) {
+                        invalidatedSubmissionPdfPaths.push({
+                            submissionId: s.id,
+                            type: claimDocumentTypes.letter,
+                            path: s.claimLetterPdfPath,
+                        });
+                    }
+                    if (s.summaryPdfPath) {
+                        invalidatedSubmissionPdfPaths.push({
+                            submissionId: s.id,
+                            type: claimDocumentTypes.summary,
+                            path: s.summaryPdfPath,
+                        });
+                    }
+                    if (s.receiptPdfPath) {
+                        invalidatedSubmissionPdfPaths.push({
+                            submissionId: s.id,
+                            type: claimDocumentTypes.receipt,
+                            path: s.receiptPdfPath,
+                        });
+                    }
+                    await tx
+                        .update(claimSubmission)
+                        .set({
+                            claimLetterPdfPath: null,
+                            claimLetterGeneratedAt: null,
+                            claimLetterGeneratedBy: null,
+                            summaryPdfPath: null,
+                            summaryGeneratedAt: null,
+                            summaryGeneratedBy: null,
+                            receiptPdfPath: null,
+                            receiptGeneratedAt: null,
+                            receiptGeneratedBy: null,
+                            updatedAt: now,
+                        })
+                        .where(eq(claimSubmission.id, s.id));
+                }
+                if (invalidatedSubmissionPdfPaths.length > 0) {
+                    auditMetadata.invalidatedSubmissionPdfPaths = invalidatedSubmissionPdfPaths;
+                }
+            }
+
             await writeClaimAudit({
                 claimWorkflowId: id,
+                auditScope: claimAuditScopes.workflow,
                 actor,
                 action,
                 fromStatus,
@@ -304,6 +384,12 @@ export async function POST(request: Request, context: Context) {
             isPathInsideReceiptDir(invalidatedReceiptPdfPath)
         ) {
             await unlink(invalidatedReceiptPdfPath).catch(() => {});
+        }
+        // Phase R7c: best-effort unlink semua PDF submission yang ter-invalidate.
+        for (const entry of invalidatedSubmissionPdfPaths) {
+            if (shouldUnlinkClaimDocument(entry.path)) {
+                await unlink(entry.path).catch(() => {});
+            }
         }
 
         const [updated] = await db

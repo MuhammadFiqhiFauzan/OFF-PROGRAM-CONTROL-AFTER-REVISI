@@ -1,11 +1,14 @@
 /*
- * Tujuan: Generate dan serve Kwitansi Claim PDF (POST/GET).
- *         Mirroring pattern Claim Letter route.
- * Caller: UI Claim Workflow detail (admin/claim untuk POST, viewer Claim
- *         Workflow untuk GET).
+ * Tujuan: Generate dan serve Kwitansi Claim PDF (POST/GET) — workflow-level
+ *         legacy route. Phase R7c menambahkan multi-submission guard
+ *         supaya cache workflow tidak menabrak nilai dari submission.
+ *         Submission-level generator ada di
+ *         `app/api/claim-workflow/[id]/submissions/[submissionId]/receipt/route.ts`.
+ * Caller: UI Claim Workflow detail (admin/claim untuk POST, viewer untuk GET).
  * Side Effects:
- *   POST: tulis PDF ke runtime/claim-workflow/receipts, update metadata
- *         claim_workflow.receipt_pdf_path, audit `claim_receipt_generated`.
+ *   POST: tulis PDF, update metadata claim_workflow.receipt_pdf_path,
+ *         optional mirror ke single submission, audit
+ *         `claim_receipt_generated`.
  *   GET : stream PDF dari path yang sudah di-validate.
  *
  * PENTING: Kwitansi Claim adalah dokumen klaim PRE-submission ke
@@ -16,12 +19,16 @@ import path from "node:path";
 import { readFile, unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { claimWorkflow, claimWorkflowItem } from "@/db/schema";
+import { claimSubmission, claimWorkflow, claimWorkflowItem } from "@/db/schema";
 import { db } from "@/lib/db";
 import {
     canActorReadClaimWorkflow,
+    claimAuditScopes,
+    claimDocumentTypes,
     claimWorkflowStatuses,
     generateClaimReceiptPdf,
+    isPathInsideClaimDocumentRoot,
+    isPathInsideLegacyDir,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
@@ -29,13 +36,6 @@ import {
 export const runtime = "nodejs";
 
 type Context = { params: Promise<{ id: string }> };
-
-const RECEIPT_DIR = path.resolve(process.cwd(), "runtime", "claim-workflow", "receipts");
-
-function isPathInsideReceiptDir(targetPath: string): boolean {
-    const resolved = path.resolve(targetPath);
-    return resolved === RECEIPT_DIR || resolved.startsWith(RECEIPT_DIR + path.sep);
-}
 
 function generationAllowed(status: string) {
     return status === claimWorkflowStatuses.draft ||
@@ -78,12 +78,26 @@ export async function POST(_request: Request, context: Context) {
         const result = await generateClaimReceiptPdf(workflow, items, generatedAt);
 
         let previousPdfPath: string | null = null;
+        let mirroredSubmissionId: string | null = null;
         try {
             await db.transaction(async (tx) => {
                 const [current] = await tx.select().from(claimWorkflow).where(eq(claimWorkflow.id, id));
                 if (!current || !generationAllowed(current.status)) {
                     throw new Error("Claim Workflow status berubah sebelum Kwitansi Claim PDF tersimpan.");
                 }
+                // Phase R7c — Multi No Claim guard:
+                const submissions = await tx
+                    .select({ id: claimSubmission.id })
+                    .from(claimSubmission)
+                    .where(eq(claimSubmission.claimWorkflowId, id));
+                if (submissions.length > 1) {
+                    throw Object.assign(
+                        new Error("Workflow memiliki beberapa submission. Generate Kwitansi lewat submission."),
+                        { code: "MULTI_SUBMISSION_RECEIPT_ROUTE_DISABLED" },
+                    );
+                }
+                const targetSubmissionId = submissions[0]?.id ?? null;
+
                 previousPdfPath = current.receiptPdfPath ?? null;
                 await tx.update(claimWorkflow).set({
                     receiptPdfPath: result.filePath,
@@ -91,28 +105,65 @@ export async function POST(_request: Request, context: Context) {
                     receiptGeneratedBy: actor.id,
                     updatedAt: generatedAt,
                 }).where(eq(claimWorkflow.id, id));
+
+                if (targetSubmissionId) {
+                    await tx.update(claimSubmission).set({
+                        receiptPdfPath: result.filePath,
+                        receiptGeneratedAt: generatedAt,
+                        receiptGeneratedBy: actor.id,
+                        updatedAt: generatedAt,
+                    }).where(eq(claimSubmission.id, targetSubmissionId));
+                    mirroredSubmissionId = targetSubmissionId;
+                }
+
                 await writeClaimAudit({
                     claimWorkflowId: id,
+                    claimSubmissionId: targetSubmissionId,
+                    auditScope: targetSubmissionId
+                        ? claimAuditScopes.submission
+                        : claimAuditScopes.workflow,
                     actor,
                     action: "claim_receipt_generated",
                     fromStatus: current.status,
                     toStatus: current.status,
                     metadata: {
-                        pdfPath: result.filePath,
+                        workflowId: id,
+                        submissionId: targetSubmissionId,
+                        documentType: claimDocumentTypes.receipt,
+                        filePath: result.filePath,
                         itemCount: items.length,
                         totalClaim: Number(current.totalClaim || 0),
                         noClaim: current.noClaim ?? null,
                         generatedBy: actor.id,
+                        viaLegacyWorkflowRoute: true,
                         ...(previousPdfPath ? { previousPdfPath } : {}),
                     },
                 }, tx);
             });
         } catch (transactionError) {
             await unlink(result.filePath).catch(() => {});
+            const code = transactionError && typeof transactionError === "object"
+                && "code" in (transactionError as Record<string, unknown>)
+                ? String((transactionError as Record<string, unknown>).code)
+                : null;
+            if (code === "MULTI_SUBMISSION_RECEIPT_ROUTE_DISABLED") {
+                return NextResponse.json({
+                    ok: false,
+                    code,
+                    error: transactionError instanceof Error
+                        ? transactionError.message
+                        : "Workflow memiliki beberapa submission. Generate Kwitansi lewat submission.",
+                }, { status: 409 });
+            }
             throw transactionError;
         }
 
-        if (previousPdfPath && previousPdfPath !== result.filePath && isPathInsideReceiptDir(previousPdfPath)) {
+        if (
+            previousPdfPath &&
+            previousPdfPath !== result.filePath &&
+            (isPathInsideLegacyDir(previousPdfPath, claimDocumentTypes.receipt) ||
+             isPathInsideClaimDocumentRoot(previousPdfPath))
+        ) {
             await unlink(previousPdfPath).catch(() => {});
         }
 
@@ -122,6 +173,7 @@ export async function POST(_request: Request, context: Context) {
             pdfPath: result.filePath,
             downloadUrl: `/api/claim-workflow/${id}/receipt`,
             receiptGeneratedAt: generatedAt,
+            mirroredSubmissionId,
         });
     } catch (error) {
         console.error("[CLAIM WORKFLOW RECEIPT PDF ERROR]", error);
@@ -142,8 +194,8 @@ export async function GET(_request: Request, context: Context) {
     if (!workflow.receiptPdfPath) {
         return NextResponse.json({ ok: false, error: "Kwitansi Claim PDF belum pernah dibuat." }, { status: 404 });
     }
-    if (!isPathInsideReceiptDir(workflow.receiptPdfPath)) {
-        console.error("[CLAIM WORKFLOW RECEIPT PDF] Refusing to serve PDF outside receipts dir", {
+    if (!isPathInsideClaimDocumentRoot(workflow.receiptPdfPath)) {
+        console.error("[CLAIM WORKFLOW RECEIPT PDF] Refusing to serve PDF outside claim-workflow root", {
             workflowId: id,
             path: workflow.receiptPdfPath,
         });
@@ -152,7 +204,8 @@ export async function GET(_request: Request, context: Context) {
 
     try {
         const file = await readFile(workflow.receiptPdfPath);
-        const fileName = `${workflow.claimWorkflowNo.replace(/[^a-zA-Z0-9]+/g, "-")}-receipt.pdf`;
+        const baseName = path.basename(workflow.receiptPdfPath);
+        const fileName = baseName || `${workflow.claimWorkflowNo.replace(/[^a-zA-Z0-9]+/g, "-")}-receipt.pdf`;
         return new NextResponse(new Uint8Array(file), {
             headers: {
                 "Content-Type": "application/pdf",

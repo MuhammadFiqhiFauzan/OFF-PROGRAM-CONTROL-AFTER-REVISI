@@ -16,7 +16,12 @@ import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { terbilangRupiah } from "@/lib/off-program-control/helpers";
-import type { ClaimWorkflowItemRow, ClaimWorkflowRow } from "./types";
+import { claimDocumentTypes } from "./constants";
+import {
+    buildSubmissionDocumentFilePath,
+    formatDocumentTimestamp,
+} from "./document-paths";
+import type { ClaimSubmissionRow, ClaimWorkflowItemRow, ClaimWorkflowRow } from "./types";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -252,13 +257,39 @@ export async function generateClaimReceiptPdf(
     workflow: ClaimWorkflowRow,
     items: ClaimWorkflowItemRow[],
     generatedAt: Date,
+    options: { submission?: ClaimSubmissionRow | null } = {},
 ) {
-    const pdf = await buildClaimReceiptPdf(workflow, items, generatedAt);
+    // Phase R7c: submission override seperti generator letter/summary.
+    const submission = options.submission ?? null;
+    const effectiveWorkflow: ClaimWorkflowRow = submission
+        ? {
+            ...workflow,
+            noClaim: submission.noClaim,
+            totalDpp: Number(submission.totalDpp || 0),
+            totalPpn: Number(submission.totalPpn || 0),
+            totalPph: Number(submission.totalPph || 0),
+            totalClaim: Number(submission.totalClaim || 0),
+        }
+        : workflow;
+    const pdf = await buildClaimReceiptPdf(effectiveWorkflow, items, generatedAt);
     if (pdf.byteLength === 0) throw new Error("Claim Receipt PDF output is empty.");
-    const directory = path.join(process.cwd(), "runtime", "claim-workflow", "receipts");
-    await mkdir(directory, { recursive: true });
-    const timestamp = generatedAt.toISOString().replace(/[-:T]/g, "").slice(0, 14);
-    const filePath = path.join(directory, `${safeFileName(workflow.claimWorkflowNo)}-receipt-${timestamp}.pdf`);
+
+    let filePath: string;
+    if (submission) {
+        filePath = buildSubmissionDocumentFilePath({
+            workflowId: workflow.id,
+            submissionId: submission.id,
+            type: claimDocumentTypes.receipt,
+            noClaim: submission.noClaim,
+            generatedAt,
+        });
+        await mkdir(path.dirname(filePath), { recursive: true });
+    } else {
+        const directory = path.join(process.cwd(), "runtime", "claim-workflow", "receipts");
+        await mkdir(directory, { recursive: true });
+        const timestamp = formatDocumentTimestamp(generatedAt);
+        filePath = path.join(directory, `${safeFileName(workflow.claimWorkflowNo)}-receipt-${timestamp}.pdf`);
+    }
     await writeFile(filePath, pdf);
     return { filePath, pdf };
 }

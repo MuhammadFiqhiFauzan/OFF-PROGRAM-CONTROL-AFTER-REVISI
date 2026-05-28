@@ -2,12 +2,16 @@ import path from "node:path";
 import { readFile, unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { claimWorkflow, claimWorkflowItem } from "@/db/schema";
+import { claimSubmission, claimWorkflow, claimWorkflowItem } from "@/db/schema";
 import { db } from "@/lib/db";
 import {
     canActorReadClaimWorkflow,
+    claimAuditScopes,
+    claimDocumentTypes,
     claimWorkflowStatuses,
     generateClaimLetterPdf,
+    isPathInsideClaimDocumentRoot,
+    isPathInsideLegacyDir,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
@@ -15,13 +19,6 @@ import {
 export const runtime = "nodejs";
 
 type Context = { params: Promise<{ id: string }> };
-
-const CLAIM_LETTERS_DIR = path.resolve(process.cwd(), "runtime", "claim-workflow", "letters");
-
-function isPathInsideLettersDir(targetPath: string): boolean {
-    const resolved = path.resolve(targetPath);
-    return resolved === CLAIM_LETTERS_DIR || resolved.startsWith(CLAIM_LETTERS_DIR + path.sep);
-}
 
 function generationAllowed(status: string) {
     // Phase R1: PDF wajib di-generate sebelum mark_ready, jadi generation
@@ -67,12 +64,29 @@ export async function POST(_request: Request, context: Context) {
         const result = await generateClaimLetterPdf(workflow, items, generatedAt);
 
         let previousPdfPath: string | null = null;
+        let mirroredSubmissionId: string | null = null;
         try {
             await db.transaction(async (tx) => {
                 const [current] = await tx.select().from(claimWorkflow).where(eq(claimWorkflow.id, id));
                 if (!current || !generationAllowed(current.status)) {
                     throw new Error("Claim Workflow status berubah sebelum Claim Letter PDF tersimpan.");
                 }
+                // Phase R7c — Multi No Claim guard:
+                // Route legacy hanya valid untuk single-submission workflow.
+                // Multi-submission wajib pakai route per submission supaya
+                // tiap No Claim punya PDF sendiri.
+                const submissions = await tx
+                    .select({ id: claimSubmission.id })
+                    .from(claimSubmission)
+                    .where(eq(claimSubmission.claimWorkflowId, id));
+                if (submissions.length > 1) {
+                    throw Object.assign(
+                        new Error("Workflow memiliki beberapa submission. Generate Claim Letter lewat submission."),
+                        { code: "MULTI_SUBMISSION_LETTER_ROUTE_DISABLED" },
+                    );
+                }
+                const targetSubmissionId = submissions[0]?.id ?? null;
+
                 previousPdfPath = current.claimLetterPdfPath ?? null;
                 await tx.update(claimWorkflow).set({
                     claimLetterPdfPath: result.filePath,
@@ -80,16 +94,37 @@ export async function POST(_request: Request, context: Context) {
                     claimLetterGeneratedBy: actor.id,
                     updatedAt: generatedAt,
                 }).where(eq(claimWorkflow.id, id));
+
+                // Mirror ke single submission supaya source-of-truth
+                // submission konsisten dengan cache workflow.
+                if (targetSubmissionId) {
+                    await tx.update(claimSubmission).set({
+                        claimLetterPdfPath: result.filePath,
+                        claimLetterGeneratedAt: generatedAt,
+                        claimLetterGeneratedBy: actor.id,
+                        updatedAt: generatedAt,
+                    }).where(eq(claimSubmission.id, targetSubmissionId));
+                    mirroredSubmissionId = targetSubmissionId;
+                }
+
                 await writeClaimAudit({
                     claimWorkflowId: id,
+                    claimSubmissionId: targetSubmissionId,
+                    auditScope: targetSubmissionId
+                        ? claimAuditScopes.submission
+                        : claimAuditScopes.workflow,
                     actor,
                     action: "claim_letter_generated",
                     fromStatus: current.status,
                     toStatus: current.status,
                     metadata: {
-                        claimLetterPdfPath: result.filePath,
+                        workflowId: id,
+                        submissionId: targetSubmissionId,
+                        documentType: claimDocumentTypes.letter,
+                        filePath: result.filePath,
                         itemCount: items.length,
                         totalClaim: Number(current.totalClaim || 0),
+                        viaLegacyWorkflowRoute: true,
                         ...(previousPdfPath ? { previousClaimLetterPdfPath: previousPdfPath } : {}),
                     },
                 }, tx);
@@ -98,12 +133,30 @@ export async function POST(_request: Request, context: Context) {
             // Transaction rolled back: hapus PDF yang sudah terlanjur ditulis ke disk
             // supaya tidak meninggalkan orphan file di runtime/claim-workflow/letters.
             await unlink(result.filePath).catch(() => {});
+            const code = transactionError && typeof transactionError === "object"
+                && "code" in (transactionError as Record<string, unknown>)
+                ? String((transactionError as Record<string, unknown>).code)
+                : null;
+            if (code === "MULTI_SUBMISSION_LETTER_ROUTE_DISABLED") {
+                return NextResponse.json({
+                    ok: false,
+                    code,
+                    error: transactionError instanceof Error
+                        ? transactionError.message
+                        : "Workflow memiliki beberapa submission. Generate Claim Letter lewat submission.",
+                }, { status: 409 });
+            }
             throw transactionError;
         }
 
         // Setelah transaksi sukses, hapus PDF lama (kalau ada) untuk
         // mencegah akumulasi file yang sudah tidak direferensikan database.
-        if (previousPdfPath && previousPdfPath !== result.filePath && isPathInsideLettersDir(previousPdfPath)) {
+        if (
+            previousPdfPath &&
+            previousPdfPath !== result.filePath &&
+            (isPathInsideLegacyDir(previousPdfPath, claimDocumentTypes.letter) ||
+             isPathInsideClaimDocumentRoot(previousPdfPath))
+        ) {
             await unlink(previousPdfPath).catch(() => {});
         }
 
@@ -113,6 +166,7 @@ export async function POST(_request: Request, context: Context) {
             pdfPath: result.filePath,
             downloadUrl: `/api/claim-workflow/${id}/claim-letter`,
             claimLetterGeneratedAt: generatedAt,
+            mirroredSubmissionId,
         });
     } catch (error) {
         console.error("[CLAIM WORKFLOW CLAIM LETTER PDF ERROR]", error);
@@ -133,8 +187,11 @@ export async function GET(_request: Request, context: Context) {
     if (!workflow.claimLetterPdfPath) {
         return NextResponse.json({ ok: false, error: "Claim Letter PDF belum pernah dibuat." }, { status: 404 });
     }
-    if (!isPathInsideLettersDir(workflow.claimLetterPdfPath)) {
-        console.error("[CLAIM WORKFLOW CLAIM LETTER PDF] Refusing to serve PDF outside letters dir", {
+    // Phase R7c: terima file dari folder legacy ATAU dari submission
+    // tree (mirror flow). Kedua-duanya berada di bawah
+    // `runtime/claim-workflow/`.
+    if (!isPathInsideClaimDocumentRoot(workflow.claimLetterPdfPath)) {
+        console.error("[CLAIM WORKFLOW CLAIM LETTER PDF] Refusing to serve PDF outside claim-workflow root", {
             workflowId: id,
             path: workflow.claimLetterPdfPath,
         });

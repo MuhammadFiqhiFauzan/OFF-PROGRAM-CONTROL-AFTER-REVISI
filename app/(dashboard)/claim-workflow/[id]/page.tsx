@@ -82,6 +82,13 @@ type Submission = {
   itemCount?: number;
   createdAt: string | Date;
   updatedAt: string | Date;
+  // Phase R7c — Documents per submission:
+  claimLetterPdfPath?: string | null;
+  claimLetterGeneratedAt?: string | Date | null;
+  summaryPdfPath?: string | null;
+  summaryGeneratedAt?: string | Date | null;
+  receiptPdfPath?: string | null;
+  receiptGeneratedAt?: string | Date | null;
 };
 
 const SUBMISSION_SCOPE_OPTIONS: { value: string; label: string }[] = [
@@ -261,6 +268,10 @@ export default function ClaimWorkflowDetailPage() {
   const [createSubmissionNoClaim, setCreateSubmissionNoClaim] = useState("");
   const [creatingSubmission, setCreatingSubmission] = useState(false);
   const [movingItemId, setMovingItemId] = useState("");
+  // Phase R7c — Documents per submission: state generate per submission +
+  // type. Key = `${submissionId}:${type}` supaya tombol per kombinasi
+  // bisa disabled secara independen.
+  const [generatingDocKey, setGeneratingDocKey] = useState("");
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -735,6 +746,43 @@ export default function ClaimWorkflowDetailPage() {
     }
   };
 
+  // Phase R7c - Documents per submission: generate Claim Letter / Summary
+  // / Kwitansi PDF per submission via endpoint per-submission. Setelah
+  // sukses detail di-reload supaya pdfPath terbaru muncul.
+  const generateSubmissionDocument = async (
+    submissionId: string,
+    type: "claim-letter" | "summary" | "receipt",
+  ) => {
+    const key = `${submissionId}:${type}`;
+    setGeneratingDocKey(key);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/claim-workflow/${id}/submissions/${submissionId}/${type}`,
+        { method: "POST" },
+      );
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal generate dokumen submission.");
+      }
+      const label = type === "claim-letter"
+        ? "Claim Letter"
+        : type === "summary"
+          ? "Summary"
+          : "Kwitansi";
+      const successMessage = `${label} PDF submission berhasil dibuat.`;
+      toast.success(successMessage);
+      setMessage(successMessage);
+      await loadDetail();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Gagal generate dokumen submission.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setGeneratingDocKey("");
+    }
+  };
+
   const submitClose = async () => {
     const trimmed = closeNote.trim();
     if (!trimmed) {
@@ -1003,28 +1051,80 @@ export default function ClaimWorkflowDetailPage() {
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2 text-right">Total Claim</th>
                 <th className="px-3 py-2 text-right">Items</th>
+                <th className="px-3 py-2">Dokumen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {submissions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-4 text-xs italic text-slate-500">
+                  <td colSpan={7} className="px-3 py-4 text-xs italic text-slate-500">
                     Belum ada submission. Workflow lama otomatis di-backfill via migration R7a.
                   </td>
                 </tr>
               ) : (
-                submissions.map((s) => (
-                  <tr key={s.id} className="text-slate-300">
-                    <td className="whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide text-indigo-300">
-                      {s.scope}
-                    </td>
-                    <td className="px-3 py-2 text-xs">{s.scopeLabel || "-"}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-emerald-200">{s.noClaim || "-"}</td>
-                    <td className="px-3 py-2 text-xs">{displayClaimStatusLabel(s.status)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{rupiah(s.totalClaim)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{s.itemCount ?? 0}</td>
-                  </tr>
-                ))
+                submissions.map((s) => {
+                  const isClosed = s.status === claimWorkflowStatuses.closed;
+                  const canGenerateDocs = canEditItems && !isClosed && (s.itemCount ?? 0) > 0 && Number(s.totalClaim || 0) > 0;
+                  const docs: Array<{ key: "claim-letter" | "summary" | "receipt"; label: string; path?: string | null }> = [
+                    { key: "claim-letter", label: "Letter", path: s.claimLetterPdfPath },
+                    { key: "summary", label: "Summary", path: s.summaryPdfPath },
+                    { key: "receipt", label: "Kwitansi", path: s.receiptPdfPath },
+                  ];
+                  return (
+                    <tr key={s.id} className="text-slate-300">
+                      <td className="whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide text-indigo-300">
+                        {s.scope}
+                      </td>
+                      <td className="px-3 py-2 text-xs">{s.scopeLabel || "-"}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-emerald-200">{s.noClaim || "-"}</td>
+                      <td className="px-3 py-2 text-xs">{displayClaimStatusLabel(s.status)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{rupiah(s.totalClaim)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{s.itemCount ?? 0}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {docs.map((doc) => {
+                            const generating = generatingDocKey === `${s.id}:${doc.key}`;
+                            const generated = Boolean(doc.path);
+                            return (
+                              <span key={doc.key} className="inline-flex items-center gap-1">
+                                {generated && (
+                                  <a
+                                    href={`/api/claim-workflow/${id}/submissions/${s.id}/${doc.key}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-200 transition hover:bg-emerald-500/20"
+                                  >
+                                    {doc.label} PDF
+                                  </a>
+                                )}
+                                {canGenerateDocs && (
+                                  <button
+                                    type="button"
+                                    disabled={generating || generatingDocKey !== ""}
+                                    onClick={() => void generateSubmissionDocument(s.id, doc.key)}
+                                    className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-200 transition hover:bg-indigo-500/20 disabled:opacity-50"
+                                    title={generated ? `Re-generate ${doc.label}` : `Generate ${doc.label}`}
+                                  >
+                                    {generating
+                                      ? "..."
+                                      : generated
+                                        ? `Re ${doc.label}`
+                                        : `Gen ${doc.label}`}
+                                  </button>
+                                )}
+                                {!generated && !canGenerateDocs && (
+                                  <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-500">
+                                    {doc.label} -
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -1091,6 +1191,11 @@ export default function ClaimWorkflowDetailPage() {
             <p className="mt-1 text-sm text-slate-400">
               Tiga dokumen wajib di-generate sebelum Mark Ready: Claim Letter, Claim Summary, Kwitansi Claim.
             </p>
+            {hasMultipleSubmissions && (
+              <p className="mt-2 text-xs text-amber-200">
+                Workflow memiliki {submissionCount} submission. Generate dokumen lewat tombol per submission di section "Claim Submissions / No Claim Groups". Tombol di section ini menolak request multi-submission (`MULTI_SUBMISSION_*_ROUTE_DISABLED`).
+              </p>
+            )}
           </div>
         </div>
 

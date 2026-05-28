@@ -283,6 +283,39 @@ Phase R7b — Submission grouping + item assignment (Mei 2026, additive):
 - Tidak menyentuh PEKA / PVT / EC / CN. Tidak menulis status manual ke
   Paid / Closed.
 
+Phase R7c — Documents per submission (Mei 2026, additive):
+- Endpoint baru `POST/GET /api/claim-workflow/[id]/submissions/[submissionId]/{claim-letter,summary,receipt}`
+  generate dan stream PDF per submission. Items di-fetch dengan filter
+  `claim_submission_id`, totals + noClaim di header PDF override pakai
+  data submission. Audit action tetap `claim_letter_generated` /
+  `claim_summary_generated` / `claim_receipt_generated` dengan metadata
+  `submissionId`, `noClaim`, `itemCount`, `totalClaim`, `documentType`,
+  `filePath`, `audit_scope = "submission"`.
+- Path file di submission tree
+  `runtime/claim-workflow/{workflowId}/submissions/{submissionId}/{type}/`.
+  Folder utama selalu pakai `submissionId` (immutable). No Claim hanya
+  jadi prefix filename setelah `slugifyNoClaim` di
+  `lib/claim-workflow/document-paths.ts`. Path validator umum
+  `isPathInsideClaimDocumentRoot` menerima legacy dir + submission tree.
+- Constants baru di `lib/claim-workflow/constants.ts`:
+  `claimDocumentTypes = { letter, summary, receipt }`.
+- PDF generator (`generateClaimLetterPdf` / `generateClaimSummaryPdf` /
+  `generateClaimReceiptPdf`) menerima optional `options.submission`.
+  Bila disuplai, header + path memakai submission context. Tanpa
+  submission → fallback ke pola workflow-level lama.
+- Route legacy `POST /[id]/{claim-letter,summary,receipt}` menolak
+  multi-submission dengan `MULTI_SUBMISSION_LETTER_ROUTE_DISABLED` /
+  `MULTI_SUBMISSION_SUMMARY_ROUTE_DISABLED` /
+  `MULTI_SUBMISSION_RECEIPT_ROUTE_DISABLED`. Single-submission tetap
+  jalan, dengan mirror atomic ke `claim_submission.{type}PdfPath`.
+- `POST /[id]/status` `return_to_draft` sekarang juga reset 3 PDF di
+  setiap submission + unlink file (best-effort), supaya tidak ada PDF
+  stale setelah balik ke Draft.
+- Mark Ready / Close gate + reports tetap workflow cache di R7c. Akan
+  pindah ke submission level di R7d/R7e.
+- Tidak menyentuh OFF Program Control PDF generator.
+- Tidak mengembalikan PEKA / PVT / EC / CN.
+
 Status legacy `Waiting PEKA`, `EC Received`, dan `CN Received` sudah
 **retired** (Mei 2026). Tidak boleh dipakai untuk transisi baru. Lihat
 `docs/CLAIM_WORKFLOW_AI_CONTEXT.md` bagian "Cleanup PEKA / EC / CN" untuk

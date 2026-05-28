@@ -170,3 +170,32 @@ export type ClaimAuditScope =
  */
 export const NO_CLAIM_MAX_LENGTH = 120;
 export const SCOPE_LABEL_MAX_LENGTH = 200;
+
+/**
+ * Phase R7c — Documents per submission:
+ * Tipe dokumen klaim yang di-generate per submission (Letter / Summary /
+ * Kwitansi). Dipakai oleh helper path resolver di
+ * `lib/claim-workflow/document-paths.ts` dan route generator di
+ * `app/api/claim-workflow/[id]/submissions/[submissionId]/{type}`.
+ *
+ * String value sengaja singkat (lowercase) supaya bisa dipakai sebagai
+ * segmen path. Audit action tetap memakai prefix `claim_`:
+ *   letter  → claim_letter_generated
+ *   summary → claim_summary_generated
+ *   receipt → claim_receipt_generated
+ */
+export const claimDocumentTypes = {
+    letter: "letter",
+    summary: "summary",
+    receipt: "receipt",
+} as const;
+
+export type ClaimDocumentType =
+    (typeof claimDocumentTypes)[keyof typeof claimDocumentTypes];
+
+export const claimDocumentTypeList = Object.values(claimDocumentTypes);
+
+export function isClaimDocumentType(value: unknown): value is ClaimDocumentType {
+    return typeof value === "string"
+        && (claimDocumentTypeList as ReadonlyArray<string>).includes(value);
+}
