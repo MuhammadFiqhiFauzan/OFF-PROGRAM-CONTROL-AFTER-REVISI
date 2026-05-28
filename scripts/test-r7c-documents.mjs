@@ -92,11 +92,33 @@ function isPathInsideClaimDocumentRoot(targetPath) {
 // ============================================================================
 // SECTION 3 — minimal PDF stub
 // ============================================================================
-const PDF_STUB = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n", "utf8");
+const PDF_STUB_PREFIX = "%PDF-1.4\n1 0 obj<<>>endobj\n";
+const PDF_STUB_SUFFIX = "\ntrailer<<>>\n%%EOF\n";
 
-function writePdfStub(filePath) {
+/**
+ * Tulis PDF stub yang valid sebagai PDF tetapi juga membawa marker
+ * identifikasi item di dalamnya. Ini supaya test bisa baca-balik
+ * bytes dan memastikan dokumen submission A benar-benar HANYA
+ * berisi item A — bukan sekadar verifikasi path.
+ *
+ * Marker format (dibungkus PDF comment supaya tidak mengganggu parser):
+ *   %ITEMS:noSurat1,noSurat2,...
+ */
+function writePdfStub(filePath, itemMarkers = []) {
     mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, PDF_STUB);
+    const marker = itemMarkers.length > 0
+        ? `\n%ITEMS:${itemMarkers.join(",")}\n`
+        : "";
+    const buf = Buffer.from(PDF_STUB_PREFIX + marker + PDF_STUB_SUFFIX, "utf8");
+    writeFileSync(filePath, buf);
+}
+
+function readPdfMarkers(filePath) {
+    if (!existsSync(filePath)) return null;
+    const content = readFileSync(filePath, "utf8");
+    const match = content.match(/%ITEMS:([^\n]*)/);
+    if (!match) return [];
+    return match[1].split(",").filter(Boolean);
 }
 
 // ============================================================================
@@ -215,12 +237,18 @@ async function legacyGenerateDocument(workflowId, type) {
         return { ok: false, code: codeMap[type], status: 409 };
     }
     const targetSubmissionId = subs.rows[0]?.id ? String(subs.rows[0].id) : null;
+    // Items: workflow-level route loads SEMUA item workflow.
+    const itemsRes = await db.execute({
+        sql: "SELECT id, no_surat FROM claim_workflow_item WHERE claim_workflow_id = ?",
+        args: [workflowId],
+    });
+    const itemMarkers = itemsRes.rows.map((r) => String(r.no_surat || r.id));
     const generatedAt = new Date();
     const ts = generatedAt.toISOString().replace(/[-:T]/g, "").slice(0, 14);
     const dir = LEGACY_DOCUMENT_DIRS[type];
     mkdirSync(dir, { recursive: true });
     const filePath = join(dir, `${TEST_PREFIX}-${type}-${ts}-${randomUUID().slice(0, 6)}.pdf`);
-    writePdfStub(filePath);
+    writePdfStub(filePath, itemMarkers);
     const colMap = {
         letter: { path: "claim_letter_pdf_path", at: "claim_letter_generated_at", by: "claim_letter_generated_by" },
         summary: { path: "summary_pdf_path", at: "summary_generated_at", by: "summary_generated_by" },
@@ -237,7 +265,7 @@ async function legacyGenerateDocument(workflowId, type) {
             args: [filePath, generatedAt.getTime(), ACTOR.id, generatedAt.getTime(), targetSubmissionId],
         });
     }
-    return { ok: true, filePath, mirroredSubmissionId: targetSubmissionId };
+    return { ok: true, filePath, mirroredSubmissionId: targetSubmissionId, itemMarkers };
 }
 
 // Simulate POST /[id]/submissions/[submissionId]/{type}.
@@ -251,7 +279,7 @@ async function submissionGenerateDocument(workflowId, submissionId, type) {
     }
     const submission = subRes.rows[0];
     const itemsRes = await db.execute({
-        sql: "SELECT * FROM claim_workflow_item WHERE claim_submission_id=?",
+        sql: "SELECT id, no_surat FROM claim_workflow_item WHERE claim_submission_id=?",
         args: [submissionId],
     });
     const items = itemsRes.rows;
@@ -263,7 +291,8 @@ async function submissionGenerateDocument(workflowId, submissionId, type) {
     }
     const generatedAt = new Date();
     const filePath = buildSubmissionDocumentFilePath(workflowId, submissionId, type, submission.no_claim, generatedAt);
-    writePdfStub(filePath);
+    const itemMarkers = items.map((r) => String(r.no_surat || r.id));
+    writePdfStub(filePath, itemMarkers);
     const colMap = {
         letter: { path: "claim_letter_pdf_path", at: "claim_letter_generated_at", by: "claim_letter_generated_by" },
         summary: { path: "summary_pdf_path", at: "summary_generated_at", by: "summary_generated_by" },
@@ -287,7 +316,7 @@ async function submissionGenerateDocument(workflowId, submissionId, type) {
         });
         workflowMirror = true;
     }
-    return { ok: true, filePath, items: items.map(i => String(i.id)), itemCount: items.length, workflowMirror };
+    return { ok: true, filePath, items: items.map(i => String(i.id)), itemCount: items.length, workflowMirror, itemMarkers };
 }
 
 // Simulate POST /[id]/status action=return_to_draft (R7c invalidate).
@@ -353,6 +382,10 @@ async function main() {
             if (exists) {
                 const buf = readFileSync(result.filePath);
                 assertTrue("3", `${type} file has valid PDF header`, buf.slice(0, 4).toString() === "%PDF");
+                // Test 3 strong: konten valid, marker item terbaca.
+                const markers = readPdfMarkers(result.filePath);
+                assertTrue("3", `${type} file readable + contains item marker`,
+                    markers !== null && markers.includes("NO-SURAT-A"));
             }
             // Test 4: mirror to submission
             const subRow = (await db.execute({ sql: "SELECT * FROM claim_submission WHERE id=?", args: [sub1] })).rows[0];
@@ -395,9 +428,16 @@ async function main() {
         if (ra.ok) {
             generatedFilesA[type] = ra.filePath;
             cleanupActions.push(() => { try { unlinkSync(ra.filePath); } catch {} });
-            // Test 10: items filter — items returned by submissionGenerate must be only itemA
-            assertEqual("10", `Submission A ${type} contains exactly 1 item`, ra.itemCount, 1);
-            assertTrue("10", `Submission A ${type} item is itemA`, ra.items.includes(itemA));
+            // Test 6 strong: items returned by submissionGenerate must be only itemA.
+            assertEqual("6", `Submission A ${type} contains exactly 1 item`, ra.itemCount, 1);
+            assertTrue("6", `Submission A ${type} item is itemA`, ra.items.includes(itemA));
+            // Test 6 strong: konten file PDF benar-benar HANYA berisi marker
+            // item A (NO-SURAT-A), TIDAK berisi marker item B.
+            const markersA = readPdfMarkers(ra.filePath);
+            assertTrue("6", `Submission A ${type} file contains NO-SURAT-A`,
+                markersA !== null && markersA.includes("NO-SURAT-A"));
+            assertTrue("6", `Submission A ${type} file does NOT contain NO-SURAT-B`,
+                markersA !== null && !markersA.includes("NO-SURAT-B"));
             // Path must include subA folder
             assertTrue("10", `Submission A ${type} path contains submissions/${subA}`,
                 ra.filePath.includes(join("submissions", sanitizeIdSegment(subA), type)));
@@ -407,8 +447,15 @@ async function main() {
         if (rb.ok) {
             generatedFilesB[type] = rb.filePath;
             cleanupActions.push(() => { try { unlinkSync(rb.filePath); } catch {} });
-            assertEqual("10", `Submission B ${type} contains exactly 1 item`, rb.itemCount, 1);
-            assertTrue("10", `Submission B ${type} item is itemB`, rb.items.includes(itemB));
+            assertEqual("7", `Submission B ${type} contains exactly 1 item`, rb.itemCount, 1);
+            assertTrue("7", `Submission B ${type} item is itemB`, rb.items.includes(itemB));
+            // Test 7 strong: konten file PDF benar-benar HANYA berisi marker
+            // item B (NO-SURAT-B), TIDAK berisi marker item A.
+            const markersB = readPdfMarkers(rb.filePath);
+            assertTrue("7", `Submission B ${type} file contains NO-SURAT-B`,
+                markersB !== null && markersB.includes("NO-SURAT-B"));
+            assertTrue("7", `Submission B ${type} file does NOT contain NO-SURAT-A`,
+                markersB !== null && !markersB.includes("NO-SURAT-A"));
             assertTrue("10", `Submission B ${type} path contains submissions/${subB}`,
                 rb.filePath.includes(join("submissions", sanitizeIdSegment(subB), type)));
         }
