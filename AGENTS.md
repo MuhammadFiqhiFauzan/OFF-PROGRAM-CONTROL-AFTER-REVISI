@@ -227,6 +227,29 @@ Phase R5 — Reporting / Export (Mei 2026):
 - UI `/claim-workflow/reports` menampilkan tab + filter ringan. Reports
   read-only, tidak ada PEKA/EC/CN.
 
+Phase R7a — Multi No Claim + Direct Claim Source (Mei 2026, additive):
+- Menambah tabel baru `claim_submission` sebagai container satu No Claim.
+  Satu `claim_workflow` boleh punya banyak submission. Belum dipakai oleh
+  route apapun di R7a — schema-only + backfill default submission per
+  workflow lama.
+- Kolom baru di `claim_workflow`: `source_type` (default `off_program`),
+  `source_ref_id`, `aggregate_status`. Belum dipakai sebagai gate atau
+  business logic; siap untuk R7e/R7f.
+- Kolom baru (nullable) di `claim_workflow_item.claim_submission_id`,
+  `claim_payment.claim_submission_id`,
+  `claim_audit_log.{claim_submission_id, audit_scope}`.
+- Backfill via `npm run migrate:r7a-submissions` atau
+  `node scripts/migrate-r7a-default-submission.mjs`. Idempotent, single
+  transaction, refuse non-lokal `DATABASE_URL`. Lihat
+  `docs/R7_MULTI_NO_CLAIM_PLAN.md`.
+- Source-of-truth No Claim akan pindah ke `claim_submission.noClaim`
+  bertahap di R7b–R7e. `claim_workflow.noClaim` dipertahankan sebagai
+  cache display selama transisi.
+- R7f (direct kwitansi/manual source) **deferred**: butuh table rebuild
+  SQLite untuk `claim_workflow.off_batch_id` → nullable. Tidak boleh
+  dijalankan tanpa backup penuh + persetujuan bisnis.
+- Tidak mengembalikan PEKA / PVT / EC / CN. Status legacy tetap retired.
+
 Status legacy `Waiting PEKA`, `EC Received`, dan `CN Received` sudah
 **retired** (Mei 2026). Tidak boleh dipakai untuk transisi baru. Lihat
 `docs/CLAIM_WORKFLOW_AI_CONTEXT.md` bagian "Cleanup PEKA / EC / CN" untuk

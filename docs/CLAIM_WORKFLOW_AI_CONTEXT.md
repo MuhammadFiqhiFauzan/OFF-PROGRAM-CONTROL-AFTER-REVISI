@@ -568,6 +568,17 @@ Phase 3+ telah retired:
 9. **Phase R5** — Reporting / Export (Summary, Paid transaction-based,
    Outstanding, dan CSV export tanpa PEKA/EC/CN). ✅
 10. **Phase R6** — Hardening (perf, audit retention, RBAC review).
+11. **Phase R7a** — Multi No Claim + Direct Claim Source, schema +
+    backfill compatibility (Mei 2026). ✅ Tabel baru `claim_submission`
+    sebagai container satu No Claim, plus kolom `source_type` /
+    `source_ref_id` / `aggregate_status` di `claim_workflow` dan kolom
+    `claim_submission_id` di `claim_workflow_item` / `claim_payment` /
+    `claim_audit_log`. Belum mengubah behavior route. Backfill default
+    submission per workflow lama via
+    `node scripts/migrate-r7a-default-submission.mjs`. Detail lengkap
+    dan rencana R7b–R7f di `docs/R7_MULTI_NO_CLAIM_PLAN.md`.
+    R7f (direct kwitansi/manual) **deferred** karena butuh table rebuild
+    SQLite + backup penuh.
 
 ## Phase R4 — Close Claim Workflow
 

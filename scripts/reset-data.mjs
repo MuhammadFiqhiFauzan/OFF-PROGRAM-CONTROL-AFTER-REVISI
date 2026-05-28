@@ -41,11 +41,20 @@ if (!filePath || filePath.startsWith("/app/")) {
 // dari skema aktif. Kalau DB lokal lama masih punya tabel itu, baris-baris
 // nya tetap dibersihkan supaya tidak ada residu legacy. Tabel yang tidak
 // ada di DB di-skip secara otomatis.
+//
+// Catatan R7a (Multi No Claim): `claim_submission` adalah container baru
+// yang direferensikan oleh claim_workflow_item, claim_payment, dan
+// claim_audit_log. Order cleanup di bawah:
+//   1. tabel yang punya FK ke claim_submission DAN claim_workflow → dulu
+//      (claim_audit_log, claim_payment, claim_workflow_item)
+//   2. claim_submission (FK ke claim_workflow)
+//   3. claim_workflow (parent)
 const tables = [
     "claim_audit_log",
     "claim_payment",
     "claim_peka_report",
     "claim_workflow_item",
+    "claim_submission",
     "claim_workflow",
     "off_audit_log",
     "off_notification",

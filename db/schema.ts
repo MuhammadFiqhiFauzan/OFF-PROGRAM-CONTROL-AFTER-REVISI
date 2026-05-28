@@ -254,6 +254,20 @@ export const claimWorkflow = sqliteTable("claim_workflow", {
     claimWorkflowNo: text("claim_workflow_no").notNull().unique(),
     principleCode: text("principle_code").notNull(),
     principleName: text("principle_name").notNull(),
+    // Phase R7a — Multi No Claim + Direct Claim Source (additive only):
+    // - `sourceType` mendokumentasikan asal data klaim. Saat ini selalu
+    //   `off_program`; nilai `direct_kwitansi` dan `manual` disiapkan
+    //   untuk Phase R7f (deferred). Tidak boleh dipakai sebagai gate atau
+    //   business logic di R7a — kolom hanya metadata.
+    // - `sourceRefId` adalah generic pointer ke sumber. Untuk
+    //   `off_program`, nilai sama dengan `offBatchId`. Untuk source
+    //   masa depan, akan menunjuk ke entitas lain (mis. receipt batch).
+    // - `aggregateStatus` adalah status hasil derivasi dari semua
+    //   submissions di workflow. Belum dipakai di R7a; akan menjadi
+    //   source-of-truth display setelah R7e.
+    sourceType: text("source_type").notNull().default("off_program"),
+    sourceRefId: text("source_ref_id"),
+    aggregateStatus: text("aggregate_status"),
     status: text("status").notNull().default("Draft"),
     totalDpp: real("total_dpp").notNull().default(0),
     totalPpn: real("total_ppn").notNull().default(0),
@@ -320,6 +334,12 @@ export const claimWorkflow = sqliteTable("claim_workflow", {
 export const claimWorkflowItem = sqliteTable("claim_workflow_item", {
     id: text("id").primaryKey(),
     claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
+    // Phase R7a — Multi No Claim (additive):
+    // Setiap item akan ditugaskan ke tepat satu `claim_submission` di phase
+    // R7b ke depan. Di R7a kolom ini bersifat opsional / nullable supaya
+    // backfill aman untuk row existing. Validasi 1:n (item -> submission)
+    // diberlakukan di app layer mulai R7b.
+    claimSubmissionId: text("claim_submission_id"),
     offBatchItemId: text("off_batch_item_id").references(() => offBatchItem.id),
     noSurat: text("no_surat"),
     jenisPromosi: text("jenis_promosi"),
@@ -338,11 +358,19 @@ export const claimWorkflowItem = sqliteTable("claim_workflow_item", {
 }, (table) => ({
     workflowIdx: index("idx_claim_workflow_item_workflow_id").on(table.claimWorkflowId),
     offBatchItemIdx: index("idx_claim_workflow_item_off_batch_item_id").on(table.offBatchItemId),
+    submissionIdx: index("idx_claim_workflow_item_submission_id").on(table.claimSubmissionId),
 }));
 
 export const claimPayment = sqliteTable("claim_payment", {
     id: text("id").primaryKey(),
     claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
+    // Phase R7a — Multi No Claim (additive):
+    // Payment akan pindah ke level submission di Phase R7d. Di R7a kolom
+    // ini bersifat opsional dan diisi oleh migration backfill ke default
+    // submission per workflow. `claimWorkflowId` tetap dipertahankan
+    // sebagai redundant pointer agar query agregate tetap cepat dan
+    // backward-compat dengan route existing.
+    claimSubmissionId: text("claim_submission_id"),
     paymentDate: text("payment_date").notNull(),
     paymentAmount: real("payment_amount").notNull().default(0),
     paymentType: text("payment_type"),
@@ -362,6 +390,7 @@ export const claimPayment = sqliteTable("claim_payment", {
 }, (table) => ({
     workflowIdx: index("idx_claim_payment_workflow_id").on(table.claimWorkflowId),
     voidedAtIdx: index("idx_claim_payment_voided_at").on(table.voidedAt),
+    submissionIdx: index("idx_claim_payment_submission_id").on(table.claimSubmissionId),
 }));
 
 // Catatan cleanup PEKA (Mei 2026):
@@ -374,6 +403,14 @@ export const claimPayment = sqliteTable("claim_payment", {
 export const claimAuditLog = sqliteTable("claim_audit_log", {
     id: text("id").primaryKey(),
     claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
+    // Phase R7a — Multi No Claim (additive):
+    // Audit tetap satu tabel terpusat. Untuk audit yang scope-nya satu
+    // submission (mis. assign No Claim, generate dokumen submission),
+    // kolom `claimSubmissionId` diisi dan `auditScope = "submission"`.
+    // Audit existing biarkan NULL / `auditScope = "workflow"` supaya
+    // timeline UI tetap bisa membedakan.
+    claimSubmissionId: text("claim_submission_id"),
+    auditScope: text("audit_scope"),
     actorId: text("actor_id"),
     actorName: text("actor_name"),
     actorRole: text("actor_role"),
@@ -386,4 +423,68 @@ export const claimAuditLog = sqliteTable("claim_audit_log", {
 }, (table) => ({
     workflowIdx: index("idx_claim_audit_log_workflow_id").on(table.claimWorkflowId),
     createdAtIdx: index("idx_claim_audit_log_created_at").on(table.createdAt),
+    submissionIdx: index("idx_claim_audit_log_submission_id").on(table.claimSubmissionId),
+}));
+
+// Phase R7a — Multi No Claim + Direct Claim Source (additive):
+// `claim_submission` adalah container baru untuk SATU No Claim. Satu
+// `claim_workflow` boleh punya banyak `claim_submission`. Di R7a tabel ini
+// hanya dibuat + di-backfill (1 default submission per workflow lama)
+// supaya schema siap dipakai oleh Phase R7b ke depan. Tidak ada route
+// existing yang membaca/menulis tabel ini di R7a — semua tetap operate
+// di level `claim_workflow` agar R1-R6 berjalan tanpa regresi.
+//
+// Source-of-truth direncanakan pindah bertahap:
+//   R7b — submission grouping + item assignment
+//   R7c — documents per submission
+//   R7d — payment + outstanding per submission
+//   R7e — close + reports per submission, workflow status menjadi aggregate
+//   R7f — direct kwitansi/manual source (deferred, butuh table rebuild)
+//
+// Aturan partial unique index `idx_claim_submission_no_claim_unique`
+// memastikan No Claim tidak duplikat antar submission. Empty string tidak
+// boleh disimpan (validasi tetap di app layer); jika lolos, tetap akan
+// dianggap sama dan bentrok di unique index ini.
+export const claimSubmission = sqliteTable("claim_submission", {
+    id: text("id").primaryKey(),
+    claimWorkflowId: text("claim_workflow_id").notNull().references(() => claimWorkflow.id),
+    noClaim: text("no_claim"),
+    noClaimAssignedAt: integer("no_claim_assigned_at", { mode: "timestamp" }),
+    noClaimAssignedBy: text("no_claim_assigned_by"),
+    // `scope` mendokumentasikan cara grouping No Claim.
+    // Nilai valid (lihat lib/claim-workflow/constants.ts):
+    //   per_pengajuan | per_program | per_toko | custom
+    // `scopeLabel` adalah konteks human-readable (mis. nama program /
+    // nama toko / "Pengajuan utama"). Tidak dipakai untuk gating.
+    scope: text("scope").notNull().default("per_pengajuan"),
+    scopeLabel: text("scope_label"),
+    status: text("status").notNull().default("Draft"),
+    totalDpp: real("total_dpp").notNull().default(0),
+    totalPpn: real("total_ppn").notNull().default(0),
+    totalPph: real("total_pph").notNull().default(0),
+    totalClaim: real("total_claim").notNull().default(0),
+    totalPaid: real("total_paid").notNull().default(0),
+    remainingAmount: real("remaining_amount").notNull().default(0),
+    submittedToPrincipalAt: integer("submitted_to_principal_at", { mode: "timestamp" }),
+    claimLetterPdfPath: text("claim_letter_pdf_path"),
+    claimLetterGeneratedAt: integer("claim_letter_generated_at", { mode: "timestamp" }),
+    claimLetterGeneratedBy: text("claim_letter_generated_by"),
+    summaryPdfPath: text("summary_pdf_path"),
+    summaryGeneratedAt: integer("summary_generated_at", { mode: "timestamp" }),
+    summaryGeneratedBy: text("summary_generated_by"),
+    receiptPdfPath: text("receipt_pdf_path"),
+    receiptGeneratedAt: integer("receipt_generated_at", { mode: "timestamp" }),
+    receiptGeneratedBy: text("receipt_generated_by"),
+    closedAt: integer("closed_at", { mode: "timestamp" }),
+    closedBy: text("closed_by"),
+    closeNote: text("close_note"),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => ({
+    workflowIdx: index("idx_claim_submission_workflow_id").on(table.claimWorkflowId),
+    statusIdx: index("idx_claim_submission_status").on(table.status),
+    // Partial unique index didefinisikan via init-db.mjs karena
+    // drizzle-orm/sqlite-core tidak punya helper langsung untuk
+    // partial-unique. Lihat scripts/init-db.mjs untuk DDL persis.
 }));

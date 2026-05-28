@@ -80,3 +80,84 @@ export function displayClaimStatusLabel(value: string | null | undefined): strin
 export const claimWorkflowOffRequirements = {
     omStatus: "Approved",
 } as const;
+
+/**
+ * Phase R7a — Multi No Claim + Direct Claim Source (additive):
+ *
+ * `claim_submission` adalah container baru yang akan menampung satu
+ * No Claim. Satu `claim_workflow` boleh memiliki banyak submission. Phase
+ * R7a hanya memperkenalkan schema + backfill, sehingga konstanta di sini
+ * baru dipakai oleh helper backfill, seed, dan UI mulai phase berikut.
+ * Tidak ada route existing yang gating ke nilai-nilai di bawah pada R7a.
+ *
+ * Scope mendokumentasikan cara grouping No Claim:
+ *   per_pengajuan — satu submission mencakup keseluruhan pengajuan
+ *                   (default backfill untuk workflow lama).
+ *   per_program   — satu submission per nama program promosi.
+ *   per_toko      — satu submission per outlet/toko.
+ *   custom        — grouping manual yang ditentukan user.
+ */
+export const claimSubmissionScopes = {
+    perPengajuan: "per_pengajuan",
+    perProgram: "per_program",
+    perToko: "per_toko",
+    custom: "custom",
+} as const;
+
+export type ClaimSubmissionScope =
+    (typeof claimSubmissionScopes)[keyof typeof claimSubmissionScopes];
+
+export const claimSubmissionScopeList = Object.values(claimSubmissionScopes);
+
+/**
+ * Status produksi untuk `claim_submission`. Mirrors `claimWorkflowStatuses`
+ * tetapi dengan subset yang masuk akal untuk satu submission. `Outstanding`
+ * dan `Cancelled` di workflow ditahan dulu — submission level akan dipakai
+ * di phase R7d/R7e dengan rule yang lebih ketat.
+ *
+ * `Need Revision` dan transisi balik diatur oleh route Phase R7b ke depan.
+ * Di R7a tidak ada route yang menulis tabel `claim_submission` selain
+ * migration backfill yang langsung mengisi `status = workflow.status`.
+ */
+export const claimSubmissionStatuses = {
+    draft: "Draft",
+    needRevision: "Need Revision",
+    readyToSubmit: "Ready to Submit",
+    submittedToPrincipal: "Submitted to Principal",
+    partiallyPaid: "Partially Paid",
+    paid: "Paid",
+    closed: "Closed",
+} as const;
+
+export type ClaimSubmissionStatus =
+    (typeof claimSubmissionStatuses)[keyof typeof claimSubmissionStatuses];
+
+export const claimSubmissionStatusList = Object.values(claimSubmissionStatuses);
+
+/**
+ * Sumber data klaim untuk `claim_workflow.sourceType`. Default `off_program`
+ * mempertahankan semantics R1-R6. `direct_kwitansi` dan `manual` dibuat
+ * untuk Phase R7f (deferred) dan tidak dipakai untuk gating apapun di R7a.
+ */
+export const claimWorkflowSourceTypes = {
+    offProgram: "off_program",
+    directKwitansi: "direct_kwitansi",
+    manual: "manual",
+} as const;
+
+export type ClaimWorkflowSourceType =
+    (typeof claimWorkflowSourceTypes)[keyof typeof claimWorkflowSourceTypes];
+
+export const claimWorkflowSourceTypeList = Object.values(claimWorkflowSourceTypes);
+
+/**
+ * Audit scope label untuk `claim_audit_log.auditScope`. Audit existing
+ * (R1-R6) bersifat workflow-scope; audit submission dipakai mulai R7b.
+ */
+export const claimAuditScopes = {
+    workflow: "workflow",
+    submission: "submission",
+} as const;
+
+export type ClaimAuditScope =
+    (typeof claimAuditScopes)[keyof typeof claimAuditScopes];

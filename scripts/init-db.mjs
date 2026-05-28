@@ -346,6 +346,8 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS claim_audit_log (
     id TEXT PRIMARY KEY,
     claim_workflow_id TEXT NOT NULL,
+    claim_submission_id TEXT,
+    audit_scope TEXT,
     actor_id TEXT,
     actor_name TEXT,
     actor_role TEXT,
@@ -355,6 +357,46 @@ const statements = [
     note TEXT,
     metadata TEXT,
     created_at INTEGER NOT NULL,
+    FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id),
+    FOREIGN KEY (claim_submission_id) REFERENCES claim_submission(id)
+  );`,
+  // Phase R7a — Multi No Claim (additive):
+  // claim_submission adalah container baru untuk satu No Claim. Tabel ini
+  // dibuat di awal supaya foreign key dari claim_workflow_item /
+  // claim_payment / claim_audit_log valid. Backfill 1 default submission
+  // per workflow dilakukan oleh `scripts/migrate-r7a-default-submission.mjs`.
+  // Tidak ada route existing yang baca/tulis tabel ini di R7a.
+  `CREATE TABLE IF NOT EXISTS claim_submission (
+    id TEXT PRIMARY KEY,
+    claim_workflow_id TEXT NOT NULL,
+    no_claim TEXT,
+    no_claim_assigned_at INTEGER,
+    no_claim_assigned_by TEXT,
+    scope TEXT NOT NULL DEFAULT 'per_pengajuan',
+    scope_label TEXT,
+    status TEXT NOT NULL DEFAULT 'Draft',
+    total_dpp REAL NOT NULL DEFAULT 0,
+    total_ppn REAL NOT NULL DEFAULT 0,
+    total_pph REAL NOT NULL DEFAULT 0,
+    total_claim REAL NOT NULL DEFAULT 0,
+    total_paid REAL NOT NULL DEFAULT 0,
+    remaining_amount REAL NOT NULL DEFAULT 0,
+    submitted_to_principal_at INTEGER,
+    claim_letter_pdf_path TEXT,
+    claim_letter_generated_at INTEGER,
+    claim_letter_generated_by TEXT,
+    summary_pdf_path TEXT,
+    summary_generated_at INTEGER,
+    summary_generated_by TEXT,
+    receipt_pdf_path TEXT,
+    receipt_generated_at INTEGER,
+    receipt_generated_by TEXT,
+    closed_at INTEGER,
+    closed_by TEXT,
+    close_note TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
     FOREIGN KEY (claim_workflow_id) REFERENCES claim_workflow(id)
   );`,
 ];
@@ -467,6 +509,23 @@ const migrations = [
   // closed_by dan close_note untuk audit aktor + alasan close.
   `ALTER TABLE claim_workflow ADD COLUMN closed_by TEXT;`,
   `ALTER TABLE claim_workflow ADD COLUMN close_note TEXT;`,
+  // Phase R7a — Multi No Claim + Direct Claim Source (additive):
+  // - claim_workflow.{source_type,source_ref_id,aggregate_status} adalah
+  //   metadata persiapan multi-submission + direct/manual source. Belum
+  //   dipakai oleh route apapun di R7a; hanya schema-only supaya backfill
+  //   migration dapat menulisnya tanpa SQL error pada DB lokal lama.
+  // - claim_workflow_item.claim_submission_id, claim_payment.claim_submission_id,
+  //   claim_audit_log.{claim_submission_id,audit_scope} adalah pointer ke
+  //   tabel baru `claim_submission`. Nullable supaya migration backfill
+  //   dapat berjalan idempotent. App layer akan enforce 1 item -> 1
+  //   submission mulai R7b.
+  `ALTER TABLE claim_workflow ADD COLUMN source_type TEXT NOT NULL DEFAULT 'off_program';`,
+  `ALTER TABLE claim_workflow ADD COLUMN source_ref_id TEXT;`,
+  `ALTER TABLE claim_workflow ADD COLUMN aggregate_status TEXT;`,
+  `ALTER TABLE claim_workflow_item ADD COLUMN claim_submission_id TEXT;`,
+  `ALTER TABLE claim_payment ADD COLUMN claim_submission_id TEXT;`,
+  `ALTER TABLE claim_audit_log ADD COLUMN claim_submission_id TEXT;`,
+  `ALTER TABLE claim_audit_log ADD COLUMN audit_scope TEXT;`,
 ];
 
 for (const sql of migrations) {
@@ -495,10 +554,31 @@ const indexStatements = [
     WHERE no_claim IS NOT NULL AND no_claim <> '';`,
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_workflow_id ON claim_workflow_item(claim_workflow_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_off_batch_item_id ON claim_workflow_item(off_batch_item_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_workflow_item_submission_id ON claim_workflow_item(claim_submission_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_payment_workflow_id ON claim_payment(claim_workflow_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_payment_voided_at ON claim_payment(voided_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_payment_submission_id ON claim_payment(claim_submission_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_workflow_id ON claim_audit_log(claim_workflow_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_created_at ON claim_audit_log(created_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_submission_id ON claim_audit_log(claim_submission_id);`,
+  // Phase R7a — Multi No Claim (additive):
+  // Index dasar + partial unique index untuk No Claim. Aturan sama dengan
+  // index lama di claim_workflow.no_claim:
+  //  - banyak baris boleh punya no_claim NULL (submission yang belum
+  //    di-assign).
+  //  - empty string ditolak di app layer; jika lolos, tetap dianggap
+  //    sama dan bentrok di unique index ini.
+  //  - dua submission yang sudah di-assign tidak boleh punya no_claim
+  //    sama, baik dalam satu workflow maupun antar workflow.
+  // Index lama `idx_claim_workflow_no_claim_unique` di tabel
+  // `claim_workflow` SENGAJA dipertahankan selama transisi R7a-R7e supaya
+  // `claim_workflow.noClaim` (cache legacy) tetap konsisten dengan source
+  // baru sampai sepenuhnya di-deprecate.
+  `CREATE INDEX IF NOT EXISTS idx_claim_submission_workflow_id ON claim_submission(claim_workflow_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_submission_status ON claim_submission(status);`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_submission_no_claim_unique
+    ON claim_submission(no_claim)
+    WHERE no_claim IS NOT NULL AND no_claim <> '';`,
 ];
 
 for (const sql of indexStatements) {
