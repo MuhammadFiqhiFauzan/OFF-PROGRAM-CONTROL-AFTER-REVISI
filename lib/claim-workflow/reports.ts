@@ -11,15 +11,14 @@
  * Catatan kunci:
  * - `totalPaid` per workflow di-recalc dari `claim_payment` aktif (voided_at NULL).
  * - `remainingAmount = max(totalClaim - totalPaid, 0)` (helper R3).
- * - Tidak ada kolom PEKA/EC/CN. Workflow legacy PEKA statuses tetap
- *   ditampilkan apa adanya supaya tidak hilang dari recap.
+ * - Hanya status production yang masuk report. Row legacy ditangani di
+ *   compatibility UI/migrasi terpisah, bukan report operasional.
  */
 import { and, asc, count, desc, eq, gte, inArray, lte, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimPayment, claimWorkflow, claimWorkflowItem, offBatch } from "@/db/schema";
 import { calculateRemainingAmount, sumActivePayments } from "./calculations";
 import {
-    LEGACY_PEKA_STATUSES,
     claimWorkflowStatuses,
     claimWorkflowStatusList,
 } from "./constants";
@@ -116,9 +115,7 @@ function parseIsoDateEndOfDay(value: string | null | undefined): Date | null {
 
 function isKnownStatus(value: string | null | undefined): value is string {
     if (!value) return false;
-    if ((claimWorkflowStatusList as ReadonlyArray<string>).includes(value)) return true;
-    if ((LEGACY_PEKA_STATUSES as ReadonlyArray<string>).includes(value)) return true;
-    return false;
+    return (claimWorkflowStatusList as ReadonlyArray<string>).includes(value);
 }
 
 // =============================================================================
@@ -215,11 +212,13 @@ const OPEN_STATUSES = [
     claimWorkflowStatuses.submittedToPrincipal,
     claimWorkflowStatuses.partiallyPaid,
     claimWorkflowStatuses.outstanding,
-    ...LEGACY_PEKA_STATUSES,
 ] as const;
 
 export async function buildSummaryReport(filters: SummaryReportFilters): Promise<SummaryReportRow[]> {
-    const conditions: SQL[] = [];
+    if (filters.status && !isKnownStatus(filters.status)) return [];
+    const conditions: SQL[] = [
+        inArray(claimWorkflow.status, claimWorkflowStatusList as unknown as string[]),
+    ];
     if (isKnownStatus(filters.status ?? null)) {
         conditions.push(eq(claimWorkflow.status, filters.status as string));
     }
@@ -340,7 +339,10 @@ export type PaidReportRow = {
 };
 
 export async function buildPaidReport(filters: PaidReportFilters): Promise<PaidReportRow[]> {
-    const workflowConditions: SQL[] = [];
+    if (filters.status && !isKnownStatus(filters.status)) return [];
+    const workflowConditions: SQL[] = [
+        inArray(claimWorkflow.status, claimWorkflowStatusList as unknown as string[]),
+    ];
     if (isKnownStatus(filters.status ?? null)) {
         workflowConditions.push(eq(claimWorkflow.status, filters.status as string));
     }
@@ -456,7 +458,6 @@ const OUTSTANDING_STATUSES = [
     claimWorkflowStatuses.submittedToPrincipal,
     claimWorkflowStatuses.partiallyPaid,
     claimWorkflowStatuses.outstanding,
-    ...LEGACY_PEKA_STATUSES,
 ] as const;
 
 function bucketize(days: number | null): OutstandingReportRow["agingBucket"] {
@@ -468,6 +469,9 @@ function bucketize(days: number | null): OutstandingReportRow["agingBucket"] {
 }
 
 export async function buildOutstandingReport(filters: OutstandingReportFilters): Promise<OutstandingReportRow[]> {
+    if (filters.status && !(OUTSTANDING_STATUSES as ReadonlyArray<string>).includes(filters.status)) {
+        return [];
+    }
     const conditions: SQL[] = [];
     const requestedStatus = filters.status ?? null;
     if (requestedStatus && (OUTSTANDING_STATUSES as ReadonlyArray<string>).includes(requestedStatus)) {

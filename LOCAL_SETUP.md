@@ -183,9 +183,9 @@ OFF OM Approved
   -> Submit to Principal
 ```
 
-Pembayaran dari principal (Partially Paid → Paid → Closed) dan dashboard
-Outstanding masuk roadmap berikutnya (R3 Principal Payment + Outstanding,
-R4 Close Workflow).
+Pembayaran dari principal (`Partially Paid` -> `Paid` -> `Closed`) dan
+dashboard Outstanding sudah diimplementasikan lewat R3/R4. Status `Paid`
+hanya berlaku ketika `remainingAmount = 0`.
 
 ### Cleanup PEKA / EC / CN
 
@@ -198,6 +198,8 @@ dari core production. Aplikasi tidak lagi:
   atau close.
 - Menampilkan tombol transisi `Waiting PEKA` / `EC Received` /
   `CN Received`.
+- Memasukkan status legacy PEKA/EC/CN ke laporan Summary, Paid, atau
+  Monitor Outstanding production.
 
 Database lokal lama yang masih punya tabel `claim_peka_report` atau kolom
 `ec_peka` / `cn_number` di `claim_workflow_item` tetap aman: aplikasi
@@ -217,7 +219,8 @@ npm run seed:demo
 - **R4** — Close Workflow (transisi `Paid` → `Closed`, gate
   `remainingAmount = 0` + dokumen lengkap + active payment + note). ✅
   Implemented via `POST /api/claim-workflow/[id]/close`.
-- **R5 (next)** — Reporting / Export.
+- **R5** — Reporting / Export (Summary, Paid transaction-based,
+  Outstanding, dan CSV export tanpa status legacy PEKA). ✅
 - **R6** — Hardening.
 
 ## Struktur Folder Penting
@@ -238,8 +241,10 @@ File yang TIDAK di-commit (lihat `.gitignore`): `.env`, `node_modules/`, `.next/
 Setelah backend & frontend running, jalankan checklist berikut untuk memastikan flow Claim Workflow utuh:
 
 - [ ] Login sebagai **admin** (`admin@local.test`)
-- [ ] Buat atau cek satu OFF Program Control yang sudah berstatus **Completed**
-- [ ] Dari OFF Completed tersebut, **Create Claim Workflow**
+- [ ] Buat atau cek satu OFF Program Control yang sudah **OM Approved**
+- [ ] Dari OFF **OM Approved**, **Create Claim Workflow**
+- [ ] Selesaikan OFF terpisah setelah Finance Paid, No Claim tersinkron,
+      dan final verification lengkap
 - [ ] Pada status **Draft**, edit nilai **DPP / PPN / PPH**
 - [ ] Mark claim workflow sebagai **Ready to Submit**
 - [ ] Konfirmasi field tax (DPP / PPN / PPH) sudah **terkunci** (tidak bisa diedit lagi setelah Ready)

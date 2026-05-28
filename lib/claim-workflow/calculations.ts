@@ -81,15 +81,6 @@ export function sumActivePayments(
 }
 
 /**
- * Toleransi rounding untuk perbandingan totalPaid vs totalClaim. Sumber
- * pembayaran di lapangan kadang dibulatkan ke rupiah penuh sehingga
- * angka 12.345.678,49 vs 12.345.678 tidak boleh memblokir status `Paid`.
- * Toleransi 1 rupiah cukup karena kalkulasi pajak existing juga sudah
- * dibulatkan ke rupiah penuh (lihat `calculateClaimAmount`).
- */
-export const PAYMENT_ROUNDING_TOLERANCE = 1;
-
-/**
  * Derive status workflow dari totals. Tidak menyentuh DB / context.
  *
  * Rule:
@@ -97,18 +88,19 @@ export const PAYMENT_ROUNDING_TOLERANCE = 1;
  *   belum ada pembayaran apapun). Caller bertanggung jawab mempertahankan
  *   status sumber jika hasil derive `submittedToPrincipal` sementara
  *   workflow masih Draft (mis. caller harus reject perubahan).
- * - 0 < totalPaid < totalClaim → `Partially Paid`.
- * - totalPaid >= totalClaim - tolerance → `Paid`.
+ * - 0 < totalPaid dengan remainingAmount > 0 → `Partially Paid`.
+ * - remainingAmount = 0 → `Paid`.
+ *
+ * `Paid` harus berarti outstanding sudah nol; tidak ada toleransi Rp1.
  */
 export function derivePaymentStatus(
     totalClaim: number,
     totalPaid: number,
-    tolerance: number = PAYMENT_ROUNDING_TOLERANCE,
 ): string {
     const claim = finiteAmount(totalClaim);
     const paid = finiteAmount(totalPaid);
-    if (paid <= 0) return claimWorkflowStatuses.submittedToPrincipal;
-    if (paid + tolerance >= claim && claim > 0) return claimWorkflowStatuses.paid;
+    if (paid <= 0 || claim <= 0) return claimWorkflowStatuses.submittedToPrincipal;
+    if (calculateRemainingAmount(claim, paid) === 0) return claimWorkflowStatuses.paid;
     return claimWorkflowStatuses.partiallyPaid;
 }
 

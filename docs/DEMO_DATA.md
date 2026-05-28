@@ -76,6 +76,8 @@ data nyata:
 > Status di luar `lib/claim-workflow/constants.ts` di-skip dengan log
 > warning. Workflow lama yang sempat punya `Waiting PEKA`, `EC Received`,
 > dan `CN Received` sudah retired dan tidak lagi diseed.
+> Row legacy tersebut hanya kompatibilitas tampilan dan tidak termasuk
+> laporan atau Monitor Outstanding production.
 
 ---
 
@@ -101,9 +103,10 @@ Setelah seed selesai:
      (Total Claim, Total Paid, Remaining, Payment Status) dan tabel
      payment. Demo `Partially Paid` / `Paid` / `Closed` punya minimal 1
      row payment active.
-   - Section **Close Workflow** muncul untuk demo selain `Closed`.
-     Demo `Paid` menampilkan checklist penuh "OK" dan tombol Close
-     enabled (R4); demo lain menampilkan blockers.
+   - Section **Close Workflow** muncul pada workflow dalam domain
+     payment/closure (`Partially Paid`, `Paid`, `Closed`, atau Submitted
+     yang sudah punya payment). Demo `Paid` menampilkan checklist penuh
+     "OK" dan tombol Close enabled (R4).
    - Demo `Closed` menampilkan banner emerald berisi `closed_at` dan
      close note.
    - Audit log berisi event `claim_letter_generated`,

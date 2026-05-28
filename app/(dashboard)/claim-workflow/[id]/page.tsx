@@ -45,6 +45,8 @@ type Workflow = {
   closedAt?: string | Date | null;
   closedBy?: string | null;
   closeNote?: string | null;
+  paymentDerivedStatus?: string;
+  statusDriftWarning?: boolean;
   createdAt: string | Date;
 };
 
@@ -91,6 +93,9 @@ type PaymentSummary = {
   totalPaid: number;
   remainingAmount: number;
   paymentStatus: string;
+  persistedStatus?: string;
+  paymentDerivedStatus?: string;
+  statusDriftWarning?: boolean;
   paymentCount: number;
   activePaymentCount: number;
   voidedPaymentCount: number;
@@ -693,6 +698,12 @@ export default function ClaimWorkflowDetailPage() {
         : [];
 
   const showLegacyNotice = isLegacyPekaStatus(workflow.status);
+  const showCloseSection =
+    workflow.status === claimWorkflowStatuses.closed ||
+    workflow.status === claimWorkflowStatuses.paid ||
+    workflow.status === claimWorkflowStatuses.partiallyPaid ||
+    (workflow.status === claimWorkflowStatuses.submittedToPrincipal &&
+      (paymentSummary?.totalPaid ?? 0) > 0);
 
   return (
     <div className="w-full space-y-6 pb-12 pt-2">
@@ -1157,7 +1168,6 @@ export default function ClaimWorkflowDetailPage() {
           </div>
         )}
       </section>
-
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1334,6 +1344,7 @@ export default function ClaimWorkflowDetailPage() {
         </div>
       </section>
 
+      {showCloseSection && (
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1430,6 +1441,7 @@ export default function ClaimWorkflowDetailPage() {
           </>
         )}
       </section>
+      )}
 
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <h2 className="font-bold text-white">Audit</h2>

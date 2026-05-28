@@ -11,17 +11,15 @@
  *   - `remainingAmount = max(totalClaim - totalPaid, 0)`. Konvensi tanda
  *     Excel `Sisa = Nilai Bayar - Nilai` tidak di-port ke web — UI selalu
  *     memakai non-negatif.
- *   - Status yang diikutkan ke list outstanding adalah workflow yang
- *     sudah di-submit ke principal tapi belum lunas, plus baris legacy
- *     PEKA agar tidak hilang dari monitoring.
+ *   - Status yang diikutkan ke list outstanding hanya workflow production
+ *     yang sudah di-submit ke principal tetapi belum lunas.
  */
 import { NextResponse } from "next/server";
 import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimPayment, claimWorkflow, offBatch } from "@/db/schema";
 import {
-    LEGACY_PEKA_STATUSES,
-    canActorAccessClaimData,
+    canActorReadClaimWorkflow,
     claimWorkflowStatuses,
     recalcPaymentTotals,
     requireClaimSession,
@@ -31,9 +29,6 @@ const OUTSTANDING_STATUSES = [
     claimWorkflowStatuses.submittedToPrincipal,
     claimWorkflowStatuses.partiallyPaid,
     claimWorkflowStatuses.outstanding,
-    // Legacy PEKA statuses tetap dimonitor sebagai outstanding agar
-    // workflow lama yang belum dinormalisasi tidak hilang dari dashboard.
-    ...LEGACY_PEKA_STATUSES,
 ];
 
 function dayDiff(now: number, ref: Date | null | undefined): number | null {
@@ -50,7 +45,7 @@ export async function GET(request: Request) {
     if (!actor) {
         return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
-    if (!canActorAccessClaimData(actor)) {
+    if (!canActorReadClaimWorkflow(actor)) {
         return NextResponse.json({
             ok: false,
             error: "Role Anda tidak memiliki akses Claim Workflow.",
@@ -63,8 +58,14 @@ export async function GET(request: Request) {
         const statusFilter = searchParams.get("status");
 
         const conditions: SQL[] = [];
-        if (statusFilter && OUTSTANDING_STATUSES.includes(statusFilter as typeof OUTSTANDING_STATUSES[number])) {
-            conditions.push(eq(claimWorkflow.status, statusFilter));
+        if (statusFilter) {
+            if (OUTSTANDING_STATUSES.includes(statusFilter as typeof OUTSTANDING_STATUSES[number])) {
+                conditions.push(eq(claimWorkflow.status, statusFilter));
+            } else {
+                // Status legacy/unknown tidak boleh memperluas kembali
+                // dataset monitor production.
+                conditions.push(eq(claimWorkflow.status, "__retired_or_invalid_status__"));
+            }
         } else {
             conditions.push(inArray(claimWorkflow.status, OUTSTANDING_STATUSES as unknown as string[]));
         }
@@ -85,18 +86,29 @@ export async function GET(request: Request) {
             : baseQuery;
         const rows = await filtered.orderBy(desc(claimWorkflow.submittedToPrincipalAt));
 
-        const now = Date.now();
-        const items = await Promise.all(rows.map(async (row) => {
-            const totalClaim = Number(row.workflow.totalClaim || 0);
-            const payments = await db
+        const paymentRows = rows.length > 0
+            ? await db
                 .select({
+                    claimWorkflowId: claimPayment.claimWorkflowId,
                     paymentDate: claimPayment.paymentDate,
                     paymentAmount: claimPayment.paymentAmount,
                     voidedAt: claimPayment.voidedAt,
                 })
                 .from(claimPayment)
-                .where(eq(claimPayment.claimWorkflowId, row.workflow.id))
-                .orderBy(asc(claimPayment.paymentDate));
+                .where(inArray(claimPayment.claimWorkflowId, rows.map((row) => row.workflow.id)))
+                .orderBy(asc(claimPayment.paymentDate))
+            : [];
+        const paymentsByWorkflow = new Map<string, typeof paymentRows>();
+        for (const payment of paymentRows) {
+            const payments = paymentsByWorkflow.get(payment.claimWorkflowId) ?? [];
+            payments.push(payment);
+            paymentsByWorkflow.set(payment.claimWorkflowId, payments);
+        }
+
+        const now = Date.now();
+        const items = rows.map((row) => {
+            const totalClaim = Number(row.workflow.totalClaim || 0);
+            const payments = paymentsByWorkflow.get(row.workflow.id) ?? [];
             const totals = recalcPaymentTotals(totalClaim, payments);
             const activePayments = payments.filter((p) => p.voidedAt === null);
             const latestPaymentDate = activePayments.length > 0
@@ -118,7 +130,7 @@ export async function GET(request: Request) {
                 offBatchId: row.workflow.offBatchId,
                 offNoPengajuan: row.offNoPengajuan,
             };
-        }));
+        });
 
         // Filter strict: outstanding harus benar-benar punya remainingAmount > 0.
         // Workflow yang sudah Paid namun status belum di-recalc tidak akan

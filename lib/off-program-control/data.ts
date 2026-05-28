@@ -161,6 +161,8 @@ export function findDuplicateNoSuratWithinPayload(noSurats: string[]): string[] 
         .map(([value]) => value);
 }
 
+type OffAuditWriter = Pick<typeof db, "insert">;
+
 export async function writeOffAudit(input: {
     batchId: string;
     itemId?: string | null;
@@ -170,8 +172,8 @@ export async function writeOffAudit(input: {
     toStatus?: string | null;
     note?: string | null;
     metadata?: unknown;
-}) {
-    await db.insert(offAuditLog).values({
+}, writer: OffAuditWriter = db) {
+    await writer.insert(offAuditLog).values({
         id: randomUUID(),
         batchId: input.batchId,
         itemId: input.itemId || null,

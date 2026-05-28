@@ -250,12 +250,12 @@ export async function POST(request: Request, context: Context) {
       );
     }
 
-    await Promise.all(
-      data.items.map((item) => {
+    await db.transaction(async (tx) => {
+      for (const item of data.items) {
         const ref = claimRefMap.get(item.id);
-        if (!ref) return Promise.resolve();
+        if (!ref) continue;
 
-        return db
+        await tx
           .update(offBatchItem)
           .set({
             // No Claim TIDAK ditulis dari body. Tetap dipakai dari
@@ -272,36 +272,36 @@ export async function POST(request: Request, context: Context) {
             updatedAt: now,
           })
           .where(eq(offBatchItem.id, item.id));
-      }),
-    );
+      }
 
-    await db
-      .update(offBatch)
-      .set({
-        status: "Completed",
-        finalStatus: "Completed",
-        verifiedAmount: paymentSummary.totalPaid,
-        finalClaimNote: note,
-        locked: true,
-        updatedAt: now,
-      })
-      .where(eq(offBatch.id, id));
+      await tx
+        .update(offBatch)
+        .set({
+          status: "Completed",
+          finalStatus: "Completed",
+          verifiedAmount: paymentSummary.totalPaid,
+          finalClaimNote: note,
+          locked: true,
+          updatedAt: now,
+        })
+        .where(eq(offBatch.id, id));
 
-    await writeOffAudit({
-      batchId: id,
-      actor,
-      action: "complete",
-      fromStatus: data.batch.finalStatus,
-      toStatus: "Completed",
-      note,
-      metadata: {
-        totalPaid: paymentSummary.totalPaid,
-        paymentCount: data.payments.length,
-        claimRefs: sanitizedClaimRefs,
-        claimWorkflowId: linkedWorkflow.id,
-        claimWorkflowNo: linkedWorkflow.claimWorkflowNo,
-        claimWorkflowNoClaim: workflowNoClaim,
-      },
+      await writeOffAudit({
+        batchId: id,
+        actor,
+        action: "complete",
+        fromStatus: data.batch.finalStatus,
+        toStatus: "Completed",
+        note,
+        metadata: {
+          totalPaid: paymentSummary.totalPaid,
+          paymentCount: data.payments.length,
+          claimRefs: sanitizedClaimRefs,
+          claimWorkflowId: linkedWorkflow.id,
+          claimWorkflowNo: linkedWorkflow.claimWorkflowNo,
+          claimWorkflowNoClaim: workflowNoClaim,
+        },
+      }, tx);
     });
     const updated = await getBatchWithItems(id);
     return NextResponse.json({

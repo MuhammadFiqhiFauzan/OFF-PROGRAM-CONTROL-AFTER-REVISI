@@ -171,6 +171,10 @@ Side effects (single transaction):
 If any step fails, the transaction rolls back and neither the workflow
 header nor the OFF items are updated.
 
+No Claim tidak dapat diubah lagi ketika workflow sudah `Closed`; endpoint
+menolak update agar identifier yang telah tersinkron ke OFF tidak berubah
+setelah lifecycle final.
+
 ### OFF Completed gate (Phase R1 additions)
 
 `POST /api/off-program-control/batches/[id]/final-claim` action
@@ -528,6 +532,9 @@ Phase 3+ telah retired:
 - UI `/claim-workflow` dan `/claim-workflow/[id]` tidak lagi memunculkan
   "PEKA Manual Import", "Load PEKA Matches", atau aksi transisi
   `Waiting PEKA` / `EC Received` / `CN Received`.
+- Report production Summary, Paid, dan Outstanding serta monitor
+  Outstanding tidak memasukkan status legacy PEKA/EC/CN. Fallback legacy
+  hanya untuk menampilkan row DB lama di UI kompatibilitas.
 
 **Aturan untuk kontributor masa depan:**
 
@@ -558,7 +565,8 @@ Phase 3+ telah retired:
    `POST /api/claim-workflow/[id]/close` untuk transisi `Paid` →
    `Closed` dengan gate `remainingAmount = 0`, dokumen lengkap, active
    payment, dan note wajib. Lihat section "Phase R4" di bawah.
-9. **Phase R5 (next)** — Reporting / Export.
+9. **Phase R5** — Reporting / Export (Summary, Paid transaction-based,
+   Outstanding, dan CSV export tanpa PEKA/EC/CN). ✅
 10. **Phase R6** — Hardening (perf, audit retention, RBAC review).
 
 ## Phase R4 — Close Claim Workflow
@@ -644,7 +652,9 @@ ditampilkan untuk workflow yang sudah Closed.
 
 ### UI changes
 
-Detail page `/claim-workflow/[id]` menambah section "Close Workflow":
+Detail page `/claim-workflow/[id]` menambah section "Close Workflow"
+ketika workflow sudah berada dalam domain payment/close (`Partially Paid`,
+`Paid`, `Closed`, atau `Submitted to Principal` yang sudah punya payment):
 
 - Untuk workflow non-Closed:
   - Checklist visual 8 item (Status Paid / Outstanding 0 / Total Paid
@@ -717,9 +727,9 @@ didefinisikan sebagai `voided_at IS NULL`. Hard delete tidak diizinkan.
   totals (`Submitted to Principal` / `Partially Paid` / `Paid`).
 - `recalcPaymentTotals(totalClaim, payments)` — wrap di atas tiga
   function di atas; output `totalPaid`, `remainingAmount`, `derivedStatus`.
-- `PAYMENT_ROUNDING_TOLERANCE = 1` — toleransi pembulatan rupiah agar
-  klaim dengan total fraksional (mis. PPN/PPh hasil rounding) tetap
-  bisa mencapai `Paid`.
+- Status `Paid` hanya ter-derive bila `remainingAmount = 0` tepat.
+  Tidak ada toleransi Rp1 yang dapat menyisakan saldo dalam status final
+  pembayaran.
 
 ### Endpoints
 
@@ -730,9 +740,12 @@ didefinisikan sebagai `voided_at IS NULL`. Hard delete tidak diizinkan.
 `POST /api/claim-workflow/[id]/payments` — admin/claim only:
 - Body: `paymentDate` (YYYY-MM-DD), `paymentAmount` (>0), optional
   `paymentType`, `paymentNote`.
-- Validasi: workflow ada, status harus `Submitted to Principal` atau
-  `Partially Paid`, `totalClaim > 0`, `noClaim` ter-assign.
-- Reject overpayment: `paymentAmount > remainingAmount + Rp1` →
+- Validasi: workflow ada, effective payment status harus `Submitted to
+  Principal` atau `Partially Paid`, `totalClaim > 0`, `noClaim`
+  ter-assign. Row lama yang persisted sebagai `Paid` tetapi masih punya
+  outstanding diperlakukan `Partially Paid` dari recalc untuk menerima
+  pelunasan; workflow `Closed` tidak dibuka kembali.
+- Reject overpayment: `paymentAmount > remainingAmount` →
   HTTP 409 code `CLAIM_PAYMENT_OVERPAYMENT`, message:
   "Pembayaran melebihi sisa outstanding. Overpayment belum didukung."
 - Side effects (transaksi atomic): insert `claim_payment` aktif,
@@ -751,8 +764,8 @@ didefinisikan sebagai `voided_at IS NULL`. Hard delete tidak diizinkan.
 
 `GET /api/claim-workflow/outstanding` — list claim workflows yang masih
 punya `remainingAmount > 0`. Status yang ikut: `Submitted to Principal`,
-`Partially Paid`, `Outstanding`, plus legacy PEKA agar tidak hilang dari
-monitoring. Output: `outstanding[]` (id, claimWorkflowNo, noClaim,
+`Partially Paid`, `Outstanding`. Status legacy PEKA/EC/CN dikecualikan
+dari monitoring production. Output: `outstanding[]` (id, claimWorkflowNo, noClaim,
 principleName, status, totalClaim, totalPaid, remainingAmount,
 submittedToPrincipalAt, latestPaymentDate, daysOutstanding,
 offBatchId/offNoPengajuan) dan `summary` (workflowCount, totalClaim,

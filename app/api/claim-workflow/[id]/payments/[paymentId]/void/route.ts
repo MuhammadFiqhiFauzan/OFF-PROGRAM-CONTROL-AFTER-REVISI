@@ -15,7 +15,6 @@ import { db } from "@/lib/db";
 import { claimPayment, claimWorkflow } from "@/db/schema";
 import {
     claimWorkflowStatuses,
-    derivePaymentStatus,
     recalcPaymentTotals,
     requireClaimSession,
     writeClaimAudit,
@@ -130,7 +129,7 @@ export async function POST(request: Request, context: Context) {
             // status balik ke Partially Paid atau Submitted to Principal.
             // Workflow Closed sudah ditolak di awal sehingga tidak akan
             // pernah memicu transisi balik dari Closed.
-            const newStatus = derivePaymentStatus(totalClaim, nextTotals.totalPaid);
+            const newStatus = nextTotals.derivedStatus;
 
             await tx
                 .update(claimWorkflow)

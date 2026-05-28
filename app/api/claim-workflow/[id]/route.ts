@@ -17,6 +17,14 @@ import {
 
 type Context = { params: Promise<{ id: string }> };
 
+function isPaymentDerivedStatus(status: string): boolean {
+    return (
+        status === claimWorkflowStatuses.submittedToPrincipal ||
+        status === claimWorkflowStatuses.partiallyPaid ||
+        status === claimWorkflowStatuses.paid
+    );
+}
+
 export async function GET(_request: Request, context: Context) {
     const actor = await requireClaimSession();
     if (!actor) {
@@ -76,7 +84,6 @@ export async function GET(_request: Request, context: Context) {
         const canGenerateClaimLetter = canManageClaim && docGenerationAllowed;
         const canGenerateSummary = canManageClaim && docGenerationAllowed;
         const canGenerateReceipt = canManageClaim && docGenerationAllowed;
-        const canAssignNoClaim = canManageClaim;
 
         // Phase R3 — Principal Payment + Outstanding:
         // Hitung totals payment dari list aktif/non-voided supaya UI dan
@@ -87,9 +94,16 @@ export async function GET(_request: Request, context: Context) {
         const paymentTotals = recalcPaymentTotals(totalClaim, payments);
         const activePayments = payments.filter((p) => p.voidedAt === null);
         const voidedPayments = payments.filter((p) => p.voidedAt !== null);
+        const paymentStatus = isPaymentDerivedStatus(row.workflow.status)
+            ? paymentTotals.derivedStatus
+            : row.workflow.status;
+        const statusDriftWarning = isPaymentDerivedStatus(row.workflow.status) &&
+            row.workflow.status !== paymentTotals.derivedStatus;
+        const canAssignNoClaim = canManageClaim &&
+            row.workflow.status !== claimWorkflowStatuses.closed;
         const paymentAllowed = (
-            row.workflow.status === claimWorkflowStatuses.submittedToPrincipal ||
-            row.workflow.status === claimWorkflowStatuses.partiallyPaid
+            paymentStatus === claimWorkflowStatuses.submittedToPrincipal ||
+            paymentStatus === claimWorkflowStatuses.partiallyPaid
         );
         const canRecordPayment = canManageClaim && paymentAllowed && paymentTotals.remainingAmount > 0;
         const canVoidPayment = canManageClaim && row.workflow.status !== claimWorkflowStatuses.closed;
@@ -141,6 +155,8 @@ export async function GET(_request: Request, context: Context) {
                 // hasil recalc agar konsisten.
                 totalPaid: paymentTotals.totalPaid,
                 remainingAmount: paymentTotals.remainingAmount,
+                paymentDerivedStatus: paymentTotals.derivedStatus,
+                statusDriftWarning,
             },
             offBatch: {
                 id: row.workflow.offBatchId,
@@ -154,7 +170,10 @@ export async function GET(_request: Request, context: Context) {
                 totalClaim,
                 totalPaid: paymentTotals.totalPaid,
                 remainingAmount: paymentTotals.remainingAmount,
-                paymentStatus: row.workflow.status,
+                paymentStatus,
+                persistedStatus: row.workflow.status,
+                paymentDerivedStatus: paymentTotals.derivedStatus,
+                statusDriftWarning,
                 paymentCount: payments.length,
                 activePaymentCount: activePayments.length,
                 voidedPaymentCount: voidedPayments.length,

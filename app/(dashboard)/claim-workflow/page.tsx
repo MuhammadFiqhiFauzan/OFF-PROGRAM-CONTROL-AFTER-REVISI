@@ -189,8 +189,7 @@ export default function ClaimWorkflowPage() {
       return rows.filter((row) => row.remainingAmount > 0 && (
         row.status === claimWorkflowStatuses.submittedToPrincipal ||
         row.status === claimWorkflowStatuses.partiallyPaid ||
-        row.status === claimWorkflowStatuses.outstanding ||
-        isLegacyPekaStatus(row.status)
+        row.status === claimWorkflowStatuses.outstanding
       ));
     }
     return rows.filter((row) => row.status === claimWorkflowStatuses.paid || row.status === claimWorkflowStatuses.closed);
@@ -215,8 +214,7 @@ export default function ClaimWorkflowPage() {
         label: "Submitted to Principal",
         value: rows.filter(
           (row) =>
-            row.status === claimWorkflowStatuses.submittedToPrincipal ||
-            isLegacyPekaStatus(row.status),
+            row.status === claimWorkflowStatuses.submittedToPrincipal,
         ).length,
         icon: Send,
         tone: "text-sky-300",

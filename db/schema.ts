@@ -246,7 +246,7 @@ export const offAuditLog = sqliteTable("off_audit_log", {
     createdAt: integer("created_at", { mode: "timestamp" }).notNull()
 });
 
-// --- Claim Workflow (starts only after OFF Program Control completion) --- //
+// --- Claim Workflow (may start after OFF OM Approved) --- //
 
 export const claimWorkflow = sqliteTable("claim_workflow", {
     id: text("id").primaryKey(),

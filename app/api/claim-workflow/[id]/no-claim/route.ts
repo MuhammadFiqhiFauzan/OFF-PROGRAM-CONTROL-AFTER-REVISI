@@ -24,6 +24,7 @@ import { db } from "@/lib/db";
 import { claimWorkflow, offBatchItem } from "@/db/schema";
 import {
     canActorReadClaimWorkflow,
+    claimWorkflowStatuses,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
@@ -95,14 +96,30 @@ export async function PATCH(request: Request, context: Context) {
 
     try {
         const { id } = await context.params;
-        const [workflow] = await db
+
+        // Re-read awal di luar transaksi untuk memberi pesan error cepat
+        // (404 / Closed / duplicate). Catatan race-condition: pengecekan
+        // status `Closed` *wajib* diulang di dalam transaksi karena Close
+        // dan Update No Claim bisa berjalan paralel — pengecekan di luar
+        // transaksi saja tidak cukup. Lihat blok `db.transaction` di bawah.
+        const [preCheck] = await db
             .select()
             .from(claimWorkflow)
             .where(eq(claimWorkflow.id, id));
-        if (!workflow) {
+        if (!preCheck) {
             return NextResponse.json(
                 { ok: false, error: "Claim Workflow not found" },
                 { status: 404 },
+            );
+        }
+        if (preCheck.status === claimWorkflowStatuses.closed) {
+            return NextResponse.json(
+                {
+                    ok: false,
+                    code: "NO_CLAIM_CLOSED_LOCKED",
+                    error: "No Claim tidak bisa diubah setelah workflow Closed.",
+                },
+                { status: 409 },
             );
         }
 
@@ -129,14 +146,41 @@ export async function PATCH(request: Request, context: Context) {
             );
         }
 
-        const previousNoClaim = workflow.noClaim ?? null;
         const now = new Date();
 
         // Sync ke OFF item dilakukan dalam transaksi yang sama agar
         // claim_workflow.no_claim dan off_batch_item.no_claim tidak pernah
         // berbeda. Kalau salah satu langkah gagal, semuanya rollback.
-        let syncedItemCount = 0;
-        await db.transaction(async (tx) => {
+        const result = await db.transaction(async (tx) => {
+            // Re-read di dalam transaksi: race-protection terhadap close
+            // konkuren. Bila workflow telah berubah ke Closed setelah
+            // pre-check di atas, transaksi rollback dan client menerima
+            // error yang sama dengan pre-check.
+            const [workflow] = await tx
+                .select()
+                .from(claimWorkflow)
+                .where(eq(claimWorkflow.id, id));
+            if (!workflow) {
+                return {
+                    error: {
+                        status: 404,
+                        code: "CLAIM_WORKFLOW_NOT_FOUND",
+                        message: "Claim Workflow not found",
+                    },
+                } as const;
+            }
+            if (workflow.status === claimWorkflowStatuses.closed) {
+                return {
+                    error: {
+                        status: 409,
+                        code: "NO_CLAIM_CLOSED_LOCKED",
+                        message: "No Claim tidak bisa diubah setelah workflow Closed.",
+                    },
+                } as const;
+            }
+
+            const previousNoClaim = workflow.noClaim ?? null;
+
             await tx
                 .update(claimWorkflow)
                 .set({
@@ -152,7 +196,7 @@ export async function PATCH(request: Request, context: Context) {
                 .set({ noClaim, updatedAt: now })
                 .where(eq(offBatchItem.batchId, workflow.offBatchId))
                 .returning({ id: offBatchItem.id });
-            syncedItemCount = updateResult.length;
+            const syncedItemCount = updateResult.length;
 
             await writeClaimAudit(
                 {
@@ -187,7 +231,20 @@ export async function PATCH(request: Request, context: Context) {
                 },
                 tx,
             );
+
+            return {
+                ok: true,
+                offBatchId: workflow.offBatchId,
+                syncedItemCount,
+            } as const;
         });
+
+        if (result.error) {
+            return NextResponse.json(
+                { ok: false, code: result.error.code, error: result.error.message },
+                { status: result.error.status },
+            );
+        }
 
         return NextResponse.json({
             ok: true,
@@ -199,8 +256,8 @@ export async function PATCH(request: Request, context: Context) {
                 noClaimAssignedBy: actor.id,
             },
             sync: {
-                offBatchId: workflow.offBatchId,
-                syncedItemCount,
+                offBatchId: result.offBatchId,
+                syncedItemCount: result.syncedItemCount,
             },
         });
     } catch (error) {

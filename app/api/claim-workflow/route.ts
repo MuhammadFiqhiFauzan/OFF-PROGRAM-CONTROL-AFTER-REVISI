@@ -3,7 +3,7 @@ import { and, desc, eq, lt, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimWorkflow, offBatch } from "@/db/schema";
 import {
-    canActorAccessClaimData,
+    canActorReadClaimWorkflow,
     claimWorkflowStatusList,
     requireClaimSession,
 } from "@/lib/claim-workflow";
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     if (!actor) {
         return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
-    if (!canActorAccessClaimData(actor)) {
+    if (!canActorReadClaimWorkflow(actor)) {
         return NextResponse.json({ ok: false, error: "Role Anda tidak memiliki akses Claim Workflow." }, { status: 403 });
     }
 

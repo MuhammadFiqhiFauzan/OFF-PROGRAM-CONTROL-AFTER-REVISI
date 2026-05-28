@@ -13,7 +13,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  claimWorkflowStatuses,
   claimWorkflowStatusList,
   displayClaimStatusLabel,
 } from "@/lib/claim-workflow/constants";

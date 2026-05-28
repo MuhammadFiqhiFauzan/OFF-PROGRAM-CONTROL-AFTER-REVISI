@@ -22,10 +22,8 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimPayment, claimWorkflow } from "@/db/schema";
 import {
-    PAYMENT_ROUNDING_TOLERANCE,
     canActorReadClaimWorkflow,
     claimWorkflowStatuses,
-    derivePaymentStatus,
     recalcPaymentTotals,
     requireClaimSession,
     writeClaimAudit,
@@ -44,15 +42,30 @@ function isPaymentAllowedStatus(status: string): boolean {
     );
 }
 
+function isPaymentDerivedStatus(status: string): boolean {
+    return (
+        status === claimWorkflowStatuses.submittedToPrincipal ||
+        status === claimWorkflowStatuses.partiallyPaid ||
+        status === claimWorkflowStatuses.paid
+    );
+}
+
 function buildPaymentSummary(workflow: typeof claimWorkflow.$inferSelect, totals: {
     totalPaid: number;
     remainingAmount: number;
+    derivedStatus: string;
 }, counts: { activePaymentCount: number; voidedPaymentCount: number }) {
+    const paymentStatus = isPaymentDerivedStatus(workflow.status)
+        ? totals.derivedStatus
+        : workflow.status;
     return {
         totalClaim: Number(workflow.totalClaim || 0),
         totalPaid: totals.totalPaid,
         remainingAmount: totals.remainingAmount,
-        paymentStatus: workflow.status,
+        paymentStatus,
+        persistedStatus: workflow.status,
+        paymentDerivedStatus: totals.derivedStatus,
+        statusDriftWarning: isPaymentDerivedStatus(workflow.status) && workflow.status !== totals.derivedStatus,
         activePaymentCount: counts.activePaymentCount,
         voidedPaymentCount: counts.voidedPaymentCount,
         paymentCount: counts.activePaymentCount + counts.voidedPaymentCount,
@@ -97,7 +110,7 @@ export async function GET(_request: Request, context: Context) {
             voidedPayments,
             summary: buildPaymentSummary(
                 workflow,
-                { totalPaid: totals.totalPaid, remainingAmount: totals.remainingAmount },
+                totals,
                 {
                     activePaymentCount: activePayments.length,
                     voidedPaymentCount: voidedPayments.length,
@@ -179,15 +192,6 @@ export async function POST(request: Request, context: Context) {
             if (!workflow) {
                 return { error: { status: 404, code: "CLAIM_WORKFLOW_NOT_FOUND", message: "Claim Workflow not found" } } as const;
             }
-            if (!isPaymentAllowedStatus(workflow.status)) {
-                return {
-                    error: {
-                        status: 409,
-                        code: "CLAIM_PAYMENT_INVALID_STATE",
-                        message: "Pembayaran hanya dapat dicatat saat status Submitted to Principal atau Partially Paid.",
-                    },
-                } as const;
-            }
             const totalClaim = Number(workflow.totalClaim || 0);
             if (!(totalClaim > 0)) {
                 return {
@@ -217,12 +221,27 @@ export async function POST(request: Request, context: Context) {
             const previousTotalPaid = previousTotals.totalPaid;
             const previousRemaining = previousTotals.remainingAmount;
             const previousStatus = workflow.status;
+            const effectiveStatus = isPaymentDerivedStatus(previousStatus)
+                ? previousTotals.derivedStatus
+                : previousStatus;
+
+            // Row lama yang salah tersimpan Paid tetapi masih memiliki saldo
+            // diperlakukan sebagai Partially Paid agar dapat diperbaiki lewat
+            // payment normal. Closed tetap tidak dapat dibuka kembali.
+            if (!isPaymentAllowedStatus(effectiveStatus)) {
+                return {
+                    error: {
+                        status: 409,
+                        code: "CLAIM_PAYMENT_INVALID_STATE",
+                        message: "Pembayaran hanya dapat dicatat saat status Submitted to Principal atau Partially Paid.",
+                    },
+                } as const;
+            }
 
             // Reject overpayment: paymentAmount tidak boleh melebihi sisa
-            // outstanding (remainingAmount). Toleransi rounding 1 rupiah
-            // diberikan agar nominal pembayaran round-up dari pembulatan
-            // pajak existing tetap diterima.
-            if (paymentAmount > previousRemaining + PAYMENT_ROUNDING_TOLERANCE) {
+            // outstanding (remainingAmount). Paid hanya tercapai ketika
+            // saldo tepat nol.
+            if (paymentAmount > previousRemaining) {
                 return {
                     error: {
                         status: 409,
@@ -255,7 +274,7 @@ export async function POST(request: Request, context: Context) {
                 .from(claimPayment)
                 .where(eq(claimPayment.claimWorkflowId, id));
             const nextTotals = recalcPaymentTotals(totalClaim, refreshedPayments);
-            const newStatus = derivePaymentStatus(totalClaim, nextTotals.totalPaid);
+            const newStatus = nextTotals.derivedStatus;
 
             await tx
                 .update(claimWorkflow)
@@ -355,7 +374,7 @@ export async function POST(request: Request, context: Context) {
             voidedPayments,
             summary: workflow ? buildPaymentSummary(
                 workflow,
-                { totalPaid: result.totals.totalPaid, remainingAmount: result.totals.remainingAmount },
+                result.totals,
                 {
                     activePaymentCount: activePayments.length,
                     voidedPaymentCount: voidedPayments.length,

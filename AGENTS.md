@@ -191,7 +191,9 @@ Phase R3 — Principal Payment + Outstanding (Mei 2026):
   `return_to_draft`, `submit_to_principal`) tidak boleh dipakai untuk
   set `Partially Paid` / `Paid` secara manual supaya totals dan status
   tidak pernah drift.
-- Overpayment ditolak: `paymentAmount > remainingAmount + Rp1` dijawab
+- `Paid` hanya boleh ter-derive ketika `remainingAmount = 0` tepat; saldo
+  Rp1 tetap `Partially Paid` agar dapat dilunasi dan kemudian di-close.
+- Overpayment ditolak: `paymentAmount > remainingAmount` dijawab
   dengan code `CLAIM_PAYMENT_OVERPAYMENT`.
 
 Phase R4 — Close Claim Workflow (Mei 2026):
@@ -217,6 +219,8 @@ Phase R5 — Reporting / Export (Mei 2026):
 - Outstanding report selalu menggunakan `remainingAmount = max(totalClaim
   - totalPaid, 0)` hasil recalc fresh dari `claim_payment` aktif. Tidak
   pernah trust cache buta.
+- Status legacy PEKA/EC/CN tidak termasuk dataset atau filter laporan
+  production; fallback tersebut hanya untuk menampilkan row DB lama.
 - CSV: UTF-8 BOM, RFC 4180 escape, Content-Disposition attachment dengan
   pola filename `claim-<name>-report-YYYYMMDD.csv`. Angka raw tanpa
   format Rupiah supaya bisa dianalisa di Excel.
@@ -361,7 +365,8 @@ Aturan ini tidak boleh dilanggar oleh patch apa pun.
 
 - Modul `off-program-control` dan `claim-workflow` **tidak boleh dicampur
   dalam satu patch** kecuali memang menyentuh boundary `from-off-batch`
-  (pembuatan Claim Workflow dari OFF Batch yang sudah `Completed/Paid`).
+  (pembuatan Claim Workflow dari OFF Batch yang sudah `omStatus = "Approved"`)
+  atau sinkronisasi No Claim yang menjadi gate OFF final completion.
 - Helper, status, dan tipe milik salah satu modul **tidak boleh
   diimport silang** ke modul lainnya, kecuali yang sudah ada di kode
   (mis. `ClaimActor` extends `OffActor`, `requireClaimSession` membungkus
