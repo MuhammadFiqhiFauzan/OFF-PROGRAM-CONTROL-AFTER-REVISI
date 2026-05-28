@@ -15,16 +15,27 @@
  *   `Partially Paid`. Overpayment ditolak (overpaidAmount belum
  *   dimodelkan). Void payment ditangani di route terpisah supaya audit
  *   trail tetap bersih.
+ *
+ * Phase R7d — Multi No Claim payment:
+ *   Multi-submission workflow (>1 claim_submission) ditolak dengan
+ *   `MULTI_SUBMISSION_PAYMENT_ROUTE_DISABLED`. User wajib pakai
+ *   endpoint `/[id]/submissions/[submissionId]/payments` per submission.
+ *   Single-submission workflow tetap valid; payment baru ter-link ke
+ *   default submission, recalc submission + workflow aggregate.
  */
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { claimPayment, claimWorkflow } from "@/db/schema";
+import { claimPayment, claimSubmission, claimWorkflow } from "@/db/schema";
 import {
     canActorReadClaimWorkflow,
+    claimAuditScopes,
     claimWorkflowStatuses,
+    isSubmissionPaymentAllowedStatus,
     recalcPaymentTotals,
+    recalcSubmissionPaymentTotals,
+    recalcWorkflowAggregateWithPayments,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
@@ -192,6 +203,33 @@ export async function POST(request: Request, context: Context) {
             if (!workflow) {
                 return { error: { status: 404, code: "CLAIM_WORKFLOW_NOT_FOUND", message: "Claim Workflow not found" } } as const;
             }
+
+            // Phase R7d — Multi No Claim payment guard:
+            // Legacy route hanya boleh dijalankan untuk single-submission
+            // workflow. Multi-submission wajib pakai endpoint
+            // /[id]/submissions/[submissionId]/payments supaya tiap
+            // No Claim punya ledger payment sendiri.
+            const submissions = await tx
+                .select({
+                    id: claimSubmission.id,
+                    status: claimSubmission.status,
+                    noClaim: claimSubmission.noClaim,
+                    totalClaim: claimSubmission.totalClaim,
+                    remainingAmount: claimSubmission.remainingAmount,
+                })
+                .from(claimSubmission)
+                .where(eq(claimSubmission.claimWorkflowId, id));
+            if (submissions.length > 1) {
+                return {
+                    error: {
+                        status: 409,
+                        code: "MULTI_SUBMISSION_PAYMENT_ROUTE_DISABLED",
+                        message: "Workflow memiliki beberapa No Claim. Input pembayaran lewat submission.",
+                    },
+                } as const;
+            }
+            const targetSubmission = submissions[0] ?? null;
+
             const totalClaim = Number(workflow.totalClaim || 0);
             if (!(totalClaim > 0)) {
                 return {
@@ -238,6 +276,33 @@ export async function POST(request: Request, context: Context) {
                 } as const;
             }
 
+            // R7d: bila ada single submission, gate juga ke status submission
+            // (mencegah kasus workflow Submitted tapi submission Paid karena
+            // mirror lag). Submission Closed selalu reject.
+            if (targetSubmission) {
+                if (targetSubmission.status === claimWorkflowStatuses.closed) {
+                    return {
+                        error: {
+                            status: 409,
+                            code: "CLAIM_PAYMENT_SUBMISSION_CLOSED",
+                            message: "Submission sudah Closed; pembayaran tidak dapat dicatat.",
+                        },
+                    } as const;
+                }
+                // Gate single-submission ke status payment-allowed (Submitted
+                // / Partially Paid). Submission Paid juga ditolak supaya
+                // tidak ada overpayment lewat legacy route.
+                if (!isSubmissionPaymentAllowedStatus(targetSubmission.status)) {
+                    return {
+                        error: {
+                            status: 409,
+                            code: "CLAIM_PAYMENT_INVALID_STATE",
+                            message: "Pembayaran hanya dapat dicatat saat submission Submitted to Principal atau Partially Paid.",
+                        },
+                    } as const;
+                }
+            }
+
             // Reject overpayment: paymentAmount tidak boleh melebihi sisa
             // outstanding (remainingAmount). Paid hanya tercapai ketika
             // saldo tepat nol.
@@ -256,6 +321,7 @@ export async function POST(request: Request, context: Context) {
             await tx.insert(claimPayment).values({
                 id: newPaymentId,
                 claimWorkflowId: id,
+                claimSubmissionId: targetSubmission?.id ?? null,
                 paymentDate: body.paymentDate as string,
                 paymentAmount,
                 paymentType,
@@ -269,25 +335,42 @@ export async function POST(request: Request, context: Context) {
                 updatedAt: now,
             });
 
-            const refreshedPayments = await tx
-                .select({ paymentAmount: claimPayment.paymentAmount, voidedAt: claimPayment.voidedAt })
-                .from(claimPayment)
-                .where(eq(claimPayment.claimWorkflowId, id));
-            const nextTotals = recalcPaymentTotals(totalClaim, refreshedPayments);
-            const newStatus = nextTotals.derivedStatus;
-
-            await tx
-                .update(claimWorkflow)
-                .set({
-                    totalPaid: nextTotals.totalPaid,
-                    remainingAmount: nextTotals.remainingAmount,
-                    status: newStatus,
-                    updatedAt: now,
-                })
-                .where(eq(claimWorkflow.id, id));
+            // Recalc submission + workflow aggregate (R7d). Untuk DB lokal
+            // lama yang belum di-backfill submission, fall back ke recalc
+            // workflow-level (R3) supaya behavior tetap kompat.
+            let nextTotals;
+            let newStatus;
+            if (targetSubmission) {
+                const recalc = await recalcSubmissionPaymentTotals(tx, targetSubmission.id, now);
+                const aggregate = await recalcWorkflowAggregateWithPayments(tx, id, now);
+                nextTotals = {
+                    totalPaid: recalc.totalPaid,
+                    remainingAmount: recalc.remainingAmount,
+                    derivedStatus: recalc.nextStatus,
+                };
+                newStatus = aggregate.workflowStatus;
+            } else {
+                const refreshedPayments = await tx
+                    .select({ paymentAmount: claimPayment.paymentAmount, voidedAt: claimPayment.voidedAt })
+                    .from(claimPayment)
+                    .where(eq(claimPayment.claimWorkflowId, id));
+                nextTotals = recalcPaymentTotals(totalClaim, refreshedPayments);
+                newStatus = nextTotals.derivedStatus;
+                await tx
+                    .update(claimWorkflow)
+                    .set({
+                        totalPaid: nextTotals.totalPaid,
+                        remainingAmount: nextTotals.remainingAmount,
+                        status: newStatus,
+                        updatedAt: now,
+                    })
+                    .where(eq(claimWorkflow.id, id));
+            }
 
             await writeClaimAudit({
                 claimWorkflowId: id,
+                claimSubmissionId: targetSubmission?.id ?? null,
+                auditScope: targetSubmission ? claimAuditScopes.submission : claimAuditScopes.workflow,
                 actor,
                 action: "payment_created",
                 fromStatus: previousStatus,
@@ -304,12 +387,16 @@ export async function POST(request: Request, context: Context) {
                     newRemainingAmount: nextTotals.remainingAmount,
                     previousStatus,
                     newStatus,
+                    submissionId: targetSubmission?.id ?? null,
+                    viaLegacyWorkflowRoute: true,
                 },
             }, tx);
 
             if (newStatus !== previousStatus) {
                 await writeClaimAudit({
                     claimWorkflowId: id,
+                    claimSubmissionId: targetSubmission?.id ?? null,
+                    auditScope: targetSubmission ? claimAuditScopes.submission : claimAuditScopes.workflow,
                     actor,
                     action: "payment_status_recalculated",
                     fromStatus: previousStatus,
@@ -320,6 +407,7 @@ export async function POST(request: Request, context: Context) {
                         totalClaim,
                         totalPaid: nextTotals.totalPaid,
                         remainingAmount: nextTotals.remainingAmount,
+                        submissionId: targetSubmission?.id ?? null,
                     },
                 }, tx);
             }

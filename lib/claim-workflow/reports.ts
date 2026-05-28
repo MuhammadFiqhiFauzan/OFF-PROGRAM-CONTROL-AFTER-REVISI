@@ -1,6 +1,6 @@
 /*
- * Tujuan: Helper builder + CSV serializer untuk Phase R5 Reporting/Export.
- *         Mengonsolidasi query Claim Workflow + Claim Payment menjadi
+ * Tujuan: Helper builder + CSV serializer untuk Phase R5/R7e Reporting/Export.
+ *         Mengonsolidasi query Claim Submission + Claim Payment menjadi
  *         baris-baris siap tampil/ekspor untuk tiga report:
  *         Summary, Paid (transaction-based), Outstanding.
  * Caller: app/api/claim-workflow/reports/* (JSON + CSV) dan UI report
@@ -8,33 +8,37 @@
  * Dependensi: drizzle-orm, lib/claim-workflow/calculations.
  * Side Effects: Tidak ada (read-only).
  *
- * Catatan kunci:
- * - `totalPaid` per workflow di-recalc dari `claim_payment` aktif (voided_at NULL).
- * - `remainingAmount = max(totalClaim - totalPaid, 0)` (helper R3).
- * - Hanya status production yang masuk report. Row legacy ditangani di
- *   compatibility UI/migrasi terpisah, bukan report operasional.
+ * Phase R7e — Reports per submission:
+ *   Sumber data utama berubah dari `claim_workflow` ke `claim_submission`.
+ *   Setiap row report = satu submission. Workflow context (claimWorkflowNo,
+ *   sourceType, principleCode, OFF batch) di-join sebagai metadata.
+ *
+ * Aturan:
+ *   - `totalPaid` per submission di-recalc dari `claim_payment` aktif
+ *     (voidedAt NULL) yang link ke `claim_submission_id`.
+ *   - `remainingAmount = max(totalClaim - totalPaid, 0)` (helper R3).
+ *   - Hanya status production yang masuk report. Legacy PEKA/EC/CN tidak
+ *     boleh memperluas dataset.
  */
 import { and, asc, count, desc, eq, gte, inArray, lte, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { claimPayment, claimWorkflow, claimWorkflowItem, offBatch } from "@/db/schema";
+import {
+    claimPayment,
+    claimSubmission,
+    claimWorkflow,
+    claimWorkflowItem,
+    offBatch,
+} from "@/db/schema";
 import { calculateRemainingAmount, sumActivePayments } from "./calculations";
 import {
+    claimSubmissionStatusList,
     claimWorkflowStatuses,
-    claimWorkflowStatusList,
 } from "./constants";
 
 // =============================================================================
 // CSV serializer
 // =============================================================================
 
-/**
- * Escape satu cell CSV mengikuti RFC 4180:
- * - Bungkus dengan double-quote bila value mengandung koma, double-quote,
- *   newline, carriage return, atau leading/trailing whitespace.
- * - Double-quote di dalam value di-escape menjadi `""`.
- * - null/undefined → empty string.
- * - Number diserialisasi tanpa locale (no thousand separator).
- */
 export function escapeCsvCell(value: unknown): string {
     if (value === null || value === undefined) return "";
     let text: string;
@@ -53,11 +57,6 @@ export function escapeCsvCell(value: unknown): string {
     return `"${text.replace(/"/g, '""')}"`;
 }
 
-/**
- * Serialisasi rows ke string CSV. Header otomatis dibangun dari urutan
- * `columns`. UTF-8 BOM ditambahkan supaya Excel di Windows membaca tabel
- * bahasa Indonesia dengan benar (Rp, é, dst.).
- */
 export function rowsToCsv<T extends Record<string, unknown>>(
     columns: ReadonlyArray<{ key: keyof T & string; label: string }>,
     rows: ReadonlyArray<T>,
@@ -85,8 +84,8 @@ export function todayStamp(): string {
 export type CommonReportFilters = {
     status?: string | null;
     principleCode?: string | null;
-    dateFrom?: string | null; // YYYY-MM-DD inclusive
-    dateTo?: string | null; // YYYY-MM-DD inclusive
+    dateFrom?: string | null;
+    dateTo?: string | null;
 };
 
 export type SummaryReportFilters = CommonReportFilters & {
@@ -113,20 +112,19 @@ function parseIsoDateEndOfDay(value: string | null | undefined): Date | null {
     return Number.isFinite(date.getTime()) ? date : null;
 }
 
-function isKnownStatus(value: string | null | undefined): value is string {
+function isKnownSubmissionStatus(value: string | null | undefined): value is string {
     if (!value) return false;
-    return (claimWorkflowStatusList as ReadonlyArray<string>).includes(value);
+    return (claimSubmissionStatusList as ReadonlyArray<string>).includes(value);
 }
 
 // =============================================================================
 // Aggregation helpers
 // =============================================================================
 
-type WorkflowRow = typeof claimWorkflow.$inferSelect;
-
 type PaymentSlim = {
     id: string;
     claimWorkflowId: string;
+    claimSubmissionId: string | null;
     paymentDate: string;
     paymentAmount: number;
     paymentType: string | null;
@@ -138,17 +136,17 @@ type PaymentSlim = {
     voidReason: string | null;
 };
 
-async function loadPaymentsForWorkflows(workflowIds: ReadonlyArray<string>): Promise<Map<string, PaymentSlim[]>> {
+async function loadPaymentsForSubmissions(submissionIds: ReadonlyArray<string>): Promise<Map<string, PaymentSlim[]>> {
     const map = new Map<string, PaymentSlim[]>();
-    if (workflowIds.length === 0) return map;
-    // SQLite param limit ~999 — chunk defensif walau dataset internal kecil.
+    if (submissionIds.length === 0) return map;
     const CHUNK = 400;
-    for (let i = 0; i < workflowIds.length; i += CHUNK) {
-        const slice = workflowIds.slice(i, i + CHUNK);
+    for (let i = 0; i < submissionIds.length; i += CHUNK) {
+        const slice = submissionIds.slice(i, i + CHUNK);
         const rows = await db
             .select({
                 id: claimPayment.id,
                 claimWorkflowId: claimPayment.claimWorkflowId,
+                claimSubmissionId: claimPayment.claimSubmissionId,
                 paymentDate: claimPayment.paymentDate,
                 paymentAmount: claimPayment.paymentAmount,
                 paymentType: claimPayment.paymentType,
@@ -160,37 +158,40 @@ async function loadPaymentsForWorkflows(workflowIds: ReadonlyArray<string>): Pro
                 voidReason: claimPayment.voidReason,
             })
             .from(claimPayment)
-            .where(inArray(claimPayment.claimWorkflowId, slice as string[]))
+            .where(inArray(claimPayment.claimSubmissionId, slice as string[]))
             .orderBy(asc(claimPayment.paymentDate), asc(claimPayment.createdAt));
         for (const row of rows) {
-            const existing = map.get(row.claimWorkflowId);
+            const key = row.claimSubmissionId;
+            if (!key) continue;
+            const existing = map.get(key);
             if (existing) {
                 existing.push(row);
             } else {
-                map.set(row.claimWorkflowId, [row]);
+                map.set(key, [row]);
             }
         }
     }
     return map;
 }
 
-function isoDateOnly(value: Date | null | undefined): string | null {
-    if (!value) return null;
-    const d = value instanceof Date ? value : new Date(value);
-    if (!Number.isFinite(d.getTime())) return null;
-    return d.toISOString().slice(0, 10);
-}
-
 // =============================================================================
-// Summary Report
+// Summary Report (per submission)
 // =============================================================================
 
 export type SummaryReportRow = {
+    workflowId: string;
     claimWorkflowNo: string;
+    sourceType: string;
+    offBatchId: string;
+    offNoPengajuan: string | null;
+    submissionId: string;
     noClaim: string | null;
+    scope: string;
+    scopeLabel: string | null;
+    submissionStatus: string;
+    workflowAggregateStatus: string | null;
     principleCode: string;
     principleName: string;
-    status: string;
     totalDpp: number;
     totalPpn: number;
     totalPph: number;
@@ -201,11 +202,9 @@ export type SummaryReportRow = {
     submittedToPrincipalAt: string | null;
     closedAt: string | null;
     createdAt: string;
-    offBatchId: string;
-    offNoPengajuan: string | null;
 };
 
-const OPEN_STATUSES = [
+const OPEN_SUBMISSION_STATUSES = [
     claimWorkflowStatuses.draft,
     claimWorkflowStatuses.needRevision,
     claimWorkflowStatuses.readyToSubmit,
@@ -215,89 +214,103 @@ const OPEN_STATUSES = [
 ] as const;
 
 export async function buildSummaryReport(filters: SummaryReportFilters): Promise<SummaryReportRow[]> {
-    if (filters.status && !isKnownStatus(filters.status)) return [];
+    if (filters.status && !isKnownSubmissionStatus(filters.status)) return [];
     const conditions: SQL[] = [
-        inArray(claimWorkflow.status, claimWorkflowStatusList as unknown as string[]),
+        inArray(claimSubmission.status, claimSubmissionStatusList as unknown as string[]),
     ];
-    if (isKnownStatus(filters.status ?? null)) {
-        conditions.push(eq(claimWorkflow.status, filters.status as string));
+    if (isKnownSubmissionStatus(filters.status ?? null)) {
+        conditions.push(eq(claimSubmission.status, filters.status as string));
     }
     if (filters.principleCode) {
         conditions.push(eq(claimWorkflow.principleCode, filters.principleCode));
     }
     const dateFrom = parseIsoDateStartOfDay(filters.dateFrom ?? null);
     const dateTo = parseIsoDateEndOfDay(filters.dateTo ?? null);
-    if (dateFrom) conditions.push(gte(claimWorkflow.createdAt, dateFrom));
-    if (dateTo) conditions.push(lte(claimWorkflow.createdAt, dateTo));
+    if (dateFrom) conditions.push(gte(claimSubmission.createdAt, dateFrom));
+    if (dateTo) conditions.push(lte(claimSubmission.createdAt, dateTo));
     if (filters.onlyOpen) {
-        conditions.push(inArray(claimWorkflow.status, OPEN_STATUSES as unknown as string[]));
+        conditions.push(inArray(claimSubmission.status, OPEN_SUBMISSION_STATUSES as unknown as string[]));
     }
 
     const baseQuery = db
         .select({
+            submission: claimSubmission,
             workflow: claimWorkflow,
             offNoPengajuan: offBatch.noPengajuan,
         })
-        .from(claimWorkflow)
+        .from(claimSubmission)
+        .innerJoin(claimWorkflow, eq(claimSubmission.claimWorkflowId, claimWorkflow.id))
         .leftJoin(offBatch, eq(claimWorkflow.offBatchId, offBatch.id));
     const filtered = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
-    const rows = await filtered.orderBy(desc(claimWorkflow.createdAt));
+    const rows = await filtered.orderBy(desc(claimSubmission.createdAt));
 
-    const workflowIds = rows.map((r) => r.workflow.id);
-    const paymentsByWorkflow = await loadPaymentsForWorkflows(workflowIds);
+    const submissionIds = rows.map((r) => r.submission.id);
+    const paymentsBySubmission = await loadPaymentsForSubmissions(submissionIds);
 
-    // itemCount per workflow: satu round-trip GROUP BY supaya report tetap
-    // murah. SQLite mendukung COUNT(*) tanpa drizzle helper khusus.
+    // itemCount per submission via single GROUP BY.
     const itemCountMap = new Map<string, number>();
-    if (workflowIds.length > 0) {
+    if (submissionIds.length > 0) {
         const itemRows = await db
             .select({
-                claimWorkflowId: claimWorkflowItem.claimWorkflowId,
+                claimSubmissionId: claimWorkflowItem.claimSubmissionId,
                 count: count(claimWorkflowItem.id),
             })
             .from(claimWorkflowItem)
-            .where(inArray(claimWorkflowItem.claimWorkflowId, workflowIds as string[]))
-            .groupBy(claimWorkflowItem.claimWorkflowId);
+            .where(inArray(claimWorkflowItem.claimSubmissionId, submissionIds as string[]))
+            .groupBy(claimWorkflowItem.claimSubmissionId);
         for (const row of itemRows) {
-            itemCountMap.set(row.claimWorkflowId, Number(row.count || 0));
+            if (row.claimSubmissionId) {
+                itemCountMap.set(row.claimSubmissionId, Number(row.count || 0));
+            }
         }
     }
 
-    return rows.map(({ workflow: w, offNoPengajuan }) => {
-        const totalClaim = Number(w.totalClaim || 0);
-        const payments = paymentsByWorkflow.get(w.id) ?? [];
+    return rows.map(({ submission: s, workflow: w, offNoPengajuan }) => {
+        const totalClaim = Number(s.totalClaim || 0);
+        const payments = paymentsBySubmission.get(s.id) ?? [];
         const totalPaid = sumActivePayments(payments);
         const remainingAmount = calculateRemainingAmount(totalClaim, totalPaid);
         return {
+            workflowId: w.id,
             claimWorkflowNo: w.claimWorkflowNo,
-            noClaim: w.noClaim,
+            sourceType: w.sourceType,
+            offBatchId: w.offBatchId,
+            offNoPengajuan,
+            submissionId: s.id,
+            noClaim: s.noClaim,
+            scope: s.scope,
+            scopeLabel: s.scopeLabel,
+            submissionStatus: s.status,
+            workflowAggregateStatus: w.aggregateStatus,
             principleCode: w.principleCode,
             principleName: w.principleName,
-            status: w.status,
-            totalDpp: Number(w.totalDpp || 0),
-            totalPpn: Number(w.totalPpn || 0),
-            totalPph: Number(w.totalPph || 0),
+            totalDpp: Number(s.totalDpp || 0),
+            totalPpn: Number(s.totalPpn || 0),
+            totalPph: Number(s.totalPph || 0),
             totalClaim,
             totalPaid,
             remainingAmount,
-            itemCount: itemCountMap.get(w.id) ?? 0,
-            submittedToPrincipalAt: w.submittedToPrincipalAt
-                ? new Date(w.submittedToPrincipalAt).toISOString()
+            itemCount: itemCountMap.get(s.id) ?? 0,
+            submittedToPrincipalAt: s.submittedToPrincipalAt
+                ? new Date(s.submittedToPrincipalAt).toISOString()
                 : null,
-            closedAt: w.closedAt ? new Date(w.closedAt).toISOString() : null,
-            createdAt: new Date(w.createdAt).toISOString(),
-            offBatchId: w.offBatchId,
-            offNoPengajuan,
+            closedAt: s.closedAt ? new Date(s.closedAt).toISOString() : null,
+            createdAt: new Date(s.createdAt).toISOString(),
         } satisfies SummaryReportRow;
     });
 }
 
 export const SUMMARY_REPORT_COLUMNS: ReadonlyArray<{ key: keyof SummaryReportRow & string; label: string }> = [
     { key: "claimWorkflowNo", label: "Claim Workflow No" },
+    { key: "sourceType", label: "Source Type" },
+    { key: "submissionId", label: "Submission Id" },
     { key: "noClaim", label: "No Claim" },
+    { key: "scope", label: "Scope" },
+    { key: "scopeLabel", label: "Scope Label" },
+    { key: "submissionStatus", label: "Submission Status" },
+    { key: "workflowAggregateStatus", label: "Workflow Aggregate Status" },
     { key: "principleCode", label: "Principle Code" },
     { key: "principleName", label: "Principle Name" },
-    { key: "status", label: "Status" },
     { key: "totalDpp", label: "Total DPP" },
     { key: "totalPpn", label: "Total PPN" },
     { key: "totalPph", label: "Total PPH" },
@@ -313,24 +326,28 @@ export const SUMMARY_REPORT_COLUMNS: ReadonlyArray<{ key: keyof SummaryReportRow
 ];
 
 // =============================================================================
-// Paid Report (transaction-based)
+// Paid Report (transaction-based, per submission)
 // =============================================================================
 
 export type PaidReportRow = {
     paymentId: string;
-    claimWorkflowId: string;
+    workflowId: string;
     claimWorkflowNo: string;
+    sourceType: string;
+    submissionId: string | null;
     noClaim: string | null;
+    scope: string | null;
+    scopeLabel: string | null;
     principleCode: string;
     principleName: string;
     paymentDate: string;
     paymentAmount: number;
     paymentType: string | null;
     paymentNote: string | null;
-    workflowTotalClaim: number;
-    workflowTotalPaid: number;
-    workflowRemainingAmount: number;
-    workflowStatus: string;
+    submissionTotalClaim: number;
+    submissionTotalPaid: number;
+    submissionRemainingAmount: number;
+    submissionStatus: string | null;
     createdBy: string | null;
     createdAt: string;
     voidedAt: string | null;
@@ -339,42 +356,40 @@ export type PaidReportRow = {
 };
 
 export async function buildPaidReport(filters: PaidReportFilters): Promise<PaidReportRow[]> {
-    if (filters.status && !isKnownStatus(filters.status)) return [];
-    const workflowConditions: SQL[] = [
-        inArray(claimWorkflow.status, claimWorkflowStatusList as unknown as string[]),
+    if (filters.status && !isKnownSubmissionStatus(filters.status)) return [];
+    const conditions: SQL[] = [
+        inArray(claimSubmission.status, claimSubmissionStatusList as unknown as string[]),
     ];
-    if (isKnownStatus(filters.status ?? null)) {
-        workflowConditions.push(eq(claimWorkflow.status, filters.status as string));
+    if (isKnownSubmissionStatus(filters.status ?? null)) {
+        conditions.push(eq(claimSubmission.status, filters.status as string));
     }
     if (filters.principleCode) {
-        workflowConditions.push(eq(claimWorkflow.principleCode, filters.principleCode));
+        conditions.push(eq(claimWorkflow.principleCode, filters.principleCode));
     }
 
-    const baseWorkflow = db
+    const baseQuery = db
         .select({
+            submission: claimSubmission,
             workflow: claimWorkflow,
         })
-        .from(claimWorkflow);
-    const workflowsQuery = workflowConditions.length > 0
-        ? baseWorkflow.where(and(...workflowConditions))
-        : baseWorkflow;
-    const workflowRows = await workflowsQuery;
-    if (workflowRows.length === 0) return [];
+        .from(claimSubmission)
+        .innerJoin(claimWorkflow, eq(claimSubmission.claimWorkflowId, claimWorkflow.id));
+    const filtered = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
+    const submissionRows = await filtered;
+    if (submissionRows.length === 0) return [];
 
-    const workflowMap = new Map<string, WorkflowRow>();
-    for (const row of workflowRows) workflowMap.set(row.workflow.id, row.workflow);
-
-    const paymentsByWorkflow = await loadPaymentsForWorkflows([...workflowMap.keys()]);
+    const submissionIds = submissionRows.map((r) => r.submission.id);
+    const paymentsBySubmission = await loadPaymentsForSubmissions(submissionIds);
 
     const includeVoided = Boolean(filters.includeVoided);
     const dateFrom = filters.dateFrom && ISO_DATE_RE.test(filters.dateFrom) ? filters.dateFrom : null;
     const dateTo = filters.dateTo && ISO_DATE_RE.test(filters.dateTo) ? filters.dateTo : null;
 
     const rows: PaidReportRow[] = [];
-    for (const workflow of workflowMap.values()) {
-        const payments = paymentsByWorkflow.get(workflow.id) ?? [];
+    for (const { submission: s, workflow: w } of submissionRows) {
+        const payments = paymentsBySubmission.get(s.id) ?? [];
         if (payments.length === 0) continue;
-        const totalClaim = Number(workflow.totalClaim || 0);
+        const totalClaim = Number(s.totalClaim || 0);
         const totalPaid = sumActivePayments(payments);
         const remainingAmount = calculateRemainingAmount(totalClaim, totalPaid);
         for (const p of payments) {
@@ -384,19 +399,23 @@ export async function buildPaidReport(filters: PaidReportFilters): Promise<PaidR
             if (dateTo && p.paymentDate > dateTo) continue;
             rows.push({
                 paymentId: p.id,
-                claimWorkflowId: workflow.id,
-                claimWorkflowNo: workflow.claimWorkflowNo,
-                noClaim: workflow.noClaim,
-                principleCode: workflow.principleCode,
-                principleName: workflow.principleName,
+                workflowId: w.id,
+                claimWorkflowNo: w.claimWorkflowNo,
+                sourceType: w.sourceType,
+                submissionId: s.id,
+                noClaim: s.noClaim,
+                scope: s.scope,
+                scopeLabel: s.scopeLabel,
+                principleCode: w.principleCode,
+                principleName: w.principleName,
                 paymentDate: p.paymentDate,
                 paymentAmount: Number(p.paymentAmount || 0),
                 paymentType: p.paymentType,
                 paymentNote: p.paymentNote,
-                workflowTotalClaim: totalClaim,
-                workflowTotalPaid: totalPaid,
-                workflowRemainingAmount: remainingAmount,
-                workflowStatus: workflow.status,
+                submissionTotalClaim: totalClaim,
+                submissionTotalPaid: totalPaid,
+                submissionRemainingAmount: remainingAmount,
+                submissionStatus: s.status,
                 createdBy: p.createdBy,
                 createdAt: new Date(p.createdAt).toISOString(),
                 voidedAt: p.voidedAt ? new Date(p.voidedAt).toISOString() : null,
@@ -415,17 +434,21 @@ export async function buildPaidReport(filters: PaidReportFilters): Promise<PaidR
 export const PAID_REPORT_COLUMNS: ReadonlyArray<{ key: keyof PaidReportRow & string; label: string }> = [
     { key: "paymentId", label: "Payment Id" },
     { key: "claimWorkflowNo", label: "Claim Workflow No" },
+    { key: "sourceType", label: "Source Type" },
+    { key: "submissionId", label: "Submission Id" },
     { key: "noClaim", label: "No Claim" },
+    { key: "scope", label: "Scope" },
+    { key: "scopeLabel", label: "Scope Label" },
     { key: "principleCode", label: "Principle Code" },
     { key: "principleName", label: "Principle Name" },
     { key: "paymentDate", label: "Payment Date" },
     { key: "paymentAmount", label: "Payment Amount" },
     { key: "paymentType", label: "Payment Type" },
     { key: "paymentNote", label: "Payment Note" },
-    { key: "workflowTotalClaim", label: "Workflow Total Claim" },
-    { key: "workflowTotalPaid", label: "Workflow Total Paid" },
-    { key: "workflowRemainingAmount", label: "Workflow Remaining Amount" },
-    { key: "workflowStatus", label: "Workflow Status" },
+    { key: "submissionTotalClaim", label: "Submission Total Claim" },
+    { key: "submissionTotalPaid", label: "Submission Total Paid" },
+    { key: "submissionRemainingAmount", label: "Submission Remaining Amount" },
+    { key: "submissionStatus", label: "Submission Status" },
     { key: "createdBy", label: "Created By" },
     { key: "createdAt", label: "Created At" },
     { key: "voidedAt", label: "Voided At" },
@@ -434,15 +457,20 @@ export const PAID_REPORT_COLUMNS: ReadonlyArray<{ key: keyof PaidReportRow & str
 ];
 
 // =============================================================================
-// Outstanding Report
+// Outstanding Report (per submission)
 // =============================================================================
 
 export type OutstandingReportRow = {
+    workflowId: string;
     claimWorkflowNo: string;
+    sourceType: string;
+    submissionId: string;
     noClaim: string | null;
+    scope: string;
+    scopeLabel: string | null;
+    submissionStatus: string;
     principleCode: string;
     principleName: string;
-    status: string;
     totalClaim: number;
     totalPaid: number;
     remainingAmount: number;
@@ -454,7 +482,7 @@ export type OutstandingReportRow = {
     offNoPengajuan: string | null;
 };
 
-const OUTSTANDING_STATUSES = [
+const OUTSTANDING_SUBMISSION_STATUSES = [
     claimWorkflowStatuses.submittedToPrincipal,
     claimWorkflowStatuses.partiallyPaid,
     claimWorkflowStatuses.outstanding,
@@ -469,15 +497,15 @@ function bucketize(days: number | null): OutstandingReportRow["agingBucket"] {
 }
 
 export async function buildOutstandingReport(filters: OutstandingReportFilters): Promise<OutstandingReportRow[]> {
-    if (filters.status && !(OUTSTANDING_STATUSES as ReadonlyArray<string>).includes(filters.status)) {
+    if (filters.status && !(OUTSTANDING_SUBMISSION_STATUSES as ReadonlyArray<string>).includes(filters.status)) {
         return [];
     }
     const conditions: SQL[] = [];
     const requestedStatus = filters.status ?? null;
-    if (requestedStatus && (OUTSTANDING_STATUSES as ReadonlyArray<string>).includes(requestedStatus)) {
-        conditions.push(eq(claimWorkflow.status, requestedStatus));
+    if (requestedStatus && (OUTSTANDING_SUBMISSION_STATUSES as ReadonlyArray<string>).includes(requestedStatus)) {
+        conditions.push(eq(claimSubmission.status, requestedStatus));
     } else {
-        conditions.push(inArray(claimWorkflow.status, OUTSTANDING_STATUSES as unknown as string[]));
+        conditions.push(inArray(claimSubmission.status, OUTSTANDING_SUBMISSION_STATUSES as unknown as string[]));
     }
     if (filters.principleCode) {
         conditions.push(eq(claimWorkflow.principleCode, filters.principleCode));
@@ -485,22 +513,24 @@ export async function buildOutstandingReport(filters: OutstandingReportFilters):
 
     const baseQuery = db
         .select({
+            submission: claimSubmission,
             workflow: claimWorkflow,
             offNoPengajuan: offBatch.noPengajuan,
         })
-        .from(claimWorkflow)
+        .from(claimSubmission)
+        .innerJoin(claimWorkflow, eq(claimSubmission.claimWorkflowId, claimWorkflow.id))
         .leftJoin(offBatch, eq(claimWorkflow.offBatchId, offBatch.id));
     const filtered = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
-    const rows = await filtered.orderBy(desc(claimWorkflow.submittedToPrincipalAt));
+    const rows = await filtered.orderBy(desc(claimSubmission.submittedToPrincipalAt));
 
-    const workflowIds = rows.map((r) => r.workflow.id);
-    const paymentsByWorkflow = await loadPaymentsForWorkflows(workflowIds);
+    const submissionIds = rows.map((r) => r.submission.id);
+    const paymentsBySubmission = await loadPaymentsForSubmissions(submissionIds);
 
     const now = Date.now();
     const out: OutstandingReportRow[] = [];
-    for (const row of rows) {
-        const totalClaim = Number(row.workflow.totalClaim || 0);
-        const payments = paymentsByWorkflow.get(row.workflow.id) ?? [];
+    for (const { submission: s, workflow: w, offNoPengajuan } of rows) {
+        const totalClaim = Number(s.totalClaim || 0);
+        const payments = paymentsBySubmission.get(s.id) ?? [];
         const totalPaid = sumActivePayments(payments);
         const remainingAmount = calculateRemainingAmount(totalClaim, totalPaid);
         if (remainingAmount <= 0) continue;
@@ -508,18 +538,23 @@ export async function buildOutstandingReport(filters: OutstandingReportFilters):
         const latestPaymentDate = activePayments.length > 0
             ? activePayments[activePayments.length - 1].paymentDate
             : null;
-        const submittedAt = row.workflow.submittedToPrincipalAt
-            ? new Date(row.workflow.submittedToPrincipalAt)
+        const submittedAt = s.submittedToPrincipalAt
+            ? new Date(s.submittedToPrincipalAt)
             : null;
         const days = submittedAt && Number.isFinite(submittedAt.getTime())
             ? Math.max(0, Math.floor((now - submittedAt.getTime()) / (1000 * 60 * 60 * 24)))
             : null;
         out.push({
-            claimWorkflowNo: row.workflow.claimWorkflowNo,
-            noClaim: row.workflow.noClaim,
-            principleCode: row.workflow.principleCode,
-            principleName: row.workflow.principleName,
-            status: row.workflow.status,
+            workflowId: w.id,
+            claimWorkflowNo: w.claimWorkflowNo,
+            sourceType: w.sourceType,
+            submissionId: s.id,
+            noClaim: s.noClaim,
+            scope: s.scope,
+            scopeLabel: s.scopeLabel,
+            submissionStatus: s.status,
+            principleCode: w.principleCode,
+            principleName: w.principleName,
             totalClaim,
             totalPaid,
             remainingAmount,
@@ -527,8 +562,8 @@ export async function buildOutstandingReport(filters: OutstandingReportFilters):
             latestPaymentDate,
             daysOutstanding: days,
             agingBucket: bucketize(days),
-            offBatchId: row.workflow.offBatchId,
-            offNoPengajuan: row.offNoPengajuan,
+            offBatchId: w.offBatchId,
+            offNoPengajuan,
         });
     }
     return out;
@@ -536,10 +571,14 @@ export async function buildOutstandingReport(filters: OutstandingReportFilters):
 
 export const OUTSTANDING_REPORT_COLUMNS: ReadonlyArray<{ key: keyof OutstandingReportRow & string; label: string }> = [
     { key: "claimWorkflowNo", label: "Claim Workflow No" },
+    { key: "sourceType", label: "Source Type" },
+    { key: "submissionId", label: "Submission Id" },
     { key: "noClaim", label: "No Claim" },
+    { key: "scope", label: "Scope" },
+    { key: "scopeLabel", label: "Scope Label" },
+    { key: "submissionStatus", label: "Submission Status" },
     { key: "principleCode", label: "Principle Code" },
     { key: "principleName", label: "Principle Name" },
-    { key: "status", label: "Status" },
     { key: "totalClaim", label: "Total Claim" },
     { key: "totalPaid", label: "Total Paid" },
     { key: "remainingAmount", label: "Remaining Amount" },
@@ -550,9 +589,3 @@ export const OUTSTANDING_REPORT_COLUMNS: ReadonlyArray<{ key: keyof OutstandingR
     { key: "offBatchId", label: "OFF Batch Id" },
     { key: "offNoPengajuan", label: "OFF No Pengajuan" },
 ];
-
-// =============================================================================
-// Untyped util re-export (jaga isoDateOnly tidak unused warning)
-// =============================================================================
-
-export const __reportInternal = { isoDateOnly };

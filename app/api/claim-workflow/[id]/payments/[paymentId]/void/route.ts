@@ -8,14 +8,21 @@
  *               recalc totals + status workflow, tulis audit
  *               `payment_voided` (+ optional status transition audit)
  *               dalam transaksi yang sama.
+ *
+ * Phase R7d — Multi No Claim void:
+ *   Multi-submission workflow ditolak `MULTI_SUBMISSION_PAYMENT_ROUTE_DISABLED`.
+ *   Single-submission tetap valid; recalc submission + workflow aggregate.
  */
 import { NextResponse } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { claimPayment, claimWorkflow } from "@/db/schema";
+import { claimPayment, claimSubmission, claimWorkflow } from "@/db/schema";
 import {
+    claimAuditScopes,
     claimWorkflowStatuses,
     recalcPaymentTotals,
+    recalcSubmissionPaymentTotals,
+    recalcWorkflowAggregateWithPayments,
     requireClaimSession,
     writeClaimAudit,
 } from "@/lib/claim-workflow";
@@ -78,6 +85,22 @@ export async function POST(request: Request, context: Context) {
                 } as const;
             }
 
+            // Phase R7d — Multi No Claim void guard:
+            const submissions = await tx
+                .select({ id: claimSubmission.id })
+                .from(claimSubmission)
+                .where(eq(claimSubmission.claimWorkflowId, id));
+            if (submissions.length > 1) {
+                return {
+                    error: {
+                        status: 409,
+                        code: "MULTI_SUBMISSION_PAYMENT_ROUTE_DISABLED",
+                        message: "Workflow memiliki beberapa No Claim. Void pembayaran lewat submission.",
+                    },
+                } as const;
+            }
+            const targetSubmissionId = submissions[0]?.id ?? null;
+
             const [payment] = await tx
                 .select()
                 .from(claimPayment)
@@ -118,31 +141,41 @@ export async function POST(request: Request, context: Context) {
                 })
                 .where(eq(claimPayment.id, paymentId));
 
-            const refreshedPayments = await tx
-                .select({ paymentAmount: claimPayment.paymentAmount, voidedAt: claimPayment.voidedAt })
-                .from(claimPayment)
-                .where(eq(claimPayment.claimWorkflowId, id));
-            const nextTotals = recalcPaymentTotals(totalClaim, refreshedPayments);
-
-            // Setelah void, status diturunkan kembali sesuai totalPaid.
-            // Jika sebelumnya Paid dan totalPaid drop di bawah totalClaim,
-            // status balik ke Partially Paid atau Submitted to Principal.
-            // Workflow Closed sudah ditolak di awal sehingga tidak akan
-            // pernah memicu transisi balik dari Closed.
-            const newStatus = nextTotals.derivedStatus;
-
-            await tx
-                .update(claimWorkflow)
-                .set({
-                    totalPaid: nextTotals.totalPaid,
-                    remainingAmount: nextTotals.remainingAmount,
-                    status: newStatus,
-                    updatedAt: now,
-                })
-                .where(eq(claimWorkflow.id, id));
+            // Recalc submission + workflow aggregate (R7d) bila ada submission;
+            // fall back ke recalc workflow-level (R3) untuk DB lokal lama.
+            let nextTotals;
+            let newStatus;
+            if (targetSubmissionId) {
+                const recalc = await recalcSubmissionPaymentTotals(tx, targetSubmissionId, now);
+                const aggregate = await recalcWorkflowAggregateWithPayments(tx, id, now);
+                nextTotals = {
+                    totalPaid: recalc.totalPaid,
+                    remainingAmount: recalc.remainingAmount,
+                    derivedStatus: recalc.nextStatus,
+                };
+                newStatus = aggregate.workflowStatus;
+            } else {
+                const refreshedPayments = await tx
+                    .select({ paymentAmount: claimPayment.paymentAmount, voidedAt: claimPayment.voidedAt })
+                    .from(claimPayment)
+                    .where(eq(claimPayment.claimWorkflowId, id));
+                nextTotals = recalcPaymentTotals(totalClaim, refreshedPayments);
+                newStatus = nextTotals.derivedStatus;
+                await tx
+                    .update(claimWorkflow)
+                    .set({
+                        totalPaid: nextTotals.totalPaid,
+                        remainingAmount: nextTotals.remainingAmount,
+                        status: newStatus,
+                        updatedAt: now,
+                    })
+                    .where(eq(claimWorkflow.id, id));
+            }
 
             await writeClaimAudit({
                 claimWorkflowId: id,
+                claimSubmissionId: targetSubmissionId,
+                auditScope: targetSubmissionId ? claimAuditScopes.submission : claimAuditScopes.workflow,
                 actor,
                 action: "payment_voided",
                 fromStatus: previousStatus,
@@ -158,12 +191,16 @@ export async function POST(request: Request, context: Context) {
                     newRemainingAmount: nextTotals.remainingAmount,
                     previousStatus,
                     newStatus,
+                    submissionId: targetSubmissionId,
+                    viaLegacyWorkflowRoute: true,
                 },
             }, tx);
 
             if (newStatus !== previousStatus) {
                 await writeClaimAudit({
                     claimWorkflowId: id,
+                    claimSubmissionId: targetSubmissionId,
+                    auditScope: targetSubmissionId ? claimAuditScopes.submission : claimAuditScopes.workflow,
                     actor,
                     action: "payment_status_recalculated",
                     fromStatus: previousStatus,
@@ -174,6 +211,7 @@ export async function POST(request: Request, context: Context) {
                         totalClaim,
                         totalPaid: nextTotals.totalPaid,
                         remainingAmount: nextTotals.remainingAmount,
+                        submissionId: targetSubmissionId,
                     },
                 }, tx);
             }

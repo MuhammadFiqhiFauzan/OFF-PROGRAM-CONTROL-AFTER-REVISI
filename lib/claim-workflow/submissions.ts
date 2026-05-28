@@ -37,10 +37,15 @@ import {
     claimWorkflow,
     claimWorkflowItem,
 } from "@/db/schema";
-import { calculateRemainingAmount } from "./calculations";
+import {
+    calculateRemainingAmount,
+    derivePaymentStatus,
+    recalcPaymentTotals,
+} from "./calculations";
 import {
     claimSubmissionScopes,
     claimSubmissionStatuses,
+    claimWorkflowStatuses,
 } from "./constants";
 import type { ClaimSubmissionRow, ClaimWorkflowRow } from "./types";
 
@@ -353,4 +358,278 @@ export function isSubmissionEditableWorkflowStatus(status: string): boolean {
         status === claimSubmissionStatuses.draft ||
         status === claimSubmissionStatuses.needRevision
     );
+}
+
+// =============================================================================
+// Payment helpers (R7d)
+// =============================================================================
+
+/**
+ * Status submission yang menerima payment baru / void payment. Sama dengan
+ * status workflow R3 (Submitted to Principal / Partially Paid). Closed
+ * tidak boleh menerima payment, Paid juga tidak (sudah lunas).
+ */
+export function isSubmissionPaymentAllowedStatus(status: string): boolean {
+    return (
+        status === claimSubmissionStatuses.submittedToPrincipal ||
+        status === claimSubmissionStatuses.partiallyPaid
+    );
+}
+
+/**
+ * Status yang boleh ter-derive dari payment recalc. Dipakai oleh route
+ * untuk decide apakah mau menulis ulang status atau preserve.
+ */
+export function isSubmissionPaymentDerivedStatus(status: string): boolean {
+    return (
+        status === claimSubmissionStatuses.submittedToPrincipal ||
+        status === claimSubmissionStatuses.partiallyPaid ||
+        status === claimSubmissionStatuses.paid
+    );
+}
+
+/**
+ * Recalc totalPaid / remainingAmount / status untuk satu submission dari
+ * `claim_payment` aktif (voidedAt IS NULL) yang ter-link ke
+ * submission tersebut.
+ *
+ * Update kolom `claim_submission.totalPaid`, `remainingAmount`, dan
+ * (opsional, bila currentStatus berada di derived window) `status`.
+ *
+ * Return: totals + nextStatus + previousStatus.
+ *
+ * Tidak menyentuh payment row baru — caller bertanggung jawab insert /
+ * update payment sebelum memanggil helper ini.
+ */
+export async function recalcSubmissionPaymentTotals(
+    executor: DbExecutor,
+    submissionId: string,
+    now: Date = new Date(),
+): Promise<{
+    totalClaim: number;
+    totalPaid: number;
+    remainingAmount: number;
+    derivedStatus: string;
+    previousStatus: string;
+    nextStatus: string;
+    statusChanged: boolean;
+    activePaymentCount: number;
+    voidedPaymentCount: number;
+}> {
+    const [submission] = await executor
+        .select()
+        .from(claimSubmission)
+        .where(eq(claimSubmission.id, submissionId));
+    if (!submission) {
+        throw Object.assign(new Error("Claim Submission not found"), {
+            code: "CLAIM_SUBMISSION_NOT_FOUND",
+            status: 404,
+        });
+    }
+    const totalClaim = Number(submission.totalClaim || 0);
+    const payments = await executor
+        .select({
+            paymentAmount: claimPayment.paymentAmount,
+            voidedAt: claimPayment.voidedAt,
+        })
+        .from(claimPayment)
+        .where(eq(claimPayment.claimSubmissionId, submissionId));
+    const totals = recalcPaymentTotals(totalClaim, payments);
+    const previousStatus = submission.status;
+    // Hanya overwrite status bila currentStatus ada di derived window.
+    // Ini menjaga workflow yang masih Draft / Ready / Closed dari
+    // perubahan status liar via payment route.
+    const nextStatus = isSubmissionPaymentDerivedStatus(previousStatus)
+        ? totals.derivedStatus
+        : previousStatus;
+
+    const activePaymentCount = payments.filter((p) => p.voidedAt === null).length;
+    const voidedPaymentCount = payments.length - activePaymentCount;
+
+    await executor
+        .update(claimSubmission)
+        .set({
+            totalPaid: totals.totalPaid,
+            remainingAmount: totals.remainingAmount,
+            status: nextStatus,
+            updatedAt: now,
+        })
+        .where(eq(claimSubmission.id, submissionId));
+
+    return {
+        totalClaim,
+        totalPaid: totals.totalPaid,
+        remainingAmount: totals.remainingAmount,
+        derivedStatus: totals.derivedStatus,
+        previousStatus,
+        nextStatus,
+        statusChanged: nextStatus !== previousStatus,
+        activePaymentCount,
+        voidedPaymentCount,
+    };
+}
+
+/**
+ * Derive workflow aggregate status dari semua submissions.
+ *
+ * Aturan (konservatif):
+ *   - 0 submission        → fallback ke current workflow status (caller decide).
+ *   - all submissions Closed                       → Closed
+ *   - all submissions in {Paid, Closed} dan ≥1 Paid → Paid
+ *   - any submission Partially Paid                → Partially Paid
+ *   - any submission Submitted to Principal/Paid   → Submitted to Principal
+ *     (workflow tidak Paid karena ada submission belum lunas)
+ *   - all submissions Ready to Submit              → Ready to Submit
+ *   - any submission Need Revision                 → Need Revision
+ *   - else → Draft
+ *
+ * Workflow tidak boleh `Closed` kecuali semua submission Closed.
+ * Workflow tidak boleh `Paid` kalau ada submission yang belum Paid/Closed.
+ */
+export function deriveWorkflowAggregateStatus(
+    submissions: ReadonlyArray<Pick<ClaimSubmissionRow, "status">>,
+    fallback: string = claimWorkflowStatuses.draft,
+): string {
+    if (submissions.length === 0) return fallback;
+    const statuses = submissions.map((s) => s.status);
+    const allClosed = statuses.every((s) => s === claimWorkflowStatuses.closed);
+    if (allClosed) return claimWorkflowStatuses.closed;
+    const allPaidOrClosed = statuses.every(
+        (s) => s === claimWorkflowStatuses.paid || s === claimWorkflowStatuses.closed,
+    );
+    const hasPaid = statuses.includes(claimWorkflowStatuses.paid);
+    if (allPaidOrClosed && hasPaid) return claimWorkflowStatuses.paid;
+    if (statuses.includes(claimWorkflowStatuses.partiallyPaid)) {
+        return claimWorkflowStatuses.partiallyPaid;
+    }
+    if (
+        statuses.includes(claimWorkflowStatuses.submittedToPrincipal) ||
+        statuses.includes(claimWorkflowStatuses.paid)
+    ) {
+        return claimWorkflowStatuses.submittedToPrincipal;
+    }
+    if (statuses.every((s) => s === claimWorkflowStatuses.readyToSubmit)) {
+        return claimWorkflowStatuses.readyToSubmit;
+    }
+    if (statuses.includes(claimWorkflowStatuses.needRevision)) {
+        return claimWorkflowStatuses.needRevision;
+    }
+    return claimWorkflowStatuses.draft;
+}
+
+/**
+ * Recalc cache workflow totals dari payments + recalc aggregate status
+ * dari submissions. Phase R7d-onwards: workflow.totalPaid /
+ * remainingAmount / status di-derive dari sum submissions.
+ *
+ * Helper ini menggantikan `recalcWorkflowAggregateFromSubmissions` saat
+ * payment recalc juga dibutuhkan. Behavior:
+ *   - totalDpp/Ppn/Pph/Claim → sum submissions.
+ *   - totalPaid → sum submission.totalPaid.
+ *   - remainingAmount = max(totalClaim - totalPaid, 0).
+ *   - aggregateStatus → derive dari submissions.
+ *   - status workflow → derive dari submissions HANYA bila berada di
+ *     payment-derived window atau Closed (jangan ubah Draft → Paid).
+ *
+ * Tidak menyentuh `submitted_to_principal_at` workflow.
+ */
+export async function recalcWorkflowAggregateWithPayments(
+    executor: DbExecutor,
+    workflowId: string,
+    now: Date = new Date(),
+): Promise<{
+    totalDpp: number;
+    totalPpn: number;
+    totalPph: number;
+    totalClaim: number;
+    totalPaid: number;
+    remainingAmount: number;
+    submissionCount: number;
+    aggregateStatus: string;
+    workflowStatus: string;
+    workflowStatusChanged: boolean;
+}> {
+    const submissions = await executor
+        .select({
+            id: claimSubmission.id,
+            status: claimSubmission.status,
+            totalDpp: claimSubmission.totalDpp,
+            totalPpn: claimSubmission.totalPpn,
+            totalPph: claimSubmission.totalPph,
+            totalClaim: claimSubmission.totalClaim,
+            totalPaid: claimSubmission.totalPaid,
+        })
+        .from(claimSubmission)
+        .where(eq(claimSubmission.claimWorkflowId, workflowId));
+
+    const totalDpp = submissions.reduce((acc, s) => acc + Number(s.totalDpp || 0), 0);
+    const totalPpn = submissions.reduce((acc, s) => acc + Number(s.totalPpn || 0), 0);
+    const totalPph = submissions.reduce((acc, s) => acc + Number(s.totalPph || 0), 0);
+    const totalClaim = submissions.reduce((acc, s) => acc + Number(s.totalClaim || 0), 0);
+    const totalPaid = submissions.reduce((acc, s) => acc + Number(s.totalPaid || 0), 0);
+    const remainingAmount = calculateRemainingAmount(totalClaim, totalPaid);
+    const aggregateStatus = deriveWorkflowAggregateStatus(submissions);
+
+    const [workflow] = await executor
+        .select({ status: claimWorkflow.status })
+        .from(claimWorkflow)
+        .where(eq(claimWorkflow.id, workflowId));
+    const previousStatus = workflow?.status ?? claimWorkflowStatuses.draft;
+
+    // Hanya update workflow.status bila currentStatus sudah di derived
+    // window (Submitted to Principal / Partially Paid / Paid / Closed).
+    // Workflow Draft / Ready to Submit / Need Revision biarkan untuk
+    // dikontrol oleh status route — payment recalc tidak boleh mendorong
+    // workflow ke Paid bila itemnya belum Submitted.
+    const inDerivedWindow =
+        previousStatus === claimWorkflowStatuses.submittedToPrincipal ||
+        previousStatus === claimWorkflowStatuses.partiallyPaid ||
+        previousStatus === claimWorkflowStatuses.paid;
+    const nextStatus = inDerivedWindow ? aggregateStatus : previousStatus;
+
+    await executor
+        .update(claimWorkflow)
+        .set({
+            totalDpp,
+            totalPpn,
+            totalPph,
+            totalClaim,
+            totalPaid,
+            remainingAmount,
+            aggregateStatus,
+            status: nextStatus,
+            updatedAt: now,
+        })
+        .where(eq(claimWorkflow.id, workflowId));
+
+    return {
+        totalDpp,
+        totalPpn,
+        totalPph,
+        totalClaim,
+        totalPaid,
+        remainingAmount,
+        submissionCount: submissions.length,
+        aggregateStatus,
+        workflowStatus: nextStatus,
+        workflowStatusChanged: nextStatus !== previousStatus,
+    };
+}
+
+/**
+ * Cek apakah workflow ini "single-submission". Dipakai oleh route legacy
+ * payment / close untuk decide apakah proxy ke default submission atau
+ * 409. Kembalikan submissionId tunggal bila ada, atau null bila multi /
+ * tidak ada.
+ */
+export async function getSingleSubmissionId(
+    executor: DbExecutor,
+    workflowId: string,
+): Promise<string | null> {
+    const rows = await executor
+        .select({ id: claimSubmission.id })
+        .from(claimSubmission)
+        .where(eq(claimSubmission.claimWorkflowId, workflowId));
+    if (rows.length !== 1) return null;
+    return rows[0].id;
 }
