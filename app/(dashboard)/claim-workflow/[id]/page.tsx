@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
@@ -22,6 +22,11 @@ type Workflow = {
   offNoPengajuan?: string | null;
   principleName: string;
   status: string;
+  // R7a — Multi No Claim: source type / aggregate status optional pada
+  // detail response. Fallback ke "off_program" / status workflow saat
+  // field belum ada di payload.
+  sourceType?: string | null;
+  aggregateStatus?: string | null;
   totalDpp: number;
   totalPpn: number;
   totalPph: number;
@@ -216,6 +221,193 @@ const TRANSITION_LABEL: Record<TransitionAction, string> = {
   submit_to_principal: "Submit to Principal",
 };
 
+// =============================================================================
+// R7 — UX Experiment Helpers (frontend only)
+// =============================================================================
+// Helpers berikut tidak menyentuh backend. Mereka hanya membantu UI
+// merangkum status submission menjadi label step-guidance yang ramah staff.
+//
+// Aturan tone:
+// - warning  → kuning/amber (butuh aksi user)
+// - info     → indigo/sky (langkah normal selanjutnya)
+// - success  → emerald (selesai / OK)
+// - neutral  → slate (informasi netral)
+
+type GuidanceTone = "warning" | "info" | "success" | "neutral";
+
+const SCOPE_DISPLAY_LABEL: Record<string, string> = {
+  per_pengajuan: "Per Pengajuan",
+  per_program: "Per Program",
+  per_toko: "Per Toko",
+  custom: "Custom",
+};
+
+const SCOPE_HELPER_TEXT: Record<string, string> = {
+  per_pengajuan: "Satu paket untuk seluruh pengajuan.",
+  per_program: "Pisahkan klaim berdasarkan program.",
+  per_toko: "Pisahkan klaim berdasarkan toko.",
+  custom: "Grouping manual sesuai kebutuhan.",
+};
+
+const SOURCE_TYPE_LABEL: Record<string, string> = {
+  off_program: "OFF Program",
+  direct_kwitansi: "Direct Kwitansi",
+  manual: "Manual",
+};
+
+function getScopeDisplayLabel(scope: string | null | undefined): string {
+  if (!scope) return "Paket Klaim";
+  return SCOPE_DISPLAY_LABEL[scope] || scope;
+}
+
+function getScopeHelper(scope: string | null | undefined): string {
+  if (!scope) return "";
+  return SCOPE_HELPER_TEXT[scope] || "";
+}
+
+function getSubmissionTitle(submission: Submission): string {
+  const label = (submission.scopeLabel || "").trim();
+  if (label) return label;
+  return getScopeDisplayLabel(submission.scope);
+}
+
+function getSubmissionDocumentsCompletedCount(submission: Submission): number {
+  let count = 0;
+  if (submission.claimLetterPdfPath) count += 1;
+  if (submission.summaryPdfPath) count += 1;
+  if (submission.receiptPdfPath) count += 1;
+  return count;
+}
+
+function isSubmissionDocumentsComplete(submission: Submission): boolean {
+  return getSubmissionDocumentsCompletedCount(submission) >= 3;
+}
+
+function isSubmissionClosed(submission: Submission): boolean {
+  return submission.status === claimWorkflowStatuses.closed;
+}
+
+function getSubmissionRemainingAmount(submission: Submission): number {
+  return Number(submission.remainingAmount || 0);
+}
+
+function getSubmissionNextAction(submission: Submission): {
+  label: string;
+  tone: GuidanceTone;
+} {
+  const noClaimEmpty = !submission.noClaim || !String(submission.noClaim).trim();
+  const docsIncomplete = !isSubmissionDocumentsComplete(submission);
+  const status = submission.status;
+  const remaining = getSubmissionRemainingAmount(submission);
+
+  if (status === claimWorkflowStatuses.closed) {
+    return { label: "Selesai", tone: "neutral" };
+  }
+  if (noClaimEmpty) {
+    return { label: "Isi No Claim", tone: "warning" };
+  }
+  if (docsIncomplete) {
+    return { label: "Lengkapi dokumen", tone: "warning" };
+  }
+  if (
+    status === claimWorkflowStatuses.draft ||
+    status === claimWorkflowStatuses.needRevision
+  ) {
+    return { label: "Siap diproses", tone: "info" };
+  }
+  if (status === claimWorkflowStatuses.readyToSubmit) {
+    return { label: "Submit ke principal", tone: "info" };
+  }
+  if (status === claimWorkflowStatuses.submittedToPrincipal && remaining > 0) {
+    return { label: "Menunggu pembayaran", tone: "warning" };
+  }
+  if (status === claimWorkflowStatuses.partiallyPaid) {
+    return { label: "Follow up outstanding", tone: "warning" };
+  }
+  if (status === claimWorkflowStatuses.paid) {
+    return { label: "Close paket", tone: "success" };
+  }
+  return { label: "Cek detail paket", tone: "neutral" };
+}
+
+function getWorkflowGuidance(submissions: Submission[]): {
+  message: string;
+  tone: GuidanceTone;
+} {
+  if (submissions.length === 0) {
+    return {
+      message: "Buat paket pertama untuk mulai mengelompokkan item klaim.",
+      tone: "info",
+    };
+  }
+  const allClosed = submissions.every((s) => isSubmissionClosed(s));
+  if (allClosed) {
+    return { message: "Semua paket selesai.", tone: "success" };
+  }
+  const missingNoClaim = submissions.filter(
+    (s) => !s.noClaim || !String(s.noClaim).trim(),
+  ).length;
+  if (missingNoClaim > 0) {
+    return {
+      message: `${missingNoClaim} paket belum punya No Claim.`,
+      tone: "warning",
+    };
+  }
+  const docsIncomplete = submissions.filter(
+    (s) => !isSubmissionDocumentsComplete(s) && !isSubmissionClosed(s),
+  ).length;
+  if (docsIncomplete > 0) {
+    return {
+      message: `${docsIncomplete} paket dokumennya belum lengkap.`,
+      tone: "warning",
+    };
+  }
+  const outstanding = submissions.filter(
+    (s) =>
+      !isSubmissionClosed(s) &&
+      getSubmissionRemainingAmount(s) > 0 &&
+      (s.status === claimWorkflowStatuses.submittedToPrincipal ||
+        s.status === claimWorkflowStatuses.partiallyPaid),
+  ).length;
+  if (outstanding > 0) {
+    return {
+      message: `${outstanding} paket masih outstanding.`,
+      tone: "warning",
+    };
+  }
+  return {
+    message: "Pilih paket untuk melanjutkan proses.",
+    tone: "info",
+  };
+}
+
+function getGuidanceClass(tone: GuidanceTone): string {
+  switch (tone) {
+    case "warning":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+    case "success":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+    case "info":
+      return "border-indigo-500/30 bg-indigo-500/10 text-indigo-200";
+    default:
+      return "border-white/10 bg-white/5 text-slate-300";
+  }
+}
+
+const SUBMISSION_LAYOUT_STORAGE_KEY = "claimWorkflowSubmissionLayoutMode";
+type SubmissionLayoutMode = "master" | "accordion";
+
+function readStoredLayoutMode(): SubmissionLayoutMode {
+  if (typeof window === "undefined") return "master";
+  try {
+    const raw = window.localStorage.getItem(SUBMISSION_LAYOUT_STORAGE_KEY);
+    if (raw === "accordion" || raw === "master") return raw;
+  } catch {
+    // localStorage might be unavailable; fallback to default.
+  }
+  return "master";
+}
+
 export default function ClaimWorkflowDetailPage() {
   const params = useParams<{ id: string }>();
   const id = String(params.id || "");
@@ -272,6 +464,27 @@ export default function ClaimWorkflowDetailPage() {
   // type. Key = `${submissionId}:${type}` supaya tombol per kombinasi
   // bisa disabled secara independen.
   const [generatingDocKey, setGeneratingDocKey] = useState("");
+  // R7 UX experiment — dual layout state (frontend only).
+  // Default mode: "master" (Master Detail + Step Guidance). Persist
+  // pilihan ke localStorage agar mengikuti preferensi user lintas
+  // navigasi. Tidak diserialisasi ke backend.
+  const [submissionLayoutMode, setSubmissionLayoutMode] =
+    useState<SubmissionLayoutMode>("master");
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(
+    null,
+  );
+  const [openSubmissionIds, setOpenSubmissionIds] = useState<string[]>([]);
+  const [showCreateSubmissionForm, setShowCreateSubmissionForm] = useState(false);
+  // Per-submission No Claim editor state. Map submissionId → draft value.
+  // Editor aktif ditandai oleh `submissionNoClaimEditingId`. Saving id
+  // mencegah double click.
+  const [submissionNoClaimDraft, setSubmissionNoClaimDraft] = useState<
+    Record<string, string>
+  >({});
+  const [submissionNoClaimEditingId, setSubmissionNoClaimEditingId] =
+    useState<string>("");
+  const [submissionNoClaimSavingId, setSubmissionNoClaimSavingId] =
+    useState<string>("");
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -337,6 +550,72 @@ export default function ClaimWorkflowDetailPage() {
   useEffect(() => {
     void loadDetail();
   }, [loadDetail]);
+
+  // R7 UX experiment — hydrate layout mode dari localStorage. Dilakukan
+  // sekali setelah mount untuk menghindari hydration mismatch (server
+  // render selalu pakai default "master").
+  useEffect(() => {
+    setSubmissionLayoutMode(readStoredLayoutMode());
+  }, []);
+
+  // R7 UX experiment — persist layout mode pilihan user. Guard dengan
+  // typeof window untuk SSR safety.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        SUBMISSION_LAYOUT_STORAGE_KEY,
+        submissionLayoutMode,
+      );
+    } catch {
+      // ignore storage errors (private mode etc).
+    }
+  }, [submissionLayoutMode]);
+
+  // R7 UX experiment — sinkronkan selected submission setelah submissions
+  // berubah (load awal, create, delete, dsb).
+  useEffect(() => {
+    if (submissions.length === 0) {
+      if (selectedSubmissionId !== null) setSelectedSubmissionId(null);
+      return;
+    }
+    const stillExists = submissions.some((s) => s.id === selectedSubmissionId);
+    if (!selectedSubmissionId || !stillExists) {
+      setSelectedSubmissionId(submissions[0].id);
+    }
+  }, [submissions, selectedSubmissionId]);
+
+  // R7 UX experiment — accordion default open. Spec: buka submission
+  // pertama saat mount awal. Setelah itu user bebas menutup semua atau
+  // memilih open ids manual. Implementasi pakai ref untuk membandingkan
+  // signature id list — bila tidak berubah, useEffect tidak menyentuh
+  // openSubmissionIds (mencegah re-open paksa setiap kali user toggle).
+  const accordionInitializedKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (submissions.length === 0) {
+      accordionInitializedKeyRef.current = "";
+      setOpenSubmissionIds((current) => (current.length === 0 ? current : []));
+      return;
+    }
+    const nextKey = submissions.map((s) => s.id).join("|");
+    if (accordionInitializedKeyRef.current === nextKey) {
+      // Submissions list belum berubah; hormati pilihan open/close user.
+      return;
+    }
+    const isFirstSync = accordionInitializedKeyRef.current === "";
+    accordionInitializedKeyRef.current = nextKey;
+    setOpenSubmissionIds((current) => {
+      const filtered = current.filter((id) =>
+        submissions.some((s) => s.id === id),
+      );
+      // Hanya enforce default-open pada sync pertama kali submissions
+      // tersedia. Setelah itu, biarkan user yang menentukan.
+      if (isFirstSync && filtered.length === 0) {
+        return [submissions[0].id];
+      }
+      return filtered;
+    });
+  }, [submissions]);
 
   const editable =
     canEditItems &&
@@ -697,16 +976,26 @@ export default function ClaimWorkflowDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = (await response.json()) as { ok?: boolean; error?: string };
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        submission?: { id?: string };
+      };
       if (!response.ok || !result.ok) {
         throw new Error(result.error || "Gagal membuat Claim Submission.");
       }
-      const successMessage = "Claim Submission baru tersimpan. Pindahkan item lewat dropdown di tabel.";
+      const successMessage = "Paket No Claim baru tersimpan. Pindahkan item lewat dropdown di tabel.";
       toast.success(successMessage);
       setMessage(successMessage);
       setCreateSubmissionLabel("");
       setCreateSubmissionNoClaim("");
       setCreateSubmissionScope("per_pengajuan");
+      setShowCreateSubmissionForm(false);
+      // R7 UX — pilih submission baru di Master Detail jika response
+      // membawa id. Tanpa id, useEffect sync akan fallback ke first.
+      if (result.submission?.id) {
+        setSelectedSubmissionId(result.submission.id);
+      }
       await loadDetail();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Gagal membuat Claim Submission.";
@@ -714,6 +1003,47 @@ export default function ClaimWorkflowDetailPage() {
       setMessage(errorMessage);
     } finally {
       setCreatingSubmission(false);
+    }
+  };
+
+  // R7 UX experiment — handler save No Claim per submission. Pakai
+  // endpoint PATCH submission yang sudah ada (R7b). Validasi non-empty
+  // di client; backend menolak empty dengan code submission-specific.
+  const submitSubmissionNoClaim = async (submissionId: string) => {
+    const draft = submissionNoClaimDraft[submissionId] ?? "";
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      const blankMessage = "No Claim wajib diisi.";
+      toast.error(blankMessage);
+      setMessage(blankMessage);
+      return;
+    }
+    setSubmissionNoClaimSavingId(submissionId);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/claim-workflow/${id}/submissions/${submissionId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ noClaim: trimmed }),
+        },
+      );
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal menyimpan No Claim paket.");
+      }
+      toast.success("No Claim paket tersimpan.");
+      setMessage("No Claim paket tersimpan.");
+      setSubmissionNoClaimEditingId("");
+      await loadDetail();
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Gagal menyimpan No Claim paket.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setSubmissionNoClaimSavingId("");
     }
   };
 
@@ -834,15 +1164,6 @@ export default function ClaimWorkflowDetailPage() {
     return <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-5 text-sm text-rose-200">{error || "Claim Workflow tidak ditemukan."}</div>;
   }
 
-  const summary = [
-    ["Total DPP", rupiah(workflow.totalDpp)],
-    ["Total PPN", rupiah(workflow.totalPpn)],
-    ["Total PPH", rupiah(workflow.totalPph)],
-    ["Total Claim", rupiah(workflow.totalClaim)],
-    ["Total Paid", rupiah(workflow.totalPaid)],
-    ["Remaining Amount", rupiah(workflow.remainingAmount)],
-  ];
-
   // Status setelah Submitted to Principal belum punya transisi UI di phase
   // ini — Partially Paid / Paid akan otomatis ditulis lewat payment workflow
   // (R3). Closed akan diatur lewat close endpoint terpisah (R4). Status
@@ -864,6 +1185,486 @@ export default function ClaimWorkflowDetailPage() {
     (workflow.status === claimWorkflowStatuses.submittedToPrincipal &&
       (paymentSummary?.totalPaid ?? 0) > 0);
 
+  // R7 UX experiment — derived helpers untuk dual layout submissions.
+  const sourceTypeKey = (workflow.sourceType || "off_program") as string;
+  const sourceTypeLabel = SOURCE_TYPE_LABEL[sourceTypeKey] || "OFF Program";
+  const workflowGuidance = getWorkflowGuidance(submissions);
+  const selectedSubmission = submissions.find(
+    (s) => s.id === selectedSubmissionId,
+  ) || null;
+
+  // Helper: items yang sudah di-link ke satu submission. Read-only di
+  // panel detail; pemindahan tetap lewat dropdown di tabel utama.
+  const getSubmissionItems = (submissionId: string) =>
+    items.filter((it) => it.claimSubmissionId === submissionId);
+
+  // R7 UX experiment — render single submission detail panel. Dipakai
+  // baik di Master Detail (right column) maupun Accordion body.
+  const renderSubmissionDetailPanel = (submission: Submission) => {
+    const docsCount = getSubmissionDocumentsCompletedCount(submission);
+    const next = getSubmissionNextAction(submission);
+    const submissionEditable =
+      canEditItems &&
+      (workflow.status === claimWorkflowStatuses.draft ||
+        workflow.status === claimWorkflowStatuses.needRevision) &&
+      !isSubmissionClosed(submission);
+    const noClaimEmpty =
+      !submission.noClaim || !String(submission.noClaim).trim();
+    const editingNoClaim = submissionNoClaimEditingId === submission.id;
+    const draftValue =
+      submissionNoClaimDraft[submission.id] ?? (submission.noClaim || "");
+    const savingNoClaim = submissionNoClaimSavingId === submission.id;
+    const submissionItems = getSubmissionItems(submission.id);
+    const remaining = getSubmissionRemainingAmount(submission);
+    const docTypes: Array<{
+      key: "claim-letter" | "summary" | "receipt";
+      title: string;
+      path?: string | null;
+      generatedAt?: string | Date | null;
+    }> = [
+      {
+        key: "claim-letter",
+        title: "Surat Claim",
+        path: submission.claimLetterPdfPath,
+        generatedAt: submission.claimLetterGeneratedAt,
+      },
+      {
+        key: "summary",
+        title: "Summary",
+        path: submission.summaryPdfPath,
+        generatedAt: submission.summaryGeneratedAt,
+      },
+      {
+        key: "receipt",
+        title: "Kwitansi",
+        path: submission.receiptPdfPath,
+        generatedAt: submission.receiptGeneratedAt,
+      },
+    ];
+    const canGenerateDocs =
+      canEditItems &&
+      !isSubmissionClosed(submission) &&
+      (submission.itemCount ?? submissionItems.length) > 0 &&
+      Number(submission.totalClaim || 0) > 0;
+    return (
+      <div className="space-y-5">
+        {/* Header */}
+        <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
+                  {getScopeDisplayLabel(submission.scope)}
+                </span>
+                <span
+                  className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(submission.status)}`}
+                >
+                  {displayClaimStatusLabel(submission.status)}
+                </span>
+                <span
+                  className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
+                >
+                  {next.label}
+                </span>
+              </div>
+              <h3 className="text-lg font-bold text-white">
+                {getSubmissionTitle(submission)}
+              </h3>
+              {submission.noClaim ? (
+                <p className="font-mono text-sm font-semibold text-emerald-200">
+                  {submission.noClaim}
+                </p>
+              ) : (
+                <p className="text-xs font-semibold text-amber-200">
+                  Belum ada No Claim
+                </p>
+              )}
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                Dokumen
+              </p>
+              <p
+                className={`mt-1 text-sm font-bold ${docsCount === 3 ? "text-emerald-200" : "text-amber-200"}`}
+              >
+                {docsCount}/3
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* No Claim Editor (per submission) */}
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-bold text-white">No Claim Paket</h4>
+              <p className="mt-1 text-xs text-slate-400">
+                No Claim untuk paket ini. Tersinkronisasi otomatis ke OFF
+                item terkait saat di-assign.
+              </p>
+            </div>
+            {!canAssignNoClaim && (
+              <span className="text-[11px] italic text-slate-500">
+                View-only
+              </span>
+            )}
+          </div>
+          {canAssignNoClaim ? (
+            editingNoClaim || noClaimEmpty ? (
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  value={draftValue}
+                  onChange={(event) => {
+                    setSubmissionNoClaimEditingId(submission.id);
+                    setSubmissionNoClaimDraft((prev) => ({
+                      ...prev,
+                      [submission.id]: event.target.value,
+                    }));
+                  }}
+                  placeholder="Contoh: 09/SUPER-GCPI/02/2026"
+                  disabled={savingNoClaim || !submissionEditable}
+                  className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                />
+                <div className="flex gap-2 sm:justify-end">
+                  {!noClaimEmpty && (
+                    <button
+                      type="button"
+                      disabled={savingNoClaim}
+                      onClick={() => {
+                        setSubmissionNoClaimEditingId("");
+                        setSubmissionNoClaimDraft((prev) => ({
+                          ...prev,
+                          [submission.id]: submission.noClaim || "",
+                        }));
+                      }}
+                      className="rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={savingNoClaim || !submissionEditable}
+                    onClick={() => void submitSubmissionNoClaim(submission.id)}
+                    className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                    title={
+                      !submissionEditable
+                        ? "No Claim hanya dapat di-assign saat workflow Draft / Need Revision dan paket belum closed."
+                        : undefined
+                    }
+                  >
+                    {savingNoClaim
+                      ? "Menyimpan..."
+                      : noClaimEmpty
+                        ? "Assign No Claim"
+                        : "Update No Claim"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="font-mono text-sm font-semibold text-emerald-200">
+                  {submission.noClaim}
+                </p>
+                <button
+                  type="button"
+                  disabled={!submissionEditable}
+                  onClick={() => {
+                    setSubmissionNoClaimEditingId(submission.id);
+                    setSubmissionNoClaimDraft((prev) => ({
+                      ...prev,
+                      [submission.id]: submission.noClaim || "",
+                    }));
+                  }}
+                  className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-bold text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+                  title={
+                    !submissionEditable
+                      ? "Edit No Claim hanya tersedia saat workflow Draft / Need Revision."
+                      : undefined
+                  }
+                >
+                  Edit No Claim
+                </button>
+              </div>
+            )
+          ) : (
+            <p className="mt-3 font-mono text-sm text-slate-300">
+              {submission.noClaim || "—"}
+            </p>
+          )}
+          {!submissionEditable && canAssignNoClaim && (
+            <p className="mt-2 text-[11px] italic text-slate-500">
+              Edit No Claim hanya tersedia saat workflow berstatus Draft atau
+              Need Revision.
+            </p>
+          )}
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Total Claim
+            </p>
+            <p className="mt-2 text-sm font-bold text-white">
+              {rupiah(submission.totalClaim)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
+              Total Paid
+            </p>
+            <p className="mt-2 text-sm font-bold text-emerald-200">
+              {rupiah(submission.totalPaid)}
+            </p>
+          </div>
+          <div
+            className={`rounded-xl border p-4 ${remaining > 0 ? "border-amber-500/30 bg-amber-500/5" : "border-emerald-500/30 bg-emerald-500/5"}`}
+          >
+            <p
+              className={`text-[11px] font-semibold uppercase tracking-wider ${remaining > 0 ? "text-amber-300" : "text-emerald-300"}`}
+            >
+              Outstanding
+            </p>
+            <p
+              className={`mt-2 text-sm font-bold ${remaining > 0 ? "text-amber-200" : "text-emerald-200"}`}
+            >
+              {rupiah(remaining)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Items
+            </p>
+            <p className="mt-2 text-sm font-bold text-white">
+              {submission.itemCount ?? submissionItems.length}
+            </p>
+          </div>
+        </div>
+
+        {/* Documents */}
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-bold text-white">Dokumen Paket</h4>
+              <p className="mt-1 text-xs text-slate-400">
+                Tiga dokumen wajib di-generate sebelum Mark Ready.
+              </p>
+            </div>
+            <span
+              className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${docsCount === 3 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}
+            >
+              {docsCount}/3
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            {docTypes.map((doc) => {
+              const generating = generatingDocKey === `${submission.id}:${doc.key}`;
+              const generated = Boolean(doc.path);
+              return (
+                <div
+                  key={doc.key}
+                  className="rounded-xl border border-white/10 bg-black/30 p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <h5 className="text-sm font-semibold text-white">
+                      {doc.title}
+                    </h5>
+                    <span
+                      className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${generated ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}
+                    >
+                      {generated ? "Sudah dibuat" : "Belum dibuat"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    {doc.generatedAt
+                      ? `Generated at ${dateText(doc.generatedAt)}`
+                      : "Belum di-generate."}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {generated && (
+                      <a
+                        href={`/api/claim-workflow/${id}/submissions/${submission.id}/${doc.key}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
+                      >
+                        Buka PDF
+                      </a>
+                    )}
+                    {canGenerateDocs && (
+                      <button
+                        type="button"
+                        disabled={generating || generatingDocKey !== ""}
+                        onClick={() =>
+                          void generateSubmissionDocument(submission.id, doc.key)
+                        }
+                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                        title={
+                          generated
+                            ? `Re-generate ${doc.title}`
+                            : `Generate ${doc.title}`
+                        }
+                      >
+                        {generating
+                          ? "Generating..."
+                          : generated
+                            ? "Regenerate"
+                            : "Generate"}
+                      </button>
+                    )}
+                    {!generated && !canGenerateDocs && (
+                      <span className="text-[11px] italic text-slate-500">
+                        {!canEditItems
+                          ? "View-only."
+                          : isSubmissionClosed(submission)
+                            ? "Paket sudah closed."
+                            : (submission.itemCount ?? submissionItems.length) === 0
+                              ? "Belum ada item ditugaskan."
+                              : Number(submission.totalClaim || 0) <= 0
+                                ? "Total Claim masih 0."
+                                : "Belum dapat di-generate."}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Items in package */}
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-bold text-white">Item Paket</h4>
+              <p className="mt-1 text-xs text-slate-400">
+                Daftar item klaim yang ditugaskan ke paket ini. Pemindahan
+                antar paket dilakukan lewat dropdown di tabel item utama
+                di bawah.
+              </p>
+            </div>
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              {submissionItems.length} item
+            </span>
+          </div>
+          {submissionItems.length === 0 ? (
+            <p className="mt-3 text-xs italic text-slate-500">
+              Belum ada item ditugaskan ke paket ini.
+            </p>
+          ) : (
+            <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-black/40 text-[11px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">No Surat</th>
+                    <th className="px-3 py-2">Outlet</th>
+                    <th className="px-3 py-2 text-right">DPP</th>
+                    <th className="px-3 py-2 text-right">PPN</th>
+                    <th className="px-3 py-2 text-right">PPH</th>
+                    <th className="px-3 py-2 text-right">Nilai Klaim</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {submissionItems.map((item) => (
+                    <tr key={item.id} className="text-slate-300">
+                      <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
+                        {item.noSurat || "-"}
+                      </td>
+                      <td className="px-3 py-2 text-xs">{item.outlet || "-"}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs tabular-nums">
+                        {rupiah(item.dpp)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs tabular-nums">
+                        {rupiah(item.ppnAmount)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs tabular-nums">
+                        {rupiah(item.pphAmount)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold tabular-nums text-white">
+                        {rupiah(item.nilaiKlaim)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Payment summary read-only */}
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-bold text-white">Pembayaran Paket</h4>
+              <p className="mt-1 text-xs text-slate-400">
+                Ringkasan pembayaran paket. Pencatatan / void pembayaran
+                masih dilakukan di section Pembayaran Principal di bawah.
+              </p>
+            </div>
+            <span
+              className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(submission.status)}`}
+            >
+              {displayClaimStatusLabel(submission.status)}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
+                Total Paid
+              </p>
+              <p className="mt-2 text-sm font-bold text-emerald-200">
+                {rupiah(submission.totalPaid)}
+              </p>
+            </div>
+            <div
+              className={`rounded-xl border p-3 ${remaining > 0 ? "border-amber-500/30 bg-amber-500/5" : "border-emerald-500/30 bg-emerald-500/5"}`}
+            >
+              <p
+                className={`text-[11px] font-semibold uppercase tracking-wider ${remaining > 0 ? "text-amber-300" : "text-emerald-300"}`}
+              >
+                Outstanding
+              </p>
+              <p
+                className={`mt-2 text-sm font-bold ${remaining > 0 ? "text-amber-200" : "text-emerald-200"}`}
+              >
+                {rupiah(remaining)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                Total Claim
+              </p>
+              <p className="mt-2 text-sm font-bold text-white">
+                {rupiah(submission.totalClaim)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Close info read-only */}
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-bold text-white">Close Paket</h4>
+              <p className="mt-1 text-xs text-slate-400">
+                {isSubmissionClosed(submission)
+                  ? "Paket sudah closed."
+                  : "Close paket akan tersedia setelah Total Paid >= Total Claim dan dokumen lengkap. Saat ini close masih dijalankan workflow-level di section Close Workflow di bawah."}
+              </p>
+            </div>
+            {isSubmissionClosed(submission) && (
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-200">
+                Closed
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="w-full space-y-6 pb-12 pt-2">
       <Link href="/claim-workflow" className="text-sm font-semibold text-indigo-300 hover:text-indigo-200">
@@ -872,26 +1673,43 @@ export default function ClaimWorkflowDetailPage() {
 
       <section className="rounded-3xl border border-white/10 bg-[#1a1c23] p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
+          <div className="space-y-2">
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-indigo-300">Claim Workflow Detail</p>
-            <h1 className="mt-3 text-2xl font-black text-white">{workflow.claimWorkflowNo}</h1>
-            <p className="mt-2 text-sm text-slate-400">
-              {workflow.principleName} | OFF {workflow.offNoPengajuan || workflow.offBatchId}
+            <h1 className="text-2xl font-black text-white">{workflow.claimWorkflowNo}</h1>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <span>{workflow.principleName}</span>
+              <span className="text-slate-600">·</span>
+              <span>OFF {workflow.offNoPengajuan || workflow.offBatchId}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
+                {sourceTypeLabel}
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${submissionCount > 1 ? "border-purple-500/30 bg-purple-500/10 text-purple-200" : "border-white/10 bg-white/5 text-slate-300"}`}
+              >
+                {submissionCount} Paket No Claim
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(workflow.status)}`}
+                title={showLegacyNotice ? "Legacy PEKA status — diperlakukan sebagai Submitted to Principal" : undefined}
+              >
+                {displayClaimStatusLabel(workflow.status)}
+              </span>
+            </div>
+            <p className="pt-2 text-[11px] text-slate-500">
+              {hasMultipleSubmissions
+                ? "Workflow ini memiliki beberapa Paket No Claim. Kelola No Claim, dokumen, pembayaran, dan close di masing-masing paket."
+                : "Workflow ini memiliki satu Paket No Claim. Shortcut No Claim header masih bisa dipakai."}
             </p>
-            <p className="mt-2 text-xs text-slate-500">Created: {dateText(workflow.createdAt)}</p>
-            {workflow.submittedToPrincipalAt && (
-              <p className="mt-1 text-xs text-sky-300">
-                Submitted to Principal: {dateText(workflow.submittedToPrincipalAt)}
-              </p>
-            )}
+            <p className="text-[11px] text-slate-500">
+              Created {dateText(workflow.createdAt)}
+              {workflow.submittedToPrincipalAt
+                ? ` · Submitted to Principal ${dateText(workflow.submittedToPrincipalAt)}`
+                : ""}
+            </p>
           </div>
           <div className="flex flex-col items-end gap-3">
-            <span
-              className={`rounded-full border px-3 py-1.5 text-sm font-bold ${statusTone(workflow.status)}`}
-              title={showLegacyNotice ? "Legacy PEKA status — diperlakukan sebagai Submitted to Principal" : undefined}
-            >
-              {displayClaimStatusLabel(workflow.status)}
-            </span>
             {canEditItems && transitions.length > 0 && (
               <div className="flex flex-wrap justify-end gap-2">
                 {transitions.map((action) => {
@@ -915,11 +1733,16 @@ export default function ClaimWorkflowDetailPage() {
             )}
           </div>
         </div>
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          {summary.map(([label, value]) => (
-            <div key={label} className="rounded-xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs font-semibold text-slate-500">{label}</p>
-              <p className="mt-2 whitespace-nowrap text-sm font-bold text-white">{value}</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { key: "totalClaim", label: "Total Claim", value: rupiah(workflow.totalClaim) },
+            { key: "totalPaid", label: "Total Paid", value: rupiah(workflow.totalPaid) },
+            { key: "remainingAmount", label: "Outstanding", value: rupiah(workflow.remainingAmount) },
+            { key: "submissions", label: "Paket No Claim", value: String(submissionCount) },
+          ].map((card) => (
+            <div key={card.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-xs font-semibold text-slate-500">{card.label}</p>
+              <p className="mt-2 whitespace-nowrap text-sm font-bold text-white">{card.value}</p>
             </div>
           ))}
         </div>
@@ -930,257 +1753,490 @@ export default function ClaimWorkflowDetailPage() {
         )}
       </section>
 
+      {/* R7 UX experiment — Workflow Guidance / Langkah Berikutnya */}
+      <section
+        className={`rounded-2xl border p-4 ${getGuidanceClass(workflowGuidance.tone)}`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider opacity-80">
+              Langkah Berikutnya
+            </p>
+            <p className="mt-1 text-sm font-bold">{workflowGuidance.message}</p>
+          </div>
+          {submissions.length > 0 && (
+            <p className="text-[11px] opacity-80">
+              {submissions.filter((s) => isSubmissionClosed(s)).length}/{submissions.length} paket selesai
+            </p>
+          )}
+        </div>
+      </section>
+
       {message && (
         <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
           {message}
         </div>
       )}
 
-      <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="font-bold text-white">No Claim</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              No Claim utama untuk Claim Workflow ini. Saat di-assign, otomatis sync ke semua OFF item terkait.
-            </p>
-            {workflow.noClaim ? (
-              <div className="mt-3 space-y-1">
-                <p className="font-mono text-base font-bold text-emerald-200">
-                  {workflow.noClaim}
-                </p>
-                {workflow.noClaimAssignedAt && (
-                  <p className="text-xs text-slate-500">
-                    Assigned at {dateText(workflow.noClaimAssignedAt)}
-                    {(workflow.noClaimAssignedByName || workflow.noClaimAssignedBy)
-                      ? ` by ${workflow.noClaimAssignedByName || workflow.noClaimAssignedBy}`
-                      : ""}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="mt-3 text-xs text-amber-200">
-                Belum di-assign. Wajib di-assign sebelum Mark Ready.
+      {/* R7 UX experiment — No Claim Container Info.
+          Saat workflow punya >1 paket, sembunyikan editor No Claim
+          workflow-level dan arahkan user ke section paket. */}
+      {hasMultipleSubmissions ? (
+        <section className="rounded-2xl border border-purple-500/20 bg-[#1a1c23] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-bold text-white">No Claim diatur per Paket Klaim</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Workflow ini memiliki beberapa Paket No Claim. Isi atau edit
+                No Claim pada masing-masing paket di section Paket No Claim.
               </p>
-            )}
-          </div>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:max-w-md">
-            {canAssignNoClaim ? (
-              noClaimEditing || !workflow.noClaim ? (
-                <>
-                  <input
-                    type="text"
-                    value={noClaimDraft}
-                    onChange={(event) => {
-                      setNoClaimEditing(true);
-                      setNoClaimDraft(event.target.value);
-                    }}
-                    placeholder="Contoh: 09/SUPER-GCPI/02/2026"
-                    disabled={noClaimSaving}
-                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
-                  />
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {workflow.noClaim && (
-                      <button
-                        type="button"
-                        disabled={noClaimSaving}
-                        onClick={() => {
-                          setNoClaimEditing(false);
-                          setNoClaimDraft(workflow.noClaim || "");
-                        }}
-                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
-                      >
-                        Batal
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={noClaimSaving}
-                      onClick={() => void submitNoClaim()}
-                      className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-                    >
-                      {noClaimSaving ? "Menyimpan..." : workflow.noClaim ? "Update No Claim" : "Assign No Claim"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNoClaimEditing(true);
-                    setNoClaimDraft(workflow.noClaim || "");
-                  }}
-                  className="self-end rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-200 transition hover:bg-indigo-500/20"
-                >
-                  Edit No Claim
-                </button>
-              )
-            ) : (
-              <p className="text-xs italic text-slate-500">
-                View-only. Hanya admin atau claim yang dapat assign / update No Claim.
-              </p>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-indigo-500/20 bg-[#1a1c23] p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="font-bold text-white">Claim Submissions / No Claim Groups</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              Container No Claim. Satu submission = satu No Claim. Item dipindah antar submission lewat dropdown di tabel item.
-            </p>
-            {hasMultipleSubmissions && (
-              <p className="mt-2 text-xs text-amber-200">
-                Workflow ini memiliki {submissionCount} submission. Update No Claim wajib lewat submission, bukan dari section No Claim di atas.
-              </p>
-            )}
-            <p className="mt-2 text-xs text-slate-500">
-              Catatan transisi R7: Dokumen klaim dan pembayaran principal masih berjalan di workflow-level sampai R7c/R7d.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-black/30 text-xs uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-3 py-2">Scope</th>
-                <th className="px-3 py-2">Label</th>
-                <th className="px-3 py-2">No Claim</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2 text-right">Total Claim</th>
-                <th className="px-3 py-2 text-right">Items</th>
-                <th className="px-3 py-2">Dokumen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {submissions.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-3 py-4 text-xs italic text-slate-500">
-                    Belum ada submission. Workflow lama otomatis di-backfill via migration R7a.
-                  </td>
-                </tr>
-              ) : (
-                submissions.map((s) => {
-                  const isClosed = s.status === claimWorkflowStatuses.closed;
-                  const canGenerateDocs = canEditItems && !isClosed && (s.itemCount ?? 0) > 0 && Number(s.totalClaim || 0) > 0;
-                  const docs: Array<{ key: "claim-letter" | "summary" | "receipt"; label: string; path?: string | null }> = [
-                    { key: "claim-letter", label: "Letter", path: s.claimLetterPdfPath },
-                    { key: "summary", label: "Summary", path: s.summaryPdfPath },
-                    { key: "receipt", label: "Kwitansi", path: s.receiptPdfPath },
-                  ];
-                  return (
-                    <tr key={s.id} className="text-slate-300">
-                      <td className="whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide text-indigo-300">
-                        {s.scope}
-                      </td>
-                      <td className="px-3 py-2 text-xs">{s.scopeLabel || "-"}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-emerald-200">{s.noClaim || "-"}</td>
-                      <td className="px-3 py-2 text-xs">{displayClaimStatusLabel(s.status)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{rupiah(s.totalClaim)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs">{s.itemCount ?? 0}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {docs.map((doc) => {
-                            const generating = generatingDocKey === `${s.id}:${doc.key}`;
-                            const generated = Boolean(doc.path);
-                            return (
-                              <span key={doc.key} className="inline-flex items-center gap-1">
-                                {generated && (
-                                  <a
-                                    href={`/api/claim-workflow/${id}/submissions/${s.id}/${doc.key}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-200 transition hover:bg-emerald-500/20"
-                                  >
-                                    {doc.label} PDF
-                                  </a>
-                                )}
-                                {canGenerateDocs && (
-                                  <button
-                                    type="button"
-                                    disabled={generating || generatingDocKey !== ""}
-                                    onClick={() => void generateSubmissionDocument(s.id, doc.key)}
-                                    className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-200 transition hover:bg-indigo-500/20 disabled:opacity-50"
-                                    title={generated ? `Re-generate ${doc.label}` : `Generate ${doc.label}`}
-                                  >
-                                    {generating
-                                      ? "..."
-                                      : generated
-                                        ? `Re ${doc.label}`
-                                        : `Gen ${doc.label}`}
-                                  </button>
-                                )}
-                                {!generated && !canGenerateDocs && (
-                                  <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-500">
-                                    {doc.label} -
-                                  </span>
-                                )}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {editable && (
-          <div className="mt-5 grid gap-3 rounded-xl border border-white/10 bg-black/20 p-4 sm:grid-cols-4">
-            <div className="sm:col-span-1">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Scope</label>
-              <select
-                value={createSubmissionScope}
-                onChange={(event) => setCreateSubmissionScope(event.target.value)}
-                disabled={creatingSubmission}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
-              >
-                {SUBMISSION_SCOPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
             </div>
-            <div className="sm:col-span-1">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Label</label>
-              <input
-                type="text"
-                value={createSubmissionLabel}
-                onChange={(event) => setCreateSubmissionLabel(event.target.value)}
-                placeholder="Mis: Program A / Toko X"
-                disabled={creatingSubmission}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
-              />
-            </div>
-            <div className="sm:col-span-1">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">No Claim (opsional)</label>
-              <input
-                type="text"
-                value={createSubmissionNoClaim}
-                onChange={(event) => setCreateSubmissionNoClaim(event.target.value)}
-                placeholder="Boleh kosong"
-                disabled={creatingSubmission}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
-              />
-            </div>
-            <div className="sm:col-span-1 sm:flex sm:items-end">
+            <div className="flex flex-col items-end gap-2">
+              <span className="rounded-full border border-purple-500/30 bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-purple-200">
+                {submissionCount} Paket No Claim
+              </span>
               <button
                 type="button"
-                disabled={creatingSubmission}
-                onClick={() => void submitCreateSubmission()}
-                className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+                onClick={() => {
+                  if (typeof document !== "undefined") {
+                    document
+                      .getElementById("paket-no-claim-section")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                }}
+                className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-bold text-purple-200 hover:bg-purple-500/20"
               >
-                {creatingSubmission ? "Membuat..." : "Buat Submission"}
+                Lihat Paket No Claim
               </button>
             </div>
           </div>
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-bold text-white">No Claim</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                No Claim utama untuk Claim Workflow ini. Saat di-assign,
+                otomatis sync ke semua OFF item terkait.
+              </p>
+              <p className="mt-1 text-[11px] italic text-slate-500">
+                Shortcut ini mengisi No Claim pada paket klaim utama.
+              </p>
+              {workflow.noClaim ? (
+                <div className="mt-3 space-y-1">
+                  <p className="font-mono text-base font-bold text-emerald-200">
+                    {workflow.noClaim}
+                  </p>
+                  {workflow.noClaimAssignedAt && (
+                    <p className="text-xs text-slate-500">
+                      Assigned at {dateText(workflow.noClaimAssignedAt)}
+                      {(workflow.noClaimAssignedByName || workflow.noClaimAssignedBy)
+                        ? ` by ${workflow.noClaimAssignedByName || workflow.noClaimAssignedBy}`
+                        : ""}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-amber-200">
+                  Belum di-assign. Wajib di-assign sebelum Mark Ready.
+                </p>
+              )}
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:max-w-md">
+              {canAssignNoClaim ? (
+                noClaimEditing || !workflow.noClaim ? (
+                  <>
+                    <input
+                      type="text"
+                      value={noClaimDraft}
+                      onChange={(event) => {
+                        setNoClaimEditing(true);
+                        setNoClaimDraft(event.target.value);
+                      }}
+                      placeholder="Contoh: 09/SUPER-GCPI/02/2026"
+                      disabled={noClaimSaving}
+                      className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
+                    />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {workflow.noClaim && (
+                        <button
+                          type="button"
+                          disabled={noClaimSaving}
+                          onClick={() => {
+                            setNoClaimEditing(false);
+                            setNoClaimDraft(workflow.noClaim || "");
+                          }}
+                          className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
+                        >
+                          Batal
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={noClaimSaving}
+                        onClick={() => void submitNoClaim()}
+                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+                      >
+                        {noClaimSaving ? "Menyimpan..." : workflow.noClaim ? "Update No Claim" : "Assign No Claim"}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNoClaimEditing(true);
+                      setNoClaimDraft(workflow.noClaim || "");
+                    }}
+                    className="self-end rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-200 transition hover:bg-indigo-500/20"
+                  >
+                    Edit No Claim
+                  </button>
+                )
+              ) : (
+                <p className="text-xs italic text-slate-500">
+                  View-only. Hanya admin atau claim yang dapat assign / update No Claim.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section
+        id="paket-no-claim-section"
+        className="rounded-2xl border border-indigo-500/20 bg-[#1a1c23] p-5"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-white">Paket No Claim</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Pilih paket untuk mengelola No Claim, dokumen, payment, dan
+              close. Satu paket = satu No Claim. Item dipindah antar paket
+              lewat dropdown di tabel item utama.
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              Catatan transisi R7: Section "Pembayaran Principal" dan "Close
+              Workflow" di bawah masih berjalan workflow-level untuk legacy /
+              single-submission. Akan dipindah ke per paket di phase berikut.
+            </p>
+          </div>
+          {/* R7 UX experiment — Layout Mode Switcher */}
+          <div className="flex flex-col items-end gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Mode Tampilan
+            </span>
+            <div
+              role="group"
+              aria-label="Mode Tampilan Paket No Claim"
+              className="inline-flex overflow-hidden rounded-lg border border-white/10"
+            >
+              {(
+                [
+                  { value: "master", label: "Master Detail" },
+                  { value: "accordion", label: "Accordion" },
+                ] as Array<{ value: SubmissionLayoutMode; label: string }>
+              ).map((opt) => {
+                const active = submissionLayoutMode === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setSubmissionLayoutMode(opt.value)}
+                    className={`px-3 py-1.5 text-xs font-bold transition ${
+                      active
+                        ? "bg-indigo-600 text-white"
+                        : "bg-transparent text-slate-300 hover:bg-white/5"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Create package form (collapsible) */}
+        {canEditItems && editable && (
+          <div className="mt-4 rounded-xl border border-white/10 bg-black/20">
+            <button
+              type="button"
+              onClick={() => setShowCreateSubmissionForm((v) => !v)}
+              className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-bold text-white"
+              aria-expanded={showCreateSubmissionForm}
+            >
+              <span>+ Buat Paket No Claim Baru</span>
+              <span className="text-xs text-slate-400">
+                {showCreateSubmissionForm ? "Tutup" : "Buka"}
+              </span>
+            </button>
+            {showCreateSubmissionForm && (
+              <div className="border-t border-white/10 p-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Tipe Paket
+                    </label>
+                    <select
+                      value={createSubmissionScope}
+                      onChange={(event) => setCreateSubmissionScope(event.target.value)}
+                      disabled={creatingSubmission}
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+                    >
+                      {SUBMISSION_SCOPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {getScopeHelper(createSubmissionScope)}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Nama Paket
+                    </label>
+                    <input
+                      type="text"
+                      value={createSubmissionLabel}
+                      onChange={(event) => setCreateSubmissionLabel(event.target.value)}
+                      placeholder="Mis. Program Promo KINO #0 / Toko ABC"
+                      disabled={creatingSubmission}
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      No Claim awal (opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={createSubmissionNoClaim}
+                      onChange={(event) => setCreateSubmissionNoClaim(event.target.value)}
+                      placeholder="Boleh kosong"
+                      disabled={creatingSubmission}
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={creatingSubmission}
+                    onClick={() => void submitCreateSubmission()}
+                    className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {creatingSubmission ? "Membuat..." : "Buat Paket"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
         {!canEditItems && (
-          <p className="mt-3 text-xs italic text-slate-500">View-only. Hanya admin atau claim yang dapat membuat atau memindahkan submission.</p>
+          <p className="mt-3 text-xs italic text-slate-500">
+            View-only. Hanya admin atau claim yang dapat membuat atau memindahkan paket.
+          </p>
+        )}
+
+        {/* Submissions content per layout */}
+        {submissions.length === 0 ? (
+          <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-6 text-center">
+            <p className="text-sm font-bold text-white">Belum ada Paket No Claim.</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Buat paket pertama untuk mulai mengelompokkan item klaim.
+            </p>
+          </div>
+        ) : submissionLayoutMode === "master" ? (
+          /* Master Detail Layout */
+          <div className="mt-5 grid gap-4 lg:grid-cols-12">
+            {/* Left: package list */}
+            <div className="space-y-3 lg:col-span-4">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Daftar Paket
+              </p>
+              <ul className="space-y-2" aria-label="Daftar Paket No Claim">
+                {submissions.map((s) => {
+                  const next = getSubmissionNextAction(s);
+                  const docsCount = getSubmissionDocumentsCompletedCount(s);
+                  const remaining = getSubmissionRemainingAmount(s);
+                  const isSelected = selectedSubmissionId === s.id;
+                  const noClaimEmpty = !s.noClaim || !String(s.noClaim).trim();
+                  return (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => setSelectedSubmissionId(s.id)}
+                        className={`w-full rounded-xl border p-3 text-left transition ${
+                          isSelected
+                            ? "border-l-4 border-l-indigo-400 border-r-indigo-500/40 border-y-indigo-500/40 bg-indigo-500/10 ring-1 ring-indigo-500/40"
+                            : "border-white/10 bg-black/20 hover:bg-white/5"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
+                            {getScopeDisplayLabel(s.scope)}
+                          </span>
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(s.status)}`}
+                          >
+                            {displayClaimStatusLabel(s.status)}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm font-bold text-white">
+                          {getSubmissionTitle(s)}
+                        </p>
+                        {noClaimEmpty ? (
+                          <p className="mt-1 text-[11px] font-semibold text-amber-200">
+                            Belum ada No Claim
+                          </p>
+                        ) : (
+                          <p className="mt-1 font-mono text-[11px] text-emerald-200">
+                            {s.noClaim}
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                          <span>{rupiah(s.totalClaim)}</span>
+                          <span className="text-slate-600">·</span>
+                          <span>{s.itemCount ?? 0} item</span>
+                          <span className="text-slate-600">·</span>
+                          <span
+                            className={
+                              docsCount === 3 ? "text-emerald-300" : "text-amber-300"
+                            }
+                          >
+                            Dokumen {docsCount}/3
+                          </span>
+                          {remaining > 0 && (
+                            <>
+                              <span className="text-slate-600">·</span>
+                              <span className="text-amber-300">
+                                Outstanding {rupiah(remaining)}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className="mt-2">
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
+                          >
+                            {next.label}
+                          </span>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            {/* Right: detail panel */}
+            <div className="lg:col-span-8">
+              {selectedSubmission ? (
+                renderSubmissionDetailPanel(selectedSubmission)
+              ) : (
+                <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-center text-sm text-slate-400">
+                  Pilih paket di kiri untuk melihat detailnya.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Accordion Layout */
+          <div className="mt-5 space-y-3">
+            {submissions.map((s) => {
+              const next = getSubmissionNextAction(s);
+              const docsCount = getSubmissionDocumentsCompletedCount(s);
+              const remaining = getSubmissionRemainingAmount(s);
+              const isOpen = openSubmissionIds.includes(s.id);
+              const noClaimEmpty = !s.noClaim || !String(s.noClaim).trim();
+              return (
+                <div
+                  key={s.id}
+                  className="overflow-hidden rounded-xl border border-white/10 bg-black/20"
+                >
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    onClick={() =>
+                      setOpenSubmissionIds((current) =>
+                        current.includes(s.id)
+                          ? current.filter((id) => id !== s.id)
+                          : [...current, s.id],
+                      )
+                    }
+                    className="flex w-full flex-col gap-2 px-4 py-3 text-left transition hover:bg-white/5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
+                          {getScopeDisplayLabel(s.scope)}
+                        </span>
+                        <span className="text-sm font-bold text-white">
+                          {getSubmissionTitle(s)}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(s.status)}`}
+                        >
+                          {displayClaimStatusLabel(s.status)}
+                        </span>
+                      </div>
+                      <span
+                        className="text-xs text-slate-400"
+                        aria-hidden="true"
+                      >
+                        {isOpen ? "▲" : "▼"}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                      {noClaimEmpty ? (
+                        <span className="font-semibold text-amber-200">
+                          Belum ada No Claim
+                        </span>
+                      ) : (
+                        <span className="font-mono text-emerald-200">
+                          {s.noClaim}
+                        </span>
+                      )}
+                      <span className="text-slate-600">·</span>
+                      <span>{rupiah(s.totalClaim)}</span>
+                      <span className="text-slate-600">·</span>
+                      <span
+                        className={
+                          docsCount === 3 ? "text-emerald-300" : "text-amber-300"
+                        }
+                      >
+                        Dokumen {docsCount}/3
+                      </span>
+                      {remaining > 0 && (
+                        <>
+                          <span className="text-slate-600">·</span>
+                          <span className="text-amber-300">
+                            Outstanding {rupiah(remaining)}
+                          </span>
+                        </>
+                      )}
+                      <span className="text-slate-600">·</span>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
+                      >
+                        {next.label}
+                      </span>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="border-t border-white/10 p-4">
+                      {renderSubmissionDetailPanel(s)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </section>
 
