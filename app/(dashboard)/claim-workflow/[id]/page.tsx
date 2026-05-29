@@ -511,6 +511,119 @@ const LIFECYCLE_STAGES: Array<{
   },
 ];
 
+// =============================================================================
+// R7 UX experiment — Shared card render helpers (Single Source of Truth)
+// =============================================================================
+// Master Detail / Accordion / Kartu / Status Board semuanya menampilkan
+// ringkasan paket dengan field yang sama (scope badge, status badge,
+// No Claim, totals, dokumen X/3, outstanding, next action). Helper di
+// bawah dipakai oleh keempat mode supaya kalau bisnis menambah field
+// wajib baru, perubahan cukup di satu tempat.
+//
+// Tetap pure functions yang return JSX agar tidak menyentuh state komponen
+// utama. Caller bertanggung jawab atas wrapper layout (grid/flex/padding).
+
+function SubmissionScopeStatusBadges({
+  submission,
+}: {
+  submission: Submission;
+}) {
+  return (
+    <>
+      <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
+        {getScopeDisplayLabel(submission.scope)}
+      </span>
+      <span
+        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(submission.status)}`}
+      >
+        {displayClaimStatusLabel(submission.status)}
+      </span>
+    </>
+  );
+}
+
+function SubmissionNoClaimLine({
+  submission,
+  className,
+}: {
+  submission: Submission;
+  className?: string;
+}) {
+  const noClaimEmpty =
+    !submission.noClaim || !String(submission.noClaim).trim();
+  if (noClaimEmpty) {
+    return (
+      <p
+        className={`${className ?? ""} font-semibold text-amber-200`.trim()}
+      >
+        Belum ada No Claim
+      </p>
+    );
+  }
+  return (
+    <p className={`${className ?? ""} font-mono text-emerald-200`.trim()}>
+      {submission.noClaim}
+    </p>
+  );
+}
+
+function SubmissionNextActionBadge({
+  submission,
+}: {
+  submission: Submission;
+}) {
+  const next = getSubmissionNextAction(submission);
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
+    >
+      {next.label}
+    </span>
+  );
+}
+
+function SubmissionMetaRow({
+  submission,
+  showItems = true,
+  abbreviated = false,
+}: {
+  submission: Submission;
+  showItems?: boolean;
+  abbreviated?: boolean;
+}) {
+  const docsCount = getSubmissionDocumentsCompletedCount(submission);
+  const remaining = getSubmissionRemainingAmount(submission);
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+      <span>{rupiah(submission.totalClaim)}</span>
+      {showItems && (
+        <>
+          <span className="text-slate-600">·</span>
+          <span>{submission.itemCount ?? 0} item</span>
+        </>
+      )}
+      <span className="text-slate-600">·</span>
+      <span
+        className={
+          docsCount === 3 ? "text-emerald-300" : "text-amber-300"
+        }
+      >
+        {abbreviated ? `Dok ${docsCount}/3` : `Dokumen ${docsCount}/3`}
+      </span>
+      {remaining > 0 && (
+        <>
+          <span className="text-slate-600">·</span>
+          <span className="text-amber-300">
+            {abbreviated
+              ? rupiah(remaining)
+              : `Outstanding ${rupiah(remaining)}`}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ClaimWorkflowDetailPage() {
   const params = useParams<{ id: string }>();
   const id = String(params.id || "");
@@ -2165,11 +2278,7 @@ export default function ClaimWorkflowDetailPage() {
               </p>
               <ul className="space-y-2" aria-label="Daftar Paket No Claim">
                 {submissions.map((s) => {
-                  const next = getSubmissionNextAction(s);
-                  const docsCount = getSubmissionDocumentsCompletedCount(s);
-                  const remaining = getSubmissionRemainingAmount(s);
                   const isSelected = selectedSubmissionId === s.id;
-                  const noClaimEmpty = !s.noClaim || !String(s.noClaim).trim();
                   return (
                     <li key={s.id}>
                       <button
@@ -2183,54 +2292,20 @@ export default function ClaimWorkflowDetailPage() {
                         }`}
                       >
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
-                            {getScopeDisplayLabel(s.scope)}
-                          </span>
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(s.status)}`}
-                          >
-                            {displayClaimStatusLabel(s.status)}
-                          </span>
+                          <SubmissionScopeStatusBadges submission={s} />
                         </div>
                         <p className="mt-2 text-sm font-bold text-white">
                           {getSubmissionTitle(s)}
                         </p>
-                        {noClaimEmpty ? (
-                          <p className="mt-1 text-[11px] font-semibold text-amber-200">
-                            Belum ada No Claim
-                          </p>
-                        ) : (
-                          <p className="mt-1 font-mono text-[11px] text-emerald-200">
-                            {s.noClaim}
-                          </p>
-                        )}
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-                          <span>{rupiah(s.totalClaim)}</span>
-                          <span className="text-slate-600">·</span>
-                          <span>{s.itemCount ?? 0} item</span>
-                          <span className="text-slate-600">·</span>
-                          <span
-                            className={
-                              docsCount === 3 ? "text-emerald-300" : "text-amber-300"
-                            }
-                          >
-                            Dokumen {docsCount}/3
-                          </span>
-                          {remaining > 0 && (
-                            <>
-                              <span className="text-slate-600">·</span>
-                              <span className="text-amber-300">
-                                Outstanding {rupiah(remaining)}
-                              </span>
-                            </>
-                          )}
+                        <SubmissionNoClaimLine
+                          submission={s}
+                          className="mt-1 text-[11px]"
+                        />
+                        <div className="mt-2">
+                          <SubmissionMetaRow submission={s} />
                         </div>
                         <div className="mt-2">
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
-                          >
-                            {next.label}
-                          </span>
+                          <SubmissionNextActionBadge submission={s} />
                         </div>
                       </button>
                     </li>
@@ -2253,11 +2328,7 @@ export default function ClaimWorkflowDetailPage() {
           /* Accordion Layout */
           <div className="mt-5 space-y-3">
             {submissions.map((s) => {
-              const next = getSubmissionNextAction(s);
-              const docsCount = getSubmissionDocumentsCompletedCount(s);
-              const remaining = getSubmissionRemainingAmount(s);
               const isOpen = openSubmissionIds.includes(s.id);
-              const noClaimEmpty = !s.noClaim || !String(s.noClaim).trim();
               return (
                 <div
                   key={s.id}
@@ -2277,16 +2348,9 @@ export default function ClaimWorkflowDetailPage() {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
-                          {getScopeDisplayLabel(s.scope)}
-                        </span>
+                        <SubmissionScopeStatusBadges submission={s} />
                         <span className="text-sm font-bold text-white">
                           {getSubmissionTitle(s)}
-                        </span>
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(s.status)}`}
-                        >
-                          {displayClaimStatusLabel(s.status)}
                         </span>
                       </div>
                       <span
@@ -2296,40 +2360,13 @@ export default function ClaimWorkflowDetailPage() {
                         {isOpen ? "▲" : "▼"}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-                      {noClaimEmpty ? (
-                        <span className="font-semibold text-amber-200">
-                          Belum ada No Claim
-                        </span>
-                      ) : (
-                        <span className="font-mono text-emerald-200">
-                          {s.noClaim}
-                        </span>
-                      )}
-                      <span className="text-slate-600">·</span>
-                      <span>{rupiah(s.totalClaim)}</span>
-                      <span className="text-slate-600">·</span>
-                      <span
-                        className={
-                          docsCount === 3 ? "text-emerald-300" : "text-amber-300"
-                        }
-                      >
-                        Dokumen {docsCount}/3
-                      </span>
-                      {remaining > 0 && (
-                        <>
-                          <span className="text-slate-600">·</span>
-                          <span className="text-amber-300">
-                            Outstanding {rupiah(remaining)}
-                          </span>
-                        </>
-                      )}
-                      <span className="text-slate-600">·</span>
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
-                      >
-                        {next.label}
-                      </span>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                      <SubmissionNoClaimLine
+                        submission={s}
+                        className="text-[11px]"
+                      />
+                      <SubmissionMetaRow submission={s} showItems={false} />
+                      <SubmissionNextActionBadge submission={s} />
                     </div>
                   </button>
                   {isOpen && (
@@ -2348,11 +2385,9 @@ export default function ClaimWorkflowDetailPage() {
           <div className="mt-5 space-y-5">
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {submissions.map((s) => {
-                const next = getSubmissionNextAction(s);
                 const docsCount = getSubmissionDocumentsCompletedCount(s);
                 const remaining = getSubmissionRemainingAmount(s);
                 const isSelected = selectedSubmissionId === s.id;
-                const noClaimEmpty = !s.noClaim || !String(s.noClaim).trim();
                 return (
                   <button
                     key={s.id}
@@ -2366,28 +2401,16 @@ export default function ClaimWorkflowDetailPage() {
                     }`}
                   >
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
-                        {getScopeDisplayLabel(s.scope)}
-                      </span>
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(s.status)}`}
-                      >
-                        {displayClaimStatusLabel(s.status)}
-                      </span>
+                      <SubmissionScopeStatusBadges submission={s} />
                     </div>
                     <div>
                       <p className="text-sm font-bold text-white">
                         {getSubmissionTitle(s)}
                       </p>
-                      {noClaimEmpty ? (
-                        <p className="mt-1 text-[11px] font-semibold text-amber-200">
-                          Belum ada No Claim
-                        </p>
-                      ) : (
-                        <p className="mt-1 font-mono text-[11px] text-emerald-200">
-                          {s.noClaim}
-                        </p>
-                      )}
+                      <SubmissionNoClaimLine
+                        submission={s}
+                        className="mt-1 text-[11px]"
+                      />
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
                       <div>
@@ -2420,11 +2443,7 @@ export default function ClaimWorkflowDetailPage() {
                       </div>
                     </div>
                     <div className="mt-auto flex items-center justify-between gap-2">
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
-                      >
-                        {next.label}
-                      </span>
+                      <SubmissionNextActionBadge submission={s} />
                       <span
                         className={`text-[11px] font-semibold ${isSelected ? "text-indigo-200" : "text-slate-500"}`}
                       >
@@ -2586,12 +2605,7 @@ export default function ClaimWorkflowDetailPage() {
                         </p>
                       ) : (
                         stageSubmissions.map((s) => {
-                          const next = getSubmissionNextAction(s);
-                          const docsCount = getSubmissionDocumentsCompletedCount(s);
-                          const remaining = getSubmissionRemainingAmount(s);
                           const isSelected = selectedSubmissionId === s.id;
-                          const noClaimEmpty =
-                            !s.noClaim || !String(s.noClaim).trim();
                           return (
                             <button
                               key={s.id}
@@ -2607,42 +2621,19 @@ export default function ClaimWorkflowDetailPage() {
                               <p className="text-sm font-bold text-white">
                                 {getSubmissionTitle(s)}
                               </p>
-                              {noClaimEmpty ? (
-                                <p className="mt-1 text-[11px] font-semibold text-amber-200">
-                                  Belum ada No Claim
-                                </p>
-                              ) : (
-                                <p className="mt-1 font-mono text-[11px] text-emerald-200">
-                                  {s.noClaim}
-                                </p>
-                              )}
-                              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
-                                <span>{rupiah(s.totalClaim)}</span>
-                                <span className="text-slate-600">·</span>
-                                <span
-                                  className={
-                                    docsCount === 3
-                                      ? "text-emerald-300"
-                                      : "text-amber-300"
-                                  }
-                                >
-                                  Dok {docsCount}/3
-                                </span>
-                                {remaining > 0 && (
-                                  <>
-                                    <span className="text-slate-600">·</span>
-                                    <span className="text-amber-300">
-                                      {rupiah(remaining)}
-                                    </span>
-                                  </>
-                                )}
+                              <SubmissionNoClaimLine
+                                submission={s}
+                                className="mt-1 text-[11px]"
+                              />
+                              <div className="mt-2">
+                                <SubmissionMetaRow
+                                  submission={s}
+                                  showItems={false}
+                                  abbreviated
+                                />
                               </div>
                               <div className="mt-2">
-                                <span
-                                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
-                                >
-                                  {next.label}
-                                </span>
+                                <SubmissionNextActionBadge submission={s} />
                               </div>
                             </button>
                           );
