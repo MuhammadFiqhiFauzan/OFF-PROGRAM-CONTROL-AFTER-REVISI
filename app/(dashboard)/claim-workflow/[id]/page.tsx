@@ -546,6 +546,21 @@ type SubmissionLayoutMode =
   | "focus"
   | "board";
 
+// R7i — primary toggle: "list" (default Daftar Claim, internal `excel`)
+// vs "advanced" (semua mode lama). Secondary toggle hanya muncul saat
+// primary = advanced.
+const ADVANCED_SUBMODES: ReadonlyArray<SubmissionLayoutMode> = [
+  "master",
+  "accordion",
+  "card",
+  "focus",
+  "board",
+];
+
+function isAdvancedSubmode(mode: SubmissionLayoutMode): boolean {
+  return (ADVANCED_SUBMODES as ReadonlyArray<string>).includes(mode);
+}
+
 const SUBMISSION_LAYOUT_OPTIONS: Array<{
   value: SubmissionLayoutMode;
   label: string;
@@ -553,18 +568,18 @@ const SUBMISSION_LAYOUT_OPTIONS: Array<{
 }> = [
   {
     value: "excel",
-    label: "Excel Input",
-    hint: "Tabel mirip BASE Godrej. Default untuk staff.",
+    label: "Daftar Claim",
+    hint: "Tabel mirip sheet BASE Excel. Default untuk staff.",
   },
   {
     value: "master",
     label: "Master Detail",
-    hint: "Daftar paket di kiri, detail di kanan.",
+    hint: "Daftar No Claim di kiri, detail di kanan.",
   },
   {
     value: "accordion",
     label: "Accordion",
-    hint: "Buka tutup paket satu per satu.",
+    hint: "Buka tutup detail No Claim satu per satu.",
   },
   {
     value: "card",
@@ -574,12 +589,12 @@ const SUBMISSION_LAYOUT_OPTIONS: Array<{
   {
     value: "focus",
     label: "Fokus",
-    hint: "Satu paket per layar dengan navigasi sebelumnya/berikutnya.",
+    hint: "Satu detail No Claim per layar dengan navigasi.",
   },
   {
     value: "board",
     label: "Status Board",
-    hint: "Paket dikelompokkan per tahap.",
+    hint: "Detail No Claim dikelompokkan per tahap.",
   },
 ];
 
@@ -1657,7 +1672,7 @@ export default function ClaimWorkflowDetailPage() {
       }
       if (!submission) {
         toast.error(
-          "Item belum punya Paket No Claim. Klik 'Buat Paket per Baris / Item' di toolbar.",
+          "Baris ini belum siap diberi No Claim. Klik 'Siapkan Baris Claim' di toolbar.",
         );
         return;
       }
@@ -2527,7 +2542,7 @@ export default function ClaimWorkflowDetailPage() {
               <span
                 className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${submissionCount > 1 ? "border-purple-500/30 bg-purple-500/10 text-purple-200" : "border-white/10 bg-white/5 text-slate-300"}`}
               >
-                {submissionCount} Paket No Claim
+                {submissionCount} No Claim
               </span>
               <span
                 className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(workflow.status)}`}
@@ -2538,8 +2553,8 @@ export default function ClaimWorkflowDetailPage() {
             </div>
             <p className="pt-2 text-[11px] text-slate-500">
               {hasMultipleSubmissions
-                ? "Workflow ini memiliki beberapa Paket No Claim. Kelola No Claim, dokumen, pembayaran, dan close di masing-masing paket."
-                : "Workflow ini memiliki satu Paket No Claim. Shortcut No Claim header masih bisa dipakai."}
+                ? "Setiap baris claim dapat memiliki No Claim sendiri."
+                : "Isi No Claim dan nilai klaim seperti di Excel BASE."}
             </p>
             <p className="text-[11px] text-slate-500">
               Created {dateText(workflow.createdAt)}
@@ -2577,7 +2592,7 @@ export default function ClaimWorkflowDetailPage() {
             { key: "totalClaim", label: "Total Claim", value: rupiah(workflow.totalClaim) },
             { key: "totalPaid", label: "Total Paid", value: rupiah(workflow.totalPaid) },
             { key: "remainingAmount", label: "Outstanding", value: rupiah(workflow.remainingAmount) },
-            { key: "submissions", label: "Paket No Claim", value: String(submissionCount) },
+            { key: "submissions", label: "Jumlah No Claim", value: String(submissionCount) },
           ].map((card) => (
             <div key={card.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
               <p className="text-xs font-semibold text-slate-500">{card.label}</p>
@@ -2618,21 +2633,22 @@ export default function ClaimWorkflowDetailPage() {
       )}
 
       {/* R7 UX experiment — No Claim Container Info.
-          Saat workflow punya >1 paket, sembunyikan editor No Claim
-          workflow-level dan arahkan user ke section paket. */}
+          Saat workflow punya >1 No Claim, sembunyikan editor No Claim
+          workflow-level dan arahkan user ke tabel Daftar Claim. */}
       {hasMultipleSubmissions ? (
         <section className="rounded-2xl border border-purple-500/20 bg-[#1a1c23] p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h2 className="font-bold text-white">No Claim diatur per Paket Klaim</h2>
+              <h2 className="font-bold text-white">No Claim per Baris</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Workflow ini memiliki beberapa Paket No Claim. Isi atau edit
-                No Claim pada masing-masing paket di section Paket No Claim.
+                Workflow ini memiliki beberapa No Claim. Isi No Claim
+                langsung pada baris claim di tabel di bawah, seperti sheet
+                BASE Excel.
               </p>
             </div>
             <div className="flex flex-col items-end gap-2">
               <span className="rounded-full border border-purple-500/30 bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-purple-200">
-                {submissionCount} Paket No Claim
+                {submissionCount} No Claim
               </span>
               <button
                 type="button"
@@ -2645,7 +2661,7 @@ export default function ClaimWorkflowDetailPage() {
                 }}
                 className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-bold text-purple-200 hover:bg-purple-500/20"
               >
-                Lihat Paket No Claim
+                Buka Daftar Claim
               </button>
             </div>
           </div>
@@ -2749,37 +2765,49 @@ export default function ClaimWorkflowDetailPage() {
       >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-bold text-white">Paket No Claim</h2>
+            <h2 className="font-bold text-white">Daftar Claim</h2>
             <p className="mt-1 text-sm text-slate-400">
-              Pilih paket untuk mengelola No Claim, dokumen, payment, dan
-              close. Satu paket = satu No Claim. Item dipindah antar paket
-              lewat dropdown di tabel item utama.
+              Input No Claim, DPP, PPN, dan PPH seperti sheet BASE.
             </p>
-            <p className="mt-2 text-xs text-slate-500">
-              Catatan transisi R7: Section "Pembayaran Principal" dan "Close
-              Workflow" di bawah masih berjalan workflow-level untuk legacy /
-              single-submission. Akan dipindah ke per paket di phase berikut.
+            <p className="mt-2 text-[11px] italic text-slate-500">
+              Satu baris claim dapat menjadi satu No Claim.
             </p>
           </div>
-          {/* R7 UX experiment — Layout Mode Switcher */}
+          {/* R7i — Primary toggle: [Daftar Claim] [Advanced]. Submode lama
+              (Master / Accordion / Kartu / Fokus / Status Board) disimpan
+              di balik Advanced supaya staff default tidak melihat 6 tombol
+              sekaligus. */}
           <div className="flex flex-col items-end gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
               Mode Tampilan
             </span>
             <div
               role="group"
-              aria-label="Mode Tampilan Paket No Claim"
+              aria-label="Mode Tampilan Daftar Claim"
               className="inline-flex flex-wrap gap-1 rounded-lg border border-white/10 p-1"
             >
-              {SUBMISSION_LAYOUT_OPTIONS.map((opt) => {
-                const active = submissionLayoutMode === opt.value;
+              {(
+                [
+                  { value: "excel" as SubmissionLayoutMode, label: "Daftar Claim" },
+                  { value: "master" as SubmissionLayoutMode, label: "Advanced" },
+                ]
+              ).map((opt) => {
+                const active =
+                  opt.value === "excel"
+                    ? submissionLayoutMode === "excel"
+                    : isAdvancedSubmode(submissionLayoutMode);
                 return (
                   <button
                     key={opt.value}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => setSubmissionLayoutMode(opt.value)}
-                    title={opt.hint}
+                    onClick={() => {
+                      if (opt.value === "excel") {
+                        setSubmissionLayoutMode("excel");
+                      } else if (!isAdvancedSubmode(submissionLayoutMode)) {
+                        setSubmissionLayoutMode("master");
+                      }
+                    }}
                     className={`rounded-md px-3 py-1 text-xs font-bold transition ${
                       active
                         ? "bg-indigo-600 text-white"
@@ -2791,128 +2819,210 @@ export default function ClaimWorkflowDetailPage() {
                 );
               })}
             </div>
-            <span className="max-w-[220px] text-right text-[11px] italic text-slate-500">
-              {SUBMISSION_LAYOUT_OPTIONS.find(
-                (opt) => opt.value === submissionLayoutMode,
-              )?.hint || ""}
-            </span>
+            {isAdvancedSubmode(submissionLayoutMode) && (
+              <div
+                role="group"
+                aria-label="Sub-mode Advanced"
+                className="inline-flex flex-wrap gap-1 rounded-lg border border-white/10 p-1"
+              >
+                {SUBMISSION_LAYOUT_OPTIONS.filter(
+                  (opt) => opt.value !== "excel",
+                ).map((opt) => {
+                  const active = submissionLayoutMode === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setSubmissionLayoutMode(opt.value)}
+                      title={opt.hint}
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-semibold transition ${
+                        active
+                          ? "bg-indigo-500 text-white"
+                          : "bg-transparent text-slate-400 hover:bg-white/5"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {isAdvancedSubmode(submissionLayoutMode) && (
+              <span className="max-w-[260px] text-right text-[11px] italic text-slate-500">
+                Advanced: gunakan hanya jika perlu menggabungkan/memecah baris
+                claim atau mengelola detail dokumen, payment, dan close.
+              </span>
+            )}
           </div>
         </div>
 
-        {/* R7g — Buat Paket per Baris / Item */}
-        {canEditItems && editable && (
-          <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+        {/* R7i — Compact "Siapkan Baris Claim" banner.
+            Hanya tampil di mode Daftar Claim (excel). Mengganti card R7g
+            "Buat Paket per Baris / Item" yang terlalu teknis. Tetap
+            memanggil endpoint from-items dengan mode all_unassigned. */}
+        {submissionLayoutMode === "excel" && canEditItems && editable && (() => {
+          const itemsWithoutSubmission = items.filter(
+            (it) => !it.claimSubmissionId,
+          );
+          const itemsInPerItem = items.filter((it) => {
+            const sub = submissions.find((s) => s.id === it.claimSubmissionId);
+            return sub?.scope === "per_item";
+          });
+          const allReady =
+            items.length > 0 &&
+            itemsWithoutSubmission.length === 0 &&
+            itemsInPerItem.length === items.length;
+          if (items.length === 0) return null;
+          if (allReady) {
+            return (
+              <p className="mt-3 text-[11px] italic text-emerald-300">
+                Semua baris claim sudah siap diberi No Claim.
+              </p>
+            );
+          }
+          return (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
               <div>
-                <p className="text-sm font-bold text-white">
-                  Buat Paket per Baris / Item
+                <p className="text-sm font-semibold text-amber-100">
+                  Ada baris claim yang belum siap diberi No Claim.
                 </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  Cocok jika ingin mengikuti Excel BASE: satu baris item menjadi
-                  satu No Claim. Paket lama tidak dihapus dan No Claim diisi
-                  setelah paket dibuat.
+                <p className="text-[11px] text-slate-400">
+                  Klik untuk menyiapkan setiap baris claim sebagai entri
+                  terpisah dengan No Claim sendiri.
                 </p>
               </div>
               <button
                 type="button"
-                disabled={creatingPerItem || items.length === 0}
+                disabled={creatingPerItem}
                 onClick={() => void submitCreatePerItem()}
-                className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
-                title={
-                  items.length === 0
-                    ? "Workflow belum memiliki item klaim."
-                    : undefined
-                }
+                className="rounded-lg bg-amber-500/80 px-3 py-2 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-50"
               >
-                {creatingPerItem
-                  ? "Memproses..."
-                  : "Buat Paket dari Item yang Belum Dipaketkan"}
+                {creatingPerItem ? "Memproses..." : "Siapkan Baris Claim"}
               </button>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
-        {/* Create package form (collapsible) */}
-        {canEditItems && editable && (
-          <div className="mt-4 rounded-xl border border-white/10 bg-black/20">
-            <button
-              type="button"
-              onClick={() => setShowCreateSubmissionForm((v) => !v)}
-              className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-bold text-white"
-              aria-expanded={showCreateSubmissionForm}
-            >
-              <span>+ Buat Paket No Claim Baru</span>
-              <span className="text-xs text-slate-400">
-                {showCreateSubmissionForm ? "Tutup" : "Buka"}
-              </span>
-            </button>
-            {showCreateSubmissionForm && (
-              <div className="border-t border-white/10 p-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      Tipe Paket
-                    </label>
-                    <select
-                      value={createSubmissionScope}
-                      onChange={(event) => setCreateSubmissionScope(event.target.value)}
-                      disabled={creatingSubmission}
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
-                    >
-                      {SUBMISSION_SCOPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {getScopeHelper(createSubmissionScope)}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      Nama Paket
-                    </label>
-                    <input
-                      type="text"
-                      value={createSubmissionLabel}
-                      onChange={(event) => setCreateSubmissionLabel(event.target.value)}
-                      placeholder="Mis. Program Promo KINO #0 / Toko ABC"
-                      disabled={creatingSubmission}
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      No Claim awal (opsional)
-                    </label>
-                    <input
-                      type="text"
-                      value={createSubmissionNoClaim}
-                      onChange={(event) => setCreateSubmissionNoClaim(event.target.value)}
-                      placeholder="Boleh kosong"
-                      disabled={creatingSubmission}
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
-                    />
-                  </div>
+        {/* R7i — Advanced-only: card "Buat Paket per Baris / Item" + form
+            "Buat Kelompok Claim Manual". Disembunyikan dari default supaya
+            staff tidak terpapar konsep paket. */}
+        {isAdvancedSubmode(submissionLayoutMode) && canEditItems && editable && (
+          <>
+            <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-bold text-white">
+                    Siapkan Baris Claim
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Membuat satu entri No Claim untuk setiap baris claim yang
+                    belum dipaketkan. Aman dijalankan berkali-kali; baris yang
+                    sudah siap akan di-skip.
+                  </p>
                 </div>
-                <div className="mt-3 flex justify-end">
-                  <button
-                    type="button"
-                    disabled={creatingSubmission}
-                    onClick={() => void submitCreateSubmission()}
-                    className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
-                  >
-                    {creatingSubmission ? "Membuat..." : "Buat Paket"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  disabled={creatingPerItem || items.length === 0}
+                  onClick={() => void submitCreatePerItem()}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                  title={
+                    items.length === 0
+                      ? "Workflow belum memiliki item klaim."
+                      : undefined
+                  }
+                >
+                  {creatingPerItem ? "Memproses..." : "Siapkan Baris Claim"}
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20">
+              <button
+                type="button"
+                onClick={() => setShowCreateSubmissionForm((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-bold text-white"
+                aria-expanded={showCreateSubmissionForm}
+              >
+                <span>+ Buat Kelompok Claim Manual</span>
+                <span className="text-xs text-slate-400">
+                  {showCreateSubmissionForm ? "Tutup" : "Buka"}
+                </span>
+              </button>
+              {showCreateSubmissionForm && (
+                <div className="border-t border-white/10 p-4">
+                  <p className="mb-3 text-[11px] italic text-slate-500">
+                    Hanya untuk admin/claim. Pakai ini bila ingin
+                    menggabungkan beberapa baris claim ke dalam satu No Claim
+                    secara manual.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        Tipe Kelompok
+                      </label>
+                      <select
+                        value={createSubmissionScope}
+                        onChange={(event) => setCreateSubmissionScope(event.target.value)}
+                        disabled={creatingSubmission}
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+                      >
+                        {SUBMISSION_SCOPE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {getScopeHelper(createSubmissionScope)}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        Nama Kelompok
+                      </label>
+                      <input
+                        type="text"
+                        value={createSubmissionLabel}
+                        onChange={(event) => setCreateSubmissionLabel(event.target.value)}
+                        placeholder="Mis. Program Promo KINO / Toko ABC"
+                        disabled={creatingSubmission}
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        No Claim awal (opsional)
+                      </label>
+                      <input
+                        type="text"
+                        value={createSubmissionNoClaim}
+                        onChange={(event) => setCreateSubmissionNoClaim(event.target.value)}
+                        placeholder="Boleh kosong"
+                        disabled={creatingSubmission}
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={creatingSubmission}
+                      onClick={() => void submitCreateSubmission()}
+                      className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                    >
+                      {creatingSubmission ? "Membuat..." : "Buat Kelompok"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
         )}
         {!canEditItems && (
           <p className="mt-3 text-xs italic text-slate-500">
-            View-only. Hanya admin atau claim yang dapat membuat atau memindahkan paket.
+            View-only. Hanya admin atau claim yang dapat menyiapkan atau
+            mengubah baris claim.
           </p>
         )}
 
@@ -3047,7 +3157,7 @@ export default function ClaimWorkflowDetailPage() {
                         >
                           {creatingPerItem
                             ? "Memproses..."
-                            : "Buat Paket per Baris / Item"}
+                            : "Siapkan Baris Claim"}
                         </button>
                       )}
                       <button
@@ -3087,8 +3197,8 @@ export default function ClaimWorkflowDetailPage() {
                           <th className="px-3 py-2 text-right font-semibold">PPH %</th>
                           <th className="px-3 py-2 text-right font-semibold">PPH Value</th>
                           <th className="px-3 py-2 text-right font-semibold">Nilai Klaim</th>
-                          <th className="px-3 py-2 font-semibold">No.2</th>
-                          <th className="px-3 py-2 font-semibold">Bulan</th>
+                          <th className="px-3 py-2 font-semibold">No. Urut</th>
+                          <th className="px-3 py-2 font-semibold">Bulan Claim</th>
                           <th className="px-3 py-2 font-semibold">Dokumen</th>
                           <th className="px-3 py-2 text-right font-semibold">Paid</th>
                           <th className="px-3 py-2 text-right font-semibold">Outstanding</th>
@@ -3189,7 +3299,7 @@ export default function ClaimWorkflowDetailPage() {
                                   )
                                 ) : (
                                   <span className="text-[11px] italic text-amber-300">
-                                    Belum punya paket
+                                    Belum siap
                                   </span>
                                 )}
                               </td>
@@ -3382,9 +3492,9 @@ export default function ClaimWorkflowDetailPage() {
                                         setSubmissionLayoutMode("master");
                                       }}
                                       className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-slate-200 hover:bg-white/10"
-                                      title="Buka Master Detail untuk paket ini"
+                                      title="Buka Advanced untuk mengelola dokumen, payment, dan close"
                                     >
-                                      Kelola Paket
+                                      Kelola Detail
                                     </button>
                                   )}
                                 </div>
@@ -3401,7 +3511,7 @@ export default function ClaimWorkflowDetailPage() {
           })()
         ) : submissions.length === 0 ? (
           <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-6 text-center">
-            <p className="text-sm font-bold text-white">Belum ada Paket No Claim.</p>
+            <p className="text-sm font-bold text-white">Belum ada No Claim.</p>
             <p className="mt-1 text-xs text-slate-400">
               Buat paket pertama untuk mulai mengelompokkan item klaim.
             </p>
@@ -3414,7 +3524,7 @@ export default function ClaimWorkflowDetailPage() {
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 Daftar Paket
               </p>
-              <ul className="space-y-2" aria-label="Daftar Paket No Claim">
+              <ul className="space-y-2" aria-label="Daftar No Claim">
                 {submissions.map((s) => {
                   const isSelected = selectedSubmissionId === s.id;
                   return (
@@ -3457,7 +3567,7 @@ export default function ClaimWorkflowDetailPage() {
                 renderSubmissionDetailPanel(selectedSubmission)
               ) : (
                 <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-center text-sm text-slate-400">
-                  Pilih paket di kiri untuk melihat detailnya.
+                  Pilih No Claim di kiri untuk melihat detailnya.
                 </div>
               )}
             </div>
@@ -3595,7 +3705,7 @@ export default function ClaimWorkflowDetailPage() {
             {selectedSubmission ? (
               <div className="rounded-2xl border border-indigo-500/20 bg-black/20 p-5">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
-                  Detail Paket Terpilih
+                  Detail No Claim Terpilih
                 </p>
                 <div className="mt-3">
                   {renderSubmissionDetailPanel(selectedSubmission)}
@@ -3665,7 +3775,7 @@ export default function ClaimWorkflowDetailPage() {
                           setSelectedSubmissionId(event.target.value)
                         }
                         className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white outline-none focus:border-indigo-500/60"
-                        aria-label="Pilih paket"
+                        aria-label="Pilih No Claim"
                       >
                         {submissions.map((s, idx) => (
                           <option key={s.id} value={s.id}>
@@ -3785,7 +3895,7 @@ export default function ClaimWorkflowDetailPage() {
             {selectedSubmission ? (
               <div className="rounded-2xl border border-indigo-500/20 bg-black/20 p-5">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
-                  Detail Paket Terpilih
+                  Detail No Claim Terpilih
                 </p>
                 <div className="mt-3">
                   {renderSubmissionDetailPanel(selectedSubmission)}
@@ -3801,6 +3911,14 @@ export default function ClaimWorkflowDetailPage() {
         )}
       </section>
 
+      {/* R7i — Workflow-level Document section.
+          Untuk multi-submission, dokumen sekarang dikelola per baris claim
+          (klik "Kelola Detail" di tabel Daftar Claim atau pakai Advanced).
+          Section workflow-level ini berisi tombol generate yang ditolak
+          backend untuk multi-submission, jadi sembunyikan dari default
+          view (Daftar Claim). Tetap tampilkan saat Advanced atau saat
+          single-submission. */}
+      {(submissionLayoutMode !== "excel" || !hasMultipleSubmissions) && (
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -3810,7 +3928,9 @@ export default function ClaimWorkflowDetailPage() {
             </p>
             {hasMultipleSubmissions && (
               <p className="mt-2 text-xs text-amber-200">
-                Workflow memiliki {submissionCount} submission. Generate dokumen lewat tombol per submission di section "Claim Submissions / No Claim Groups". Tombol di section ini menolak request multi-submission (`MULTI_SUBMISSION_*_ROUTE_DISABLED`).
+                Workflow memiliki beberapa No Claim. Dokumen dibuat per
+                No Claim. Klik "Kelola Detail" pada baris claim, atau gunakan
+                Advanced untuk generate per No Claim.
               </p>
             )}
           </div>
@@ -3960,6 +4080,7 @@ export default function ClaimWorkflowDetailPage() {
           </p>
         )}
       </section>
+      )}
 
       <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23] shadow-lg shadow-black/20">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4">

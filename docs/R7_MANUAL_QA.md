@@ -183,10 +183,37 @@ Save tetap lewat PATCH item + PATCH submission existing.
 | I12 | Filter "Belum No Claim" → menampilkan hanya baris dengan submission.noClaim kosong. | Sesuai. |
 | I13 | Filter "Outstanding" → menampilkan baris submission yang `remainingAmount > 0`. | Sesuai. |
 | I14 | Search `OUTLET-X` → tabel di-filter menurut substring case-insensitive (No Surat / Outlet / Perihal / No Claim). | Sesuai. |
-| I15 | Klik tombol **Kelola Paket** di kolom Aksi salah satu row dengan submission. | Mode beralih ke Master Detail. `selectedSubmissionId` = submissionId row. |
+| I15 | Klik tombol **Kelola Detail** di kolom Aksi salah satu row dengan submission. | Mode beralih ke Advanced (Master Detail). `selectedSubmissionId` = submissionId row. |
 | I16 | Workflow status bukan Draft/Need Revision: input row read-only, tombol Simpan tidak tampil. | Sesuai. |
-| I17 | Staff (`claim_workflow.view` only): tidak ada input edit DPP/PPN/PPH/No Claim/No.2/Bulan. Tombol "Buat Paket per Baris / Item" tidak tampil. | Sesuai (`canEditItems` false). |
+| I17 | Staff (`claim_workflow.view` only): tidak ada input edit DPP/PPN/PPH/No Claim/No.2/Bulan. Tombol "Siapkan Baris Claim" tidak tampil. | Sesuai (`canEditItems` false). |
 | I18 | `node scripts/test-r7h-excel-input-mode.mjs` | 29 PASS, 0 FAIL. |
+
+---
+
+## Section J — R7i Staff Excel Mode Simplification
+
+R7i hanya menyederhanakan presentasi UI. Tidak ada endpoint baru, schema
+tidak berubah, regression R7c/R7d/R7e/R7g/R7h harus tetap hijau.
+
+| # | Step | Expected |
+|---|------|----------|
+| J1 | Buka detail Claim Workflow di mode default. | Heading section utama: **"Daftar Claim"**. Subtitle: "Input No Claim, DPP, PPN, dan PPH seperti sheet BASE." |
+| J2 | Switcher Mode Tampilan. | Hanya 2 tombol primer: `[Daftar Claim] [Advanced]`. Default Daftar Claim aktif. |
+| J3 | Klik Advanced. | Submode kecil muncul: Master Detail / Accordion / Kartu / Fokus / Status Board. Caption "Advanced: gunakan hanya jika perlu menggabungkan/memecah baris claim atau mengelola detail dokumen, payment, dan close." |
+| J4 | Reload halaman. | localStorage `claimWorkflowSubmissionLayoutMode` mempertahankan pilihan. Nilai legacy `master`/`accordion`/`card`/`focus`/`board` masuk ke Advanced. Nilai `excel` masuk ke Daftar Claim. |
+| J5 | Mode Daftar Claim, ada item belum dipaketkan. | Banner kompak amber: "Ada baris claim yang belum siap diberi No Claim." + tombol **Siapkan Baris Claim**. Tidak ada form "Buat Paket No Claim Baru" / "Tipe Paket". |
+| J6 | Klik **Siapkan Baris Claim** di banner. | POST `/[id]/submissions/from-items` mode `all_unassigned`. Toast sukses. Banner berubah jadi "Semua baris claim sudah siap diberi No Claim." setelah reload. |
+| J7 | Mode Daftar Claim, semua item sudah `per_item`. | Hanya ada baris kecil "Semua baris claim sudah siap diberi No Claim." di bawah switcher. Tidak ada banner amber. |
+| J8 | Mode Daftar Claim, workflow tanpa item. | Tidak ada banner. Tabel menampilkan empty state. |
+| J9 | Mode Advanced. | Card "Siapkan Baris Claim" + section collapsible "+ Buat Kelompok Claim Manual" (sebelumnya "Buat Paket No Claim Baru") tampil. Form berisi Tipe Kelompok / Nama Kelompok / No Claim awal. Button "Buat Kelompok". |
+| J10 | Header workflow. | Badge `{N} No Claim` (bukan "Paket No Claim"). Summary card "Jumlah No Claim". Helper text adaptive: multi → "Setiap baris claim dapat memiliki No Claim sendiri.", single → "Isi No Claim dan nilai klaim seperti di Excel BASE." |
+| J11 | No Claim container info multi-submission. | Heading "No Claim per Baris". Tombol "Buka Daftar Claim" scroll ke section utama. |
+| J12 | Tabel kolom Excel. | Header: `No. Urut` (bukan "No.2"), `Bulan Claim` (bukan "Bulan"). Aksi per row: tombol "Kelola Detail" (bukan "Kelola Paket"). |
+| J13 | Workflow multi-submission, mode Daftar Claim. | Section workflow-level "Dokumen Klaim" disembunyikan dari default view (cuma `Pembayaran Principal` + `Close Workflow` + `Items` + `Audit` yang tetap tampil). |
+| J14 | Workflow multi-submission, mode Advanced. | Section "Dokumen Klaim" workflow-level kembali muncul dengan helper amber: "Workflow memiliki beberapa No Claim. Dokumen dibuat per No Claim. Klik 'Kelola Detail' pada baris claim, atau gunakan Advanced untuk generate per No Claim." |
+| J15 | Workflow single-submission. | Section workflow-level "Dokumen Klaim" tetap muncul di mode Daftar Claim maupun Advanced. |
+| J16 | Master Detail panel (Advanced). | Empty state "Belum ada No Claim." (bukan "Paket No Claim"). Detail panel: "Detail No Claim Terpilih". Aria label list: "Daftar No Claim". |
+| J17 | Regression: `node scripts/test-r7c-documents.mjs`, `r7d-submission-payments`, `r7e-close-reports`, `r7g-excel-no-claim`, `r7h-excel-input-mode`. | Semua 0 FAIL. |
 
 ---
 
@@ -203,5 +230,6 @@ Save tetap lewat PATCH item + PATCH submission existing.
 | G. RBAC | | |
 | H. R7g Excel-style No Claim + Per Item | | |
 | I. R7h Excel BASE Input Mode | | |
+| J. R7i Staff Excel Mode Simplification | | |
 
 QA dijalankan oleh: ___________________  Tanggal: __________

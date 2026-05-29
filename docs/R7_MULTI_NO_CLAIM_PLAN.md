@@ -60,6 +60,7 @@ mulai R7b ke depan.
 | R7f   | Direct kwitansi / manual source. Butuh table rebuild SQLite (`off_batch_id` → nullable). **Deferred** sampai backup penuh + persetujuan bisnis. | Deferred |
 | R7g   | Excel-style No Claim generator (pola Godrej `seq/SUPER-GCPI/MM/YYYY`) + scope `per_item` + endpoint `POST /[id]/submissions/from-items`. Tidak menyentuh schema; default month/year pakai zona `Asia/Makassar`. | DONE     |
 | R7h   | Excel BASE Input Mode UI: tabel mirip sheet BASE Godrej dengan inline edit DPP/PPN%/PPH%, kolom No.2/Bulan, dan generate No Claim per row. Default mode tampilan jadi `excel`. Reuse PATCH item + PATCH submission existing; tidak ada API baru. | DONE     |
+| R7i   | Staff Excel Mode simplification: switcher disederhanakan jadi `[Daftar Claim] [Advanced]` dengan submode lama tersembunyi di Advanced. Istilah "Paket" diganti "No Claim/Baris Claim" di UI default. Form "Buat Paket" + workflow-level Document section disembunyikan dari default Daftar Claim untuk multi-submission. | DONE     |
 
 Semua phase di atas additive. Tidak ada kolom dihapus / di-rename di
 R7a-R7e. Tabel `claim_peka_report` / status PEKA tetap retired (lihat
@@ -608,6 +609,112 @@ Detail untuk mengelola dokumen/payment/close per paket.
   (PPN > 100, DPP < 0).
 
 Cleanup memakai prefix `R7H-TEST-`.
+
+---
+
+## Phase R7i — Staff Excel Mode simplification (DONE)
+
+R7i hanya menyentuh frontend `app/(dashboard)/claim-workflow/[id]/page.tsx`
+dan dokumentasi. Tidak ada endpoint baru, schema tetap, dan semua aksi
+backend (R7b/R7c/R7d/R7e/R7g/R7h) dipertahankan.
+
+### Tujuan
+
+Menyederhanakan halaman detail Claim Workflow agar staff merasa
+mengisi sheet BASE Excel, bukan mengelola "Paket / Submission". Konsep
+internal R7 (`claim_submission`, `claim_workflow_item`) tetap berjalan
+di belakang layar. Source-of-truth No Claim tetap
+`claim_submission.noClaim`.
+
+### Perubahan UI utama
+
+- **Switcher 2 tier**:
+  - Primary: `[Daftar Claim] [Advanced]`. Default `Daftar Claim`.
+  - Secondary submode (hanya muncul saat Advanced): `Master Detail` /
+    `Accordion` / `Kartu` / `Fokus` / `Status Board`. Visual lebih kecil
+    dan diberi caption "Advanced: gunakan hanya jika perlu menggabungkan/
+    memecah baris claim atau mengelola detail dokumen, payment, dan
+    close."
+  - localStorage key tetap `claimWorkflowSubmissionLayoutMode`. Nilai
+    `excel` aktif Daftar Claim, lima nilai lain otomatis aktif Advanced
+    sesuai submode tersimpan.
+
+- **Heading section**: `"Paket No Claim"` → `"Daftar Claim"`. Subtitle:
+  `"Input No Claim, DPP, PPN, dan PPH seperti sheet BASE."` Helper:
+  `"Satu baris claim dapat menjadi satu No Claim."`
+
+- **Header workflow**: badge `"{N} Paket No Claim"` →
+  `"{N} No Claim"`. Summary card `"Paket No Claim"` →
+  `"Jumlah No Claim"`. Helper text adaptive:
+  - multi: `"Setiap baris claim dapat memiliki No Claim sendiri."`
+  - single: `"Isi No Claim dan nilai klaim seperti di Excel BASE."`
+
+- **No Claim container info (multi)**: heading
+  `"No Claim diatur per Paket Klaim"` →
+  `"No Claim per Baris"`. Tombol `"Lihat Paket No Claim"` →
+  `"Buka Daftar Claim"`. Badge `"{N} Paket No Claim"` →
+  `"{N} No Claim"`.
+
+- **Card "Buat Paket per Baris / Item"** dipindah ke Advanced. Default
+  Daftar Claim cuma menampilkan banner kompak amber:
+  `"Ada baris claim yang belum siap diberi No Claim."` + tombol
+  `"Siapkan Baris Claim"` saat ada item belum dipaketkan; atau
+  `"Semua baris claim sudah siap diberi No Claim."` saat semua item
+  sudah berada di submission scope `per_item`. Banner hilang jika
+  workflow belum punya item klaim.
+
+- **Form "Buat Paket No Claim Baru"** dipindah ke Advanced + diberi
+  label `"Buat Kelompok Claim Manual"` + helper text untuk admin/claim.
+
+- **Toolbar Excel Input**: tombol `"Buat Paket per Baris / Item"` →
+  `"Siapkan Baris Claim"`.
+
+- **Tabel kolom**: `No.2` → `No. Urut`, `Bulan` → `Bulan Claim`. Aksi
+  per row `Kelola Paket` → `Kelola Detail` (klik beralih ke Advanced
+  Master Detail dan select submission row).
+
+- **Pesan UX staff-friendly**:
+  - `"Item belum punya Paket No Claim. Klik 'Buat Paket per Baris /
+    Item' di toolbar."` → `"Baris ini belum siap diberi No Claim. Klik
+    'Siapkan Baris Claim' di toolbar."`
+  - Cell row tanpa submission: `"Belum punya paket"` → `"Belum siap"`.
+
+- **Workflow-level Document section**: disembunyikan dari default
+  Daftar Claim saat workflow multi-submission. Tetap muncul di Advanced
+  atau saat single-submission. Banner amber multi diperhalus:
+  `"Workflow memiliki beberapa No Claim. Dokumen dibuat per No Claim.
+  Klik "Kelola Detail" pada baris claim, atau gunakan Advanced untuk
+  generate per No Claim."`
+
+- **Master Detail panels**: label `"Detail Paket Terpilih"` →
+  `"Detail No Claim Terpilih"`, aria-label `"Pilih paket"` →
+  `"Pilih No Claim"`, `"Daftar Paket No Claim"` → `"Daftar No Claim"`,
+  empty state `"Belum ada Paket No Claim."` → `"Belum ada No Claim."`,
+  `"Pilih paket di kiri ..."` → `"Pilih No Claim di kiri ..."`.
+
+### Yang TIDAK diubah
+
+- Schema database. Tidak ada ALTER/DROP/RENAME.
+- Backend endpoint. PATCH item, PATCH submission, POST submissions,
+  POST submissions/from-items, generate dokumen, payment, close,
+  reports — semua identik R7b–R7h.
+- Business logic R7c/R7d/R7e/R7g/R7h.
+- Section "Items" di bawah tabel (raw items table) — dipertahankan
+  apa adanya untuk konsistensi flow item assignment lama. Dropdown
+  pemindahan item antar submission masih di sana.
+- Section Pembayaran Principal + Close Workflow workflow-level —
+  tetap muncul karena belum dipindah ke per submission di UI default.
+- Audit log section — tetap.
+- PEKA / EC / CN tetap retired.
+- R7f direct/manual source masih deferred.
+
+### Test
+
+Tidak ada test baru di R7i (perubahan murni presentational; backend
+contract tidak berubah). Regression suite tetap dijalankan:
+`scripts/test-r7c-documents.mjs`, `scripts/test-r7d-submission-payments.mjs`,
+`scripts/test-r7e-close-reports.mjs`, `scripts/test-r7g-excel-no-claim.mjs`,
+`scripts/test-r7h-excel-input-mode.mjs` — semua 0 FAIL.
 
 ---
 
