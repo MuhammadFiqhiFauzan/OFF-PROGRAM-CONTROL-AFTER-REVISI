@@ -395,18 +395,121 @@ function getGuidanceClass(tone: GuidanceTone): string {
 }
 
 const SUBMISSION_LAYOUT_STORAGE_KEY = "claimWorkflowSubmissionLayoutMode";
-type SubmissionLayoutMode = "master" | "accordion";
+type SubmissionLayoutMode =
+  | "master"
+  | "accordion"
+  | "card"
+  | "focus"
+  | "board";
+
+const SUBMISSION_LAYOUT_OPTIONS: Array<{
+  value: SubmissionLayoutMode;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "master",
+    label: "Master Detail",
+    hint: "Daftar paket di kiri, detail di kanan.",
+  },
+  {
+    value: "accordion",
+    label: "Accordion",
+    hint: "Buka tutup paket satu per satu.",
+  },
+  {
+    value: "card",
+    label: "Kartu",
+    hint: "Grid kartu ringkas + detail di bawah.",
+  },
+  {
+    value: "focus",
+    label: "Fokus",
+    hint: "Satu paket per layar dengan navigasi sebelumnya/berikutnya.",
+  },
+  {
+    value: "board",
+    label: "Status Board",
+    hint: "Paket dikelompokkan per tahap.",
+  },
+];
+
+const ALLOWED_LAYOUT_MODES = SUBMISSION_LAYOUT_OPTIONS.map((opt) => opt.value);
 
 function readStoredLayoutMode(): SubmissionLayoutMode {
   if (typeof window === "undefined") return "master";
   try {
     const raw = window.localStorage.getItem(SUBMISSION_LAYOUT_STORAGE_KEY);
-    if (raw === "accordion" || raw === "master") return raw;
+    if (raw && (ALLOWED_LAYOUT_MODES as ReadonlyArray<string>).includes(raw)) {
+      return raw as SubmissionLayoutMode;
+    }
   } catch {
     // localStorage might be unavailable; fallback to default.
   }
   return "master";
 }
+
+// R7 UX experiment — group submissions ke 3 lifecycle stage besar agar
+// Status Board mudah dipahami staff non-teknis. Tahap apapun yang butuh
+// input user → "needs_action"; sudah jalan tapi belum selesai →
+// "in_progress"; sudah closed → "done".
+type SubmissionLifecycleStage = "needs_action" | "in_progress" | "done";
+
+function getSubmissionLifecycleStage(
+  submission: Submission,
+): SubmissionLifecycleStage {
+  if (isSubmissionClosed(submission)) return "done";
+  const noClaimEmpty =
+    !submission.noClaim || !String(submission.noClaim).trim();
+  const docsIncomplete = !isSubmissionDocumentsComplete(submission);
+  if (noClaimEmpty || docsIncomplete) return "needs_action";
+  if (
+    submission.status === claimWorkflowStatuses.draft ||
+    submission.status === claimWorkflowStatuses.needRevision
+  ) {
+    return "needs_action";
+  }
+  if (submission.status === claimWorkflowStatuses.paid) {
+    return "needs_action";
+  }
+  return "in_progress";
+}
+
+const LIFECYCLE_STAGES: Array<{
+  key: SubmissionLifecycleStage;
+  title: string;
+  description: string;
+  badgeClass: string;
+  cardClass: string;
+}> = [
+  {
+    key: "needs_action",
+    title: "Butuh Aksi",
+    description: "Paket yang menunggu input atau dokumen dari kamu.",
+    badgeClass:
+      "border-amber-500/30 bg-amber-500/10 text-amber-200",
+    cardClass:
+      "border-amber-500/20 bg-amber-500/5",
+  },
+  {
+    key: "in_progress",
+    title: "Sedang Diproses",
+    description: "Paket yang sudah berjalan dan menunggu pembayaran.",
+    badgeClass:
+      "border-indigo-500/30 bg-indigo-500/10 text-indigo-200",
+    cardClass:
+      "border-indigo-500/20 bg-indigo-500/5",
+  },
+  {
+    key: "done",
+    title: "Selesai",
+    description: "Paket yang sudah closed.",
+    badgeClass:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+    cardClass:
+      "border-emerald-500/20 bg-emerald-500/5",
+  },
+];
 
 export default function ClaimWorkflowDetailPage() {
   const params = useParams<{ id: string }>();
@@ -1930,14 +2033,9 @@ export default function ClaimWorkflowDetailPage() {
             <div
               role="group"
               aria-label="Mode Tampilan Paket No Claim"
-              className="inline-flex overflow-hidden rounded-lg border border-white/10"
+              className="inline-flex flex-wrap gap-1 rounded-lg border border-white/10 p-1"
             >
-              {(
-                [
-                  { value: "master", label: "Master Detail" },
-                  { value: "accordion", label: "Accordion" },
-                ] as Array<{ value: SubmissionLayoutMode; label: string }>
-              ).map((opt) => {
+              {SUBMISSION_LAYOUT_OPTIONS.map((opt) => {
                 const active = submissionLayoutMode === opt.value;
                 return (
                   <button
@@ -1945,7 +2043,8 @@ export default function ClaimWorkflowDetailPage() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => setSubmissionLayoutMode(opt.value)}
-                    className={`px-3 py-1.5 text-xs font-bold transition ${
+                    title={opt.hint}
+                    className={`rounded-md px-3 py-1 text-xs font-bold transition ${
                       active
                         ? "bg-indigo-600 text-white"
                         : "bg-transparent text-slate-300 hover:bg-white/5"
@@ -1956,6 +2055,11 @@ export default function ClaimWorkflowDetailPage() {
                 );
               })}
             </div>
+            <span className="max-w-[220px] text-right text-[11px] italic text-slate-500">
+              {SUBMISSION_LAYOUT_OPTIONS.find(
+                (opt) => opt.value === submissionLayoutMode,
+              )?.hint || ""}
+            </span>
           </div>
         </div>
 
@@ -2145,7 +2249,7 @@ export default function ClaimWorkflowDetailPage() {
               )}
             </div>
           </div>
-        ) : (
+        ) : submissionLayoutMode === "accordion" ? (
           /* Accordion Layout */
           <div className="mt-5 space-y-3">
             {submissions.map((s) => {
@@ -2236,6 +2340,334 @@ export default function ClaimWorkflowDetailPage() {
                 </div>
               );
             })}
+          </div>
+        ) : submissionLayoutMode === "card" ? (
+          /* Kartu Layout — grid kartu 2-3 kolom + detail panel di bawah
+             saat satu paket dipilih. Cocok untuk staff yang lebih suka
+             scan visual. */
+          <div className="mt-5 space-y-5">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {submissions.map((s) => {
+                const next = getSubmissionNextAction(s);
+                const docsCount = getSubmissionDocumentsCompletedCount(s);
+                const remaining = getSubmissionRemainingAmount(s);
+                const isSelected = selectedSubmissionId === s.id;
+                const noClaimEmpty = !s.noClaim || !String(s.noClaim).trim();
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => setSelectedSubmissionId(s.id)}
+                    className={`flex h-full flex-col gap-3 rounded-xl border p-4 text-left transition ${
+                      isSelected
+                        ? "border-indigo-400 bg-indigo-500/10 ring-2 ring-indigo-500/40"
+                        : "border-white/10 bg-black/20 hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200">
+                        {getScopeDisplayLabel(s.scope)}
+                      </span>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(s.status)}`}
+                      >
+                        {displayClaimStatusLabel(s.status)}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-white">
+                        {getSubmissionTitle(s)}
+                      </p>
+                      {noClaimEmpty ? (
+                        <p className="mt-1 text-[11px] font-semibold text-amber-200">
+                          Belum ada No Claim
+                        </p>
+                      ) : (
+                        <p className="mt-1 font-mono text-[11px] text-emerald-200">
+                          {s.noClaim}
+                        </p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <p className="text-slate-500">Total Claim</p>
+                        <p className="font-bold text-white">
+                          {rupiah(s.totalClaim)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Outstanding</p>
+                        <p
+                          className={`font-bold ${remaining > 0 ? "text-amber-200" : "text-emerald-200"}`}
+                        >
+                          {rupiah(remaining)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Items</p>
+                        <p className="font-bold text-white">
+                          {s.itemCount ?? 0}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Dokumen</p>
+                        <p
+                          className={`font-bold ${docsCount === 3 ? "text-emerald-200" : "text-amber-200"}`}
+                        >
+                          {docsCount}/3
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-auto flex items-center justify-between gap-2">
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
+                      >
+                        {next.label}
+                      </span>
+                      <span
+                        className={`text-[11px] font-semibold ${isSelected ? "text-indigo-200" : "text-slate-500"}`}
+                      >
+                        {isSelected ? "Sedang dilihat" : "Klik untuk buka"}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedSubmission ? (
+              <div className="rounded-2xl border border-indigo-500/20 bg-black/20 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
+                  Detail Paket Terpilih
+                </p>
+                <div className="mt-3">
+                  {renderSubmissionDetailPanel(selectedSubmission)}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-center text-sm text-slate-400">
+                Pilih kartu paket di atas untuk melihat detailnya di sini.
+              </div>
+            )}
+          </div>
+        ) : submissionLayoutMode === "focus" ? (
+          /* Fokus Layout — satu paket per layar dengan navigasi
+             sebelumnya/berikutnya. Mode ini cocok untuk staff yang ingin
+             menyelesaikan paket satu per satu tanpa distraksi. */
+          (() => {
+            const currentIndex = Math.max(
+              0,
+              submissions.findIndex((s) => s.id === selectedSubmissionId),
+            );
+            const safeIndex =
+              currentIndex >= 0 && currentIndex < submissions.length
+                ? currentIndex
+                : 0;
+            const current = submissions[safeIndex];
+            const goPrev = () => {
+              if (safeIndex > 0) {
+                setSelectedSubmissionId(submissions[safeIndex - 1].id);
+              }
+            };
+            const goNext = () => {
+              if (safeIndex < submissions.length - 1) {
+                setSelectedSubmissionId(submissions[safeIndex + 1].id);
+              }
+            };
+            return (
+              <div className="mt-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={goPrev}
+                      disabled={safeIndex === 0}
+                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10 disabled:opacity-40"
+                      aria-label="Paket sebelumnya"
+                    >
+                      ← Sebelumnya
+                    </button>
+                    <button
+                      type="button"
+                      onClick={goNext}
+                      disabled={safeIndex === submissions.length - 1}
+                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10 disabled:opacity-40"
+                      aria-label="Paket berikutnya"
+                    >
+                      Berikutnya →
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-slate-400">
+                    <span>
+                      Paket {safeIndex + 1} dari {submissions.length}
+                    </span>
+                    {submissions.length > 1 && (
+                      <select
+                        value={current.id}
+                        onChange={(event) =>
+                          setSelectedSubmissionId(event.target.value)
+                        }
+                        className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white outline-none focus:border-indigo-500/60"
+                        aria-label="Pilih paket"
+                      >
+                        {submissions.map((s, idx) => (
+                          <option key={s.id} value={s.id}>
+                            {idx + 1}. {getSubmissionTitle(s)}
+                            {s.noClaim ? ` · ${s.noClaim}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+                {/* Progress dots */}
+                {submissions.length > 1 && (
+                  <div
+                    className="flex flex-wrap items-center gap-1.5"
+                    aria-hidden="true"
+                  >
+                    {submissions.map((s, idx) => {
+                      const stage = getSubmissionLifecycleStage(s);
+                      const dotColor =
+                        stage === "done"
+                          ? "bg-emerald-400"
+                          : stage === "in_progress"
+                            ? "bg-indigo-400"
+                            : "bg-amber-400";
+                      const isCurrent = idx === safeIndex;
+                      return (
+                        <span
+                          key={s.id}
+                          className={`h-2 w-6 rounded-full ${dotColor} ${isCurrent ? "ring-2 ring-white/40" : "opacity-50"}`}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {renderSubmissionDetailPanel(current)}
+              </div>
+            );
+          })()
+        ) : (
+          /* Status Board Layout — 3 kolom per lifecycle stage. Kartu di
+             setiap kolom bisa diklik untuk membuka detail di bawah board.
+             Dirancang agar staff cepat melihat "apa yang harus dikerjakan
+             dulu" tanpa membaca tabel besar. */
+          <div className="mt-5 space-y-5">
+            <div className="grid gap-3 lg:grid-cols-3">
+              {LIFECYCLE_STAGES.map((stage) => {
+                const stageSubmissions = submissions.filter(
+                  (s) => getSubmissionLifecycleStage(s) === stage.key,
+                );
+                return (
+                  <div
+                    key={stage.key}
+                    className={`rounded-2xl border p-4 ${stage.cardClass}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-white">
+                          {stage.title}
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          {stage.description}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${stage.badgeClass}`}
+                      >
+                        {stageSubmissions.length}
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {stageSubmissions.length === 0 ? (
+                        <p className="rounded-lg border border-white/5 bg-black/20 px-3 py-3 text-center text-[11px] italic text-slate-500">
+                          Tidak ada paket di tahap ini.
+                        </p>
+                      ) : (
+                        stageSubmissions.map((s) => {
+                          const next = getSubmissionNextAction(s);
+                          const docsCount = getSubmissionDocumentsCompletedCount(s);
+                          const remaining = getSubmissionRemainingAmount(s);
+                          const isSelected = selectedSubmissionId === s.id;
+                          const noClaimEmpty =
+                            !s.noClaim || !String(s.noClaim).trim();
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              aria-pressed={isSelected}
+                              onClick={() => setSelectedSubmissionId(s.id)}
+                              className={`w-full rounded-lg border p-3 text-left transition ${
+                                isSelected
+                                  ? "border-indigo-400 bg-indigo-500/10 ring-1 ring-indigo-500/40"
+                                  : "border-white/10 bg-black/30 hover:bg-white/5"
+                              }`}
+                            >
+                              <p className="text-sm font-bold text-white">
+                                {getSubmissionTitle(s)}
+                              </p>
+                              {noClaimEmpty ? (
+                                <p className="mt-1 text-[11px] font-semibold text-amber-200">
+                                  Belum ada No Claim
+                                </p>
+                              ) : (
+                                <p className="mt-1 font-mono text-[11px] text-emerald-200">
+                                  {s.noClaim}
+                                </p>
+                              )}
+                              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
+                                <span>{rupiah(s.totalClaim)}</span>
+                                <span className="text-slate-600">·</span>
+                                <span
+                                  className={
+                                    docsCount === 3
+                                      ? "text-emerald-300"
+                                      : "text-amber-300"
+                                  }
+                                >
+                                  Dok {docsCount}/3
+                                </span>
+                                {remaining > 0 && (
+                                  <>
+                                    <span className="text-slate-600">·</span>
+                                    <span className="text-amber-300">
+                                      {rupiah(remaining)}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                              <div className="mt-2">
+                                <span
+                                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getGuidanceClass(next.tone)}`}
+                                >
+                                  {next.label}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {selectedSubmission ? (
+              <div className="rounded-2xl border border-indigo-500/20 bg-black/20 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
+                  Detail Paket Terpilih
+                </p>
+                <div className="mt-3">
+                  {renderSubmissionDetailPanel(selectedSubmission)}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-center text-sm text-slate-400">
+                Klik salah satu kartu di kolom mana pun untuk melihat detail
+                paket di sini.
+              </div>
+            )}
           </div>
         )}
       </section>
