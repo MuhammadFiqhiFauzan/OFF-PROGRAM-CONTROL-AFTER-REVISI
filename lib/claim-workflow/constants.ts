@@ -95,12 +95,15 @@ export const claimWorkflowOffRequirements = {
  *                   (default backfill untuk workflow lama).
  *   per_program   — satu submission per nama program promosi.
  *   per_toko      — satu submission per outlet/toko.
+ *   per_item      — satu submission per baris/item klaim. Mengikuti pola
+ *                   sheet BASE di Excel Godrej (R7g).
  *   custom        — grouping manual yang ditentukan user.
  */
 export const claimSubmissionScopes = {
     perPengajuan: "per_pengajuan",
     perProgram: "per_program",
     perToko: "per_toko",
+    perItem: "per_item",
     custom: "custom",
 } as const;
 

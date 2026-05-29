@@ -16,10 +16,12 @@ node --check scripts/test-r7c-documents.mjs
 node --check scripts/test-r7d-submission-payments.mjs
 node --check scripts/test-r7e-close-reports.mjs
 node --check scripts/test-r7f-direct-source.mjs
+node --check scripts/test-r7g-excel-no-claim.mjs
 node scripts/test-r7c-documents.mjs        # 88 PASS
 node scripts/test-r7d-submission-payments.mjs # 41 PASS
 node scripts/test-r7e-close-reports.mjs    # 36 PASS
 node scripts/test-r7f-direct-source.mjs    # 7 PASS, 9 SKIP (HOLD)
+node scripts/test-r7g-excel-no-claim.mjs   # 36 PASS
 ```
 
 Semua harus exit 0.
@@ -122,6 +124,7 @@ di-implement untuk mencegah half-implementation.
 | GET `/api/claim-workflow/[id]` | ✓ | ✓ | 403 |
 | GET `/api/claim-workflow/[id]/submissions` | ✓ | ✓ | 403 |
 | POST `/api/claim-workflow/[id]/submissions` | ✓ | 403 | 403 |
+| POST `/api/claim-workflow/[id]/submissions/from-items` | ✓ | 403 | 403 |
 | PATCH submission | ✓ | 403 | 403 |
 | POST item assign | ✓ | 403 | 403 |
 | POST submission docs (letter/summary/receipt) | ✓ | 403 | 403 |
@@ -130,6 +133,30 @@ di-implement untuk mencegah half-implementation.
 | POST submission close | ✓ | 403 | 403 |
 | GET reports | ✓ | ✓ | 403 |
 | GET outstanding | ✓ | ✓ | 403 |
+
+---
+
+## Section H — R7g Excel-style No Claim + Per Item
+
+R7g hanya mengubah frontend + tambah satu endpoint. Tidak menyentuh
+schema. Source-of-truth No Claim tetap `claim_submission.noClaim`.
+
+| # | Step | Expected |
+|---|------|----------|
+| H1 | Buka detail Claim Workflow `Draft`/`Need Revision` dengan minimal 1 paket. Pada editor No Claim per paket, klik toggle **Generate dari Excel**. | Form 5 field muncul: Nomor Urut, Kode Distributor (`SUPER`), Kode Principal (`GCPI` untuk Godrej), Bulan, Tahun. Default bulan/tahun mengikuti `Asia/Makassar`. |
+| H2 | Isi sequence `1`, biarkan default lain. | Preview live: `01/SUPER-GCPI/{MM}/{YYYY}`. |
+| H3 | Sequence `9` → `09/...`. Sequence `10` → `10/...`. Sequence `130` → `130/...`. | Padding hanya untuk 1-9; 10+ apa adanya. |
+| H4 | Kosongkan sequence / set bulan `13` / set tahun `26`. | Preview menampilkan pesan validasi merah. Tombol "Gunakan No Claim Ini" disabled. |
+| H5 | Sequence valid → klik **Gunakan No Claim Ini**. | Field input manual ter-isi nilai preview, generator tetap terbuka. Save belum otomatis dilakukan. |
+| H6 | Edit field input manual sebelum Save → klik **Save**. | PATCH submission existing dipanggil; toast sukses muncul; detail reload. |
+| H7 | Workflow multi-submission: editor workflow-level No Claim tetap tersembunyi. Generator hanya tampil di dalam panel Paket No Claim. | Sesuai. |
+| H8 | Workflow Closed atau paket Closed: toggle Generator tidak tampil. | Sesuai (`canAssignNoClaim && submissionEditable`). |
+| H9 | Section Paket No Claim: card "Buat Paket per Baris / Item" tampak untuk admin/claim saat workflow `Draft`/`Need Revision`. Klik tombol → confirm → endpoint `POST /[id]/submissions/from-items` mode `all_unassigned`. | Toast: "{N} paket per item dibuat." atau "Semua item sudah memiliki paket." Reload. |
+| H10 | Setelah H9: setiap item klaim memiliki paket sendiri scope `per_item` dengan `scopeLabel` dari outlet/program/periode/no surat. `noClaim = null`. Workflow aggregate totals tetap sama dengan sum item. | Audit `claim_submissions_created_per_item` ditulis. |
+| H11 | Klik tombol H9 sekali lagi (idempotent test). | Toast: "Semua item sudah memiliki paket." Tidak ada submission baru. |
+| H12 | Workflow tanpa item: tombol H9 disabled (`items.length === 0`). | Sesuai. |
+| H13 | Staff (`claim_workflow.view` only) buka detail. | Tidak ada toggle generator (No Claim view-only). Card "Buat Paket per Baris / Item" tidak tampil (`canEditItems` false). |
+| H14 | `node scripts/test-r7g-excel-no-claim.mjs` | 36 PASS, 0 FAIL. |
 
 ---
 
@@ -144,5 +171,6 @@ di-implement untuk mencegah half-implementation.
 | E. R7f HOLD verification | | |
 | F. Compatibility & boundary | | |
 | G. RBAC | | |
+| H. R7g Excel-style No Claim + Per Item | | |
 
 QA dijalankan oleh: ___________________  Tanggal: __________

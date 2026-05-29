@@ -100,6 +100,7 @@ const SUBMISSION_SCOPE_OPTIONS: { value: string; label: string }[] = [
   { value: "per_pengajuan", label: "Per Pengajuan" },
   { value: "per_program", label: "Per Program" },
   { value: "per_toko", label: "Per Toko" },
+  { value: "per_item", label: "Per Baris / Item" },
   { value: "custom", label: "Custom" },
 ];
 
@@ -239,6 +240,7 @@ const SCOPE_DISPLAY_LABEL: Record<string, string> = {
   per_pengajuan: "Per Pengajuan",
   per_program: "Per Program",
   per_toko: "Per Toko",
+  per_item: "Per Baris / Item",
   custom: "Custom",
 };
 
@@ -246,6 +248,8 @@ const SCOPE_HELPER_TEXT: Record<string, string> = {
   per_pengajuan: "Satu paket untuk seluruh pengajuan.",
   per_program: "Pisahkan klaim berdasarkan program.",
   per_toko: "Pisahkan klaim berdasarkan toko.",
+  per_item:
+    "Satu item/baris klaim menjadi satu Paket No Claim. Ini paling mirip sheet BASE di Excel.",
   custom: "Grouping manual sesuai kebutuhan.",
 };
 
@@ -263,6 +267,117 @@ function getScopeDisplayLabel(scope: string | null | undefined): string {
 function getScopeHelper(scope: string | null | undefined): string {
   if (!scope) return "";
   return SCOPE_HELPER_TEXT[scope] || "";
+}
+
+// =============================================================================
+// R7g — Excel-style No Claim Generator helpers
+// =============================================================================
+// Pola Excel Godrej: No Claim = sequence + "/" + distributor + "-" + principal
+// + "/" + month(2 digit) + "/" + year(4 digit). Contoh: 01/SUPER-GCPI/02/2026.
+//
+// Default month/year diambil dari zona Asia/Makassar (UTC+08:00) supaya tidak
+// bergantung timezone browser/server.
+
+/**
+ * Hasilkan komponen tanggal (year/month/day, 2 digit untuk month/day, 4 digit
+ * untuk year) menurut zona Asia/Makassar. Berfungsi di browser dan Node modern
+ * via Intl.DateTimeFormat.
+ */
+function getMakassarDateParts(date: Date = new Date()): {
+  year: string;
+  month: string;
+  day: string;
+} {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Makassar",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = formatter.formatToParts(date);
+    const get = (type: string) =>
+      parts.find((p) => p.type === type)?.value ?? "";
+    const year = get("year").padStart(4, "0");
+    const month = get("month").padStart(2, "0");
+    const day = get("day").padStart(2, "0");
+    if (year && month && day) return { year, month, day };
+  } catch {
+    // Intl tidak tersedia; fallback di bawah.
+  }
+  // Fallback aman tanpa timezone (tidak ideal, tetapi mencegah crash).
+  const yyyy = String(date.getFullYear()).padStart(4, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return { year: yyyy, month: mm, day: dd };
+}
+
+/**
+ * Format sequence sesuai pola Excel: angka 1-9 di-pad jadi 2 digit ("01"),
+ * angka 10+ apa adanya, dan string non-numeric apa adanya (trim). Tidak
+ * memaksa 3 digit.
+ */
+function formatNoClaimSequence(value: string): string {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isFinite(n) && n >= 1 && n <= 9) {
+      return String(n).padStart(2, "0");
+    }
+    // 10+ → as typed (tetapi buang leading zero ganda kalau ada).
+    return String(Number(trimmed));
+  }
+  return trimmed;
+}
+
+type NoClaimGeneratorDraft = {
+  sequence: string;
+  distributorCode: string;
+  principalCode: string;
+  month: string;
+  year: string;
+};
+
+/**
+ * Validasi draft generator. Return error message pertama (string) atau null.
+ */
+function validateNoClaimGenerator(
+  draft: NoClaimGeneratorDraft,
+): string | null {
+  if (!draft.sequence.trim()) return "Nomor urut wajib diisi.";
+  if (!draft.distributorCode.trim()) return "Kode distributor wajib diisi.";
+  if (!draft.principalCode.trim()) return "Kode principal wajib diisi.";
+  const month = draft.month.trim();
+  if (!/^\d{2}$/.test(month)) return "Bulan harus 2 digit (01-12).";
+  const monthNum = Number(month);
+  if (monthNum < 1 || monthNum > 12) return "Bulan harus 01-12.";
+  if (!/^\d{4}$/.test(draft.year.trim())) return "Tahun harus 4 digit.";
+  return null;
+}
+
+/**
+ * Build preview string dari draft. Tidak melakukan validasi; caller pakai
+ * `validateNoClaimGenerator` terlebih dulu jika ingin tahu valid atau tidak.
+ */
+function buildNoClaimPreview(draft: NoClaimGeneratorDraft): string {
+  const sequence = formatNoClaimSequence(draft.sequence);
+  const distributor = draft.distributorCode.trim();
+  const principal = draft.principalCode.trim();
+  const month = draft.month.trim();
+  const year = draft.year.trim();
+  if (!sequence || !distributor || !principal || !month || !year) return "";
+  return `${sequence}/${distributor}-${principal}/${month}/${year}`;
+}
+
+/**
+ * Tebak kode principal dari nama principle workflow. Default fallback "GCPI"
+ * (Godrej Consumer Products Indonesia) sesuai pola Excel sumber R7g.
+ */
+function guessPrincipalCode(principleName: string | null | undefined): string {
+  const name = String(principleName || "").toLowerCase();
+  if (name.includes("godrej") || name.includes("gcpi")) return "GCPI";
+  return "GCPI";
 }
 
 function getSubmissionTitle(submission: Submission): string {
@@ -701,6 +816,18 @@ export default function ClaimWorkflowDetailPage() {
     useState<string>("");
   const [submissionNoClaimSavingId, setSubmissionNoClaimSavingId] =
     useState<string>("");
+  // R7g — Excel-style No Claim generator state.
+  // Per submission: mode (manual | generate) + draft komponen generator.
+  // Default month/year diambil dari Asia/Makassar saat mount; user boleh
+  // menggantinya. Tidak dikirim ke backend; preview murni di-derive.
+  const [submissionGeneratorMode, setSubmissionGeneratorMode] = useState<
+    Record<string, "manual" | "generate">
+  >({});
+  const [submissionGeneratorDraft, setSubmissionGeneratorDraft] = useState<
+    Record<string, NoClaimGeneratorDraft>
+  >({});
+  // R7g — Per Item action state.
+  const [creatingPerItem, setCreatingPerItem] = useState(false);
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -1263,6 +1390,76 @@ export default function ClaimWorkflowDetailPage() {
     }
   };
 
+  // R7g — Handler initialize generator draft + mode untuk satu submission.
+  // Dipanggil saat user pertama kali switch ke mode "Generate dari Excel".
+  // Default month/year dari Asia/Makassar; principal code di-tebak dari nama
+  // principle workflow.
+  const ensureGeneratorDraft = (submissionId: string) => {
+    if (submissionGeneratorDraft[submissionId]) return;
+    const parts = getMakassarDateParts();
+    const principal = guessPrincipalCode(workflow?.principleName);
+    setSubmissionGeneratorDraft((prev) => ({
+      ...prev,
+      [submissionId]: {
+        sequence: "",
+        distributorCode: "SUPER",
+        principalCode: principal,
+        month: parts.month,
+        year: parts.year,
+      },
+    }));
+  };
+
+  // R7g — Handler "Buat Paket per Baris / Item": panggil endpoint
+  // submissions/from-items mode all_unassigned. Tidak menghapus paket lama.
+  // Tidak auto-generate No Claim.
+  const submitCreatePerItem = async () => {
+    if (!workflow) return;
+    const confirmed =
+      typeof window !== "undefined"
+        ? window.confirm(
+            "Buat satu Paket No Claim untuk setiap item klaim yang belum dipaketkan? Paket lama tidak akan dihapus.",
+          )
+        : true;
+    if (!confirmed) return;
+    setCreatingPerItem(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/claim-workflow/${id}/submissions/from-items`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "all_unassigned" }),
+        },
+      );
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        createdCount?: number;
+        skippedCount?: number;
+      };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal membuat paket per item.");
+      }
+      const createdCount = result.createdCount ?? 0;
+      const successMessage = createdCount > 0
+        ? `${createdCount} paket per item dibuat.`
+        : "Semua item sudah memiliki paket.";
+      toast.success(successMessage);
+      setMessage(successMessage);
+      await loadDetail();
+    } catch (err) {
+      const errorMessage = err instanceof Error
+        ? err.message
+        : "Gagal membuat paket per item.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setCreatingPerItem(false);
+    }
+  };
+
   // Phase R7b - Multi No Claim: handler pindahkan item ke submission lain.
   const moveItemToSubmission = async (itemId: string, targetSubmissionId: string) => {
     if (!targetSubmissionId) return;
@@ -1519,11 +1716,54 @@ export default function ClaimWorkflowDetailPage() {
                 item terkait saat di-assign.
               </p>
             </div>
-            {!canAssignNoClaim && (
-              <span className="text-[11px] italic text-slate-500">
-                View-only
-              </span>
-            )}
+            <div className="flex flex-col items-end gap-2">
+              {!canAssignNoClaim && (
+                <span className="text-[11px] italic text-slate-500">
+                  View-only
+                </span>
+              )}
+              {canAssignNoClaim && submissionEditable && (
+                <div
+                  role="group"
+                  aria-label="Mode input No Claim"
+                  className="inline-flex overflow-hidden rounded-lg border border-white/10"
+                >
+                  {(
+                    [
+                      { value: "manual", label: "Input Manual" },
+                      { value: "generate", label: "Generate dari Excel" },
+                    ] as const
+                  ).map((opt) => {
+                    const currentMode =
+                      submissionGeneratorMode[submission.id] ?? "manual";
+                    const active = currentMode === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => {
+                          if (opt.value === "generate") {
+                            ensureGeneratorDraft(submission.id);
+                          }
+                          setSubmissionGeneratorMode((prev) => ({
+                            ...prev,
+                            [submission.id]: opt.value,
+                          }));
+                        }}
+                        className={`px-3 py-1 text-[11px] font-bold transition ${
+                          active
+                            ? "bg-indigo-600 text-white"
+                            : "bg-transparent text-slate-300 hover:bg-white/5"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
           {canAssignNoClaim ? (
             editingNoClaim || noClaimEmpty ? (
@@ -1615,6 +1855,131 @@ export default function ClaimWorkflowDetailPage() {
               Need Revision.
             </p>
           )}
+          {/* R7g — Generator dari Excel (mode = "generate") */}
+          {canAssignNoClaim &&
+            submissionEditable &&
+            (submissionGeneratorMode[submission.id] ?? "manual") === "generate" &&
+            submissionGeneratorDraft[submission.id] && (() => {
+              const draft = submissionGeneratorDraft[submission.id];
+              const error = validateNoClaimGenerator(draft);
+              const preview = error ? "" : buildNoClaimPreview(draft);
+              const updateDraft = (patch: Partial<NoClaimGeneratorDraft>) => {
+                setSubmissionGeneratorDraft((prev) => ({
+                  ...prev,
+                  [submission.id]: { ...prev[submission.id], ...patch },
+                }));
+              };
+              return (
+                <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
+                    Generate No Claim (pola Excel)
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Format mengikuti pola Excel: No.2/SUPER-GCPI/Bulan/Tahun.
+                    Hasil tetap bisa diedit sebelum disimpan.
+                  </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Nomor Urut
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={draft.sequence}
+                        onChange={(event) =>
+                          updateDraft({ sequence: event.target.value })
+                        }
+                        placeholder="01"
+                        className="mt-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Kode Distributor
+                      <input
+                        type="text"
+                        value={draft.distributorCode}
+                        onChange={(event) =>
+                          updateDraft({ distributorCode: event.target.value })
+                        }
+                        placeholder="SUPER"
+                        className="mt-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Kode Principal
+                      <input
+                        type="text"
+                        value={draft.principalCode}
+                        onChange={(event) =>
+                          updateDraft({ principalCode: event.target.value })
+                        }
+                        placeholder="GCPI"
+                        className="mt-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Bulan
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={2}
+                        value={draft.month}
+                        onChange={(event) =>
+                          updateDraft({ month: event.target.value })
+                        }
+                        placeholder="02"
+                        className="mt-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Tahun
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={draft.year}
+                        onChange={(event) =>
+                          updateDraft({ year: event.target.value })
+                        }
+                        placeholder="2026"
+                        className="mt-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-[11px] text-slate-400">
+                      <span className="font-semibold uppercase tracking-wider text-slate-500">
+                        Preview:
+                      </span>{" "}
+                      {error ? (
+                        <span className="text-amber-300">{error}</span>
+                      ) : (
+                        <span className="font-mono text-sm font-bold text-emerald-200">
+                          {preview}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={Boolean(error)}
+                      onClick={() => {
+                        if (error) return;
+                        setSubmissionNoClaimEditingId(submission.id);
+                        setSubmissionNoClaimDraft((prev) => ({
+                          ...prev,
+                          [submission.id]: preview,
+                        }));
+                      }}
+                      className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-bold text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-40"
+                    >
+                      Gunakan No Claim Ini
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[11px] italic text-slate-500">
+                    Default bulan/tahun mengikuti zona Asia/Makassar.
+                  </p>
+                </div>
+              );
+            })()}
         </div>
 
         {/* Summary Cards */}
@@ -2175,6 +2540,39 @@ export default function ClaimWorkflowDetailPage() {
             </span>
           </div>
         </div>
+
+        {/* R7g — Buat Paket per Baris / Item */}
+        {canEditItems && editable && (
+          <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-white">
+                  Buat Paket per Baris / Item
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Cocok jika ingin mengikuti Excel BASE: satu baris item menjadi
+                  satu No Claim. Paket lama tidak dihapus dan No Claim diisi
+                  setelah paket dibuat.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={creatingPerItem || items.length === 0}
+                onClick={() => void submitCreatePerItem()}
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                title={
+                  items.length === 0
+                    ? "Workflow belum memiliki item klaim."
+                    : undefined
+                }
+              >
+                {creatingPerItem
+                  ? "Memproses..."
+                  : "Buat Paket dari Item yang Belum Dipaketkan"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Create package form (collapsible) */}
         {canEditItems && editable && (

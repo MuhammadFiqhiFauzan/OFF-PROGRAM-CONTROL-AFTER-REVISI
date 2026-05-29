@@ -58,6 +58,7 @@ mulai R7b ke depan.
 | R7d   | Payment + outstanding pindah ke level submission. `recalcPaymentTotals` per submission. Workflow totals di-derive. | Pending  |
 | R7e   | Close per submission. Workflow `aggregate_status` derived. Reports basis berubah ke submission row. | Pending  |
 | R7f   | Direct kwitansi / manual source. Butuh table rebuild SQLite (`off_batch_id` → nullable). **Deferred** sampai backup penuh + persetujuan bisnis. | Deferred |
+| R7g   | Excel-style No Claim generator (pola Godrej `seq/SUPER-GCPI/MM/YYYY`) + scope `per_item` + endpoint `POST /[id]/submissions/from-items`. Tidak menyentuh schema; default month/year pakai zona `Asia/Makassar`. | DONE     |
 
 Semua phase di atas additive. Tidak ada kolom dihapus / di-rename di
 R7a-R7e. Tabel `claim_peka_report` / status PEKA tetap retired (lihat
@@ -373,6 +374,140 @@ bila workflow multi-submission.
 - Sebelum R7f, direct kwitansi/manual claim **belum didukung** oleh
   schema. Jangan mencoba membuat workflow tanpa OFF batch sampai R7f
   selesai.
+
+---
+
+## Phase R7g — Excel-style No Claim Generator + Per Item Package (DONE)
+
+R7g membawa pola No Claim sheet BASE Godrej ke web tanpa menyentuh
+schema. Tidak ada migration baru. Source-of-truth tetap
+`claim_submission.noClaim`.
+
+### Pola No Claim
+
+```
+{sequence}/{distributorCode}-{principalCode}/{MM}/{YYYY}
+```
+
+Contoh: `01/SUPER-GCPI/02/2026`, `130/SUPER-GCPI/04/2026`.
+
+Aturan formatting sequence di UI:
+- Trim spasi.
+- Numeric `1`-`9` → pad menjadi 2 digit (`01`-`09`).
+- Numeric `10` ke atas dipertahankan apa adanya (tidak dipaksa 3 digit).
+- String non-numeric dibiarkan apa adanya.
+
+Default principal code untuk Godrej: `GCPI` (helper `guessPrincipalCode`
+mendeteksi kata "godrej" / "gcpi" di `workflow.principleName`, fallback
+tetap `GCPI`).
+
+### Default Bulan/Tahun — Asia/Makassar
+
+Helper `getMakassarDateParts(date = new Date())` mengembalikan
+`{ year, month, day }` (4/2/2 digit) memakai
+`Intl.DateTimeFormat` dengan `timeZone: "Asia/Makassar"`. Default
+generator memakai bulan/tahun Makassar saat user pertama kali masuk
+mode "Generate dari Excel".
+
+User tetap bebas mengganti bulan/tahun setelahnya. Helper hanya untuk
+default, bukan untuk memaksa data lama berubah.
+
+### UI Generator (per submission)
+
+- Editor No Claim per paket sekarang punya toggle:
+  - **Input Manual** (default) — perilaku lama.
+  - **Generate dari Excel** — form 5 field (Nomor Urut, Kode Distributor,
+    Kode Principal, Bulan, Tahun) + preview live + tombol "Gunakan No
+    Claim Ini" yang menyalin preview ke draft input manual. User tetap
+    klik **Save** memakai handler PATCH submission existing — tidak ada
+    auto-save.
+- Validasi client-side: sequence wajib, distributor wajib, principal
+  wajib, bulan format `^\d{2}$` dan range 01-12, tahun format `^\d{4}$`.
+  Validasi backend tetap lewat PATCH submission (no_claim non-empty,
+  unique).
+
+### Scope Baru: `per_item`
+
+- Konstanta: `claimSubmissionScopes.perItem = "per_item"`.
+- Label UI: **"Per Baris / Item"**.
+- Helper text:
+  > Satu item/baris klaim menjadi satu Paket No Claim. Ini paling mirip
+  > sheet BASE di Excel.
+- Scope ini hanya nilai string; tidak ada perubahan schema. Semua aturan
+  R7b–R7e (CRUD, dokumen, payment, close, reports) berjalan sama untuk
+  scope ini.
+
+### Endpoint Baru: Buat Paket per Item
+
+```
+POST /api/claim-workflow/[id]/submissions/from-items
+```
+
+Body:
+
+```json
+{ "mode": "all_unassigned" | "all_items" }
+```
+
+- Default mode: `all_unassigned` (UI memakai ini).
+- Akses: admin/claim only. Workflow harus berstatus `Draft` atau
+  `Need Revision`. Workflow `Closed` ditolak (`CLAIM_SUBMISSION_WORKFLOW_CLOSED`).
+- Behavior:
+  1. Ambil semua `claim_workflow_item` untuk workflow.
+  2. Skip item yang sudah berada di submission scope `per_item` (untuk
+     kedua mode di R7g — idempotent guarantee).
+  3. Untuk setiap target item:
+     - Insert `claim_submission` dengan `scope = per_item`,
+       `noClaim = null`, `scopeLabel` di-derive dari item (prioritas:
+       `outlet` → `jenisPromosi` → `periode` → `noSurat` → fallback
+       `Item Klaim {short id}`).
+     - Update `claim_workflow_item.claim_submission_id` ke submission
+       baru.
+     - Recalc totals submission baru via `recalcSubmissionTotals`.
+  4. Recalc totals submission lama yang ditinggalkan.
+  5. Recalc workflow aggregate via `recalcWorkflowAggregateFromSubmissions`.
+  6. Audit `claim_submissions_created_per_item` dengan metadata
+     `mode`, `createdCount`, `createdSubmissionIds`, `affectedItemIds`,
+     `previousSubmissionIds`, `workflowAggregate`.
+- Return: `{ ok, createdCount, skippedCount, createdSubmissionIds,
+  affectedItemIds }`.
+- **Tidak** auto-generate No Claim. User mengisi belakangan via
+  generator/manual editor.
+- Submission lama (mis. `per_pengajuan` default) **tidak** dihapus
+  walau tertinggal kosong — preserve audit history.
+
+### UI Action
+
+Card "Buat Paket per Baris / Item" tampil di section Paket No Claim
+(hanya saat `canEditItems` + workflow editable). Tombol memanggil
+endpoint di atas dengan `mode = all_unassigned`. Toast sukses:
+"{N} paket per item dibuat." atau "Semua item sudah memiliki paket."
+saat `createdCount = 0`.
+
+### Test
+
+`scripts/test-r7g-excel-no-claim.mjs` — 36 assertion:
+
+- Helper `getMakassarDateParts` (year/month/day format + fixed instant
+  2026-02-15 UTC = 2026-02-15 WITA).
+- Generator formatting (sequence 1/9/10/130 + month/year).
+- Validasi (empty sequence, month 13, month abc, year 26, missing
+  distributor, valid draft).
+- Endpoint `from-items` (2 item → 2 paket per_item, totals benar,
+  workflow aggregate benar, idempotent rerun → 0 baru, workflow kosong
+  → 0 baru).
+
+Cleanup memakai prefix `R7G-TEST-`.
+
+### Yang TIDAK diubah
+
+- Schema database (tidak ada ALTER/DROP/RENAME).
+- Payment / outstanding / close / reports behavior.
+- Dokumen behavior R7c.
+- Source-of-truth `claim_submission.noClaim` (tetap).
+- `claim_workflow.noClaim` legacy/cache untuk single-submission.
+- PEKA / EC / CN tetap retired.
+- R7f direct/manual source masih deferred.
 
 ---
 
