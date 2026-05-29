@@ -17,11 +17,13 @@ node --check scripts/test-r7d-submission-payments.mjs
 node --check scripts/test-r7e-close-reports.mjs
 node --check scripts/test-r7f-direct-source.mjs
 node --check scripts/test-r7g-excel-no-claim.mjs
+node --check scripts/test-r7h-excel-input-mode.mjs
 node scripts/test-r7c-documents.mjs        # 88 PASS
 node scripts/test-r7d-submission-payments.mjs # 41 PASS
 node scripts/test-r7e-close-reports.mjs    # 36 PASS
 node scripts/test-r7f-direct-source.mjs    # 7 PASS, 9 SKIP (HOLD)
 node scripts/test-r7g-excel-no-claim.mjs   # 36 PASS
+node scripts/test-r7h-excel-input-mode.mjs # 29 PASS
 ```
 
 Semua harus exit 0.
@@ -160,6 +162,34 @@ schema. Source-of-truth No Claim tetap `claim_submission.noClaim`.
 
 ---
 
+## Section I — R7h Excel BASE Input Mode
+
+R7h hanya menyentuh frontend halaman detail. Tidak ada endpoint baru.
+Save tetap lewat PATCH item + PATCH submission existing.
+
+| # | Step | Expected |
+|---|------|----------|
+| I1 | Buka detail Claim Workflow yang punya >= 1 item dan submission. | Mode tampilan default = **Excel Input**. localStorage `claimWorkflowSubmissionLayoutMode = "excel"` saat persist. |
+| I2 | Switcher mode tampilan menampilkan opsi: Excel Input, Master Detail, Accordion, Kartu, Fokus, Status Board. Klik antar mode. | Switch berfungsi; Excel Input tetap memimpin daftar. |
+| I3 | Toolbar Excel Input punya: Search, Filter status, Distributor (`SUPER`), Principal (auto `GCPI` untuk Godrej), Tahun, Bulan default (Asia/Makassar). | Default Tahun/Bulan mengikuti zona Makassar. Principal GCPI saat principle Godrej. |
+| I4 | Tabel kolom: No, No Claim, Perihal, Periode, Surat Program, Outlet, DPP, PPN%, PPN Value, PPH%, PPH Value, Nilai Klaim, No.2, Bulan, Dokumen, Paid, Outstanding, Status, Aksi. | 19 kolom semua hadir; kolom kalkulasi (PPN Value, PPH Value, Nilai Klaim) read-only. |
+| I5 | Edit DPP=100000, PPN%=11, PPH%=15. | Live preview: PPN Value 11000, PPH Value 15000, Nilai Klaim 96000. Row badge dirty (background amber). Tombol Simpan aktif. |
+| I6 | Klik **Simpan**. | PATCH `/api/claim-workflow/[id]/items/[itemId]` dengan body `{ dpp, ppnRate, pphRate }`. Toast sukses. Detail reload. Submission/workflow totals update. |
+| I7 | Edit No.2=`1`, Bulan=`02`. Klik tombol **Generate** di kolom Aksi row. | No Claim draft jadi `01/SUPER-GCPI/02/2026`. Tidak auto-save. |
+| I8 | Klik **Simpan**. | PATCH `/api/claim-workflow/[id]/submissions/[submissionId]` dengan body `{ noClaim }`. Toast sukses. Submission `no_claim` tersimpan. |
+| I9 | Edit No.2 + Bulan invalid (kosong / 13 / non-numeric tahun). | Validasi `toast.error` muncul. PATCH tidak dipanggil. |
+| I10 | Edit baris yang itemnya belum punya submission (status fallback "Belum punya paket"). Klik Simpan setelah edit No Claim. | Toast minta klik "Buat Paket per Baris / Item" dulu. |
+| I11 | Klik tombol toolbar **Buat Paket per Baris / Item**. | Reuse endpoint R7g `submissions/from-items`. Setelah reload, baris yang sebelumnya tanpa paket sekarang terhubung ke paket per_item baru dengan `noClaim = null`. |
+| I12 | Filter "Belum No Claim" → menampilkan hanya baris dengan submission.noClaim kosong. | Sesuai. |
+| I13 | Filter "Outstanding" → menampilkan baris submission yang `remainingAmount > 0`. | Sesuai. |
+| I14 | Search `OUTLET-X` → tabel di-filter menurut substring case-insensitive (No Surat / Outlet / Perihal / No Claim). | Sesuai. |
+| I15 | Klik tombol **Kelola Paket** di kolom Aksi salah satu row dengan submission. | Mode beralih ke Master Detail. `selectedSubmissionId` = submissionId row. |
+| I16 | Workflow status bukan Draft/Need Revision: input row read-only, tombol Simpan tidak tampil. | Sesuai. |
+| I17 | Staff (`claim_workflow.view` only): tidak ada input edit DPP/PPN/PPH/No Claim/No.2/Bulan. Tombol "Buat Paket per Baris / Item" tidak tampil. | Sesuai (`canEditItems` false). |
+| I18 | `node scripts/test-r7h-excel-input-mode.mjs` | 29 PASS, 0 FAIL. |
+
+---
+
 ## Sign-off
 
 | Section | Status | Notes |
@@ -172,5 +202,6 @@ schema. Source-of-truth No Claim tetap `claim_submission.noClaim`.
 | F. Compatibility & boundary | | |
 | G. RBAC | | |
 | H. R7g Excel-style No Claim + Per Item | | |
+| I. R7h Excel BASE Input Mode | | |
 
 QA dijalankan oleh: ___________________  Tanggal: __________

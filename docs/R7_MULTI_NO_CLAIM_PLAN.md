@@ -59,6 +59,7 @@ mulai R7b ke depan.
 | R7e   | Close per submission. Workflow `aggregate_status` derived. Reports basis berubah ke submission row. | Pending  |
 | R7f   | Direct kwitansi / manual source. Butuh table rebuild SQLite (`off_batch_id` → nullable). **Deferred** sampai backup penuh + persetujuan bisnis. | Deferred |
 | R7g   | Excel-style No Claim generator (pola Godrej `seq/SUPER-GCPI/MM/YYYY`) + scope `per_item` + endpoint `POST /[id]/submissions/from-items`. Tidak menyentuh schema; default month/year pakai zona `Asia/Makassar`. | DONE     |
+| R7h   | Excel BASE Input Mode UI: tabel mirip sheet BASE Godrej dengan inline edit DPP/PPN%/PPH%, kolom No.2/Bulan, dan generate No Claim per row. Default mode tampilan jadi `excel`. Reuse PATCH item + PATCH submission existing; tidak ada API baru. | DONE     |
 
 Semua phase di atas additive. Tidak ada kolom dihapus / di-rename di
 R7a-R7e. Tabel `claim_peka_report` / status PEKA tetap retired (lihat
@@ -508,6 +509,105 @@ Cleanup memakai prefix `R7G-TEST-`.
 - `claim_workflow.noClaim` legacy/cache untuk single-submission.
 - PEKA / EC / CN tetap retired.
 - R7f direct/manual source masih deferred.
+
+---
+
+## Phase R7h — Excel BASE Input Mode (DONE)
+
+R7h hanya menyentuh frontend halaman detail Claim Workflow. Tidak ada
+endpoint baru, schema berubah, atau perubahan business logic. Semua
+save tetap lewat endpoint existing R7b/R7g.
+
+### Mode tampilan baru
+
+`SUBMISSION_LAYOUT_OPTIONS` sekarang berisi 6 opsi: `excel` (default),
+`master`, `accordion`, `card`, `focus`, `board`. localStorage key
+`claimWorkflowSubmissionLayoutMode` menerima nilai `excel` di samping
+yang lama.
+
+- Default: **Excel Input** — tabel mirip sheet BASE Godrej.
+- Mode lama (Master / Accordion / Kartu / Fokus / Status Board) tetap
+  tersedia sebagai Advanced.
+
+### Tabel Excel Input
+
+Satu baris = satu `claim_workflow_item`. Submission resolved via
+`item.claimSubmissionId`. Kolom:
+
+```
+No. | No Claim | Perihal | Periode | Surat Program | Outlet | DPP |
+PPN % | PPN Value | PPH % | PPH Value | Nilai Klaim | No.2 | Bulan |
+Dokumen | Paid | Outstanding | Status | Aksi
+```
+
+Toolbar di atas tabel:
+
+- Search (No Surat / Outlet / Perihal / No Claim).
+- Filter status: `Semua` / `Belum No Claim` / `Belum Dokumen` /
+  `Outstanding` / `Paid`.
+- Global generator settings: Distributor (`SUPER`), Principal (`GCPI`,
+  ditebak via `guessPrincipalCode(workflow.principleName)`), Tahun, Bulan
+  default. Default tahun/bulan saat mount diambil dari
+  `getMakassarDateParts()` (Asia/Makassar).
+- Tombol "Buat Paket per Baris / Item" reuse endpoint R7g
+  `POST /[id]/submissions/from-items` mode `all_unassigned`.
+- Tombol "Refresh".
+
+### Inline edit per row
+
+- **No.2** + **Bulan** — input ringan; tombol "Generate" menyusun
+  `formatNoClaimSequence(seq)/{distributor}-{principal}/{month}/{year}`
+  dan mengisi draft No Claim. Tidak auto-save.
+- **No Claim** — input langsung; bisa dipakai untuk menyimpan No Claim
+  manual yang tidak sesuai pola Excel.
+- **DPP / PPN % / PPH %** — input numeric. Calculated cell
+  (PPN Value, PPH Value, Nilai Klaim) di-derive di frontend pakai
+  rumus `Nilai Klaim = DPP + DPP*PPN/100 - DPP*PPH/100`.
+
+Save row memanggil:
+- `PATCH /api/claim-workflow/[id]/items/[itemId]` — bila DPP/PPN/PPH
+  berubah. Field `dpp`, `ppnRate`, `pphRate` (mirror route existing).
+- `PATCH /api/claim-workflow/[id]/submissions/[submissionId]` — bila
+  No Claim berubah, dengan body `{ noClaim }`. Item harus sudah
+  ter-link ke submission (kalau belum, tampilkan toast minta klik
+  "Buat Paket per Baris / Item" dulu).
+
+Validasi client-side mirror backend: `dpp >= 0`, `0 <= ppnRate <= 100`,
+`0 <= pphRate <= 100`, `noClaim` non-empty saat dirty.
+
+### Kolom Dokumen / Paid / Outstanding
+
+Read-only ringkas:
+- Dokumen: counter `X/3` (Letter / Summary / Kwitansi) per submission.
+- Paid: `submission.totalPaid`.
+- Outstanding: `submission.remainingAmount`, ditampilkan "Lunas" saat 0.
+- Status: badge submission.
+
+Aksi per row: **Generate** (susun preview), **Simpan** (PATCH item +
+submission), **Kelola Paket** — set `submissionLayoutMode = "master"`
+dan `selectedSubmissionId = sub.id` agar user pindah ke Advanced Master
+Detail untuk mengelola dokumen/payment/close per paket.
+
+### Backward Compatibility
+
+- Mode lama tetap dipertahankan (no breaking layout removal).
+- Workflow-level No Claim editor tetap di section legacy untuk
+  single-submission.
+- `claim_submission.noClaim` tetap source-of-truth.
+- Schema database tidak berubah.
+- PEKA / EC / CN tetap retired.
+- R7f direct/manual source masih deferred.
+
+### Test
+
+`scripts/test-r7h-excel-input-mode.mjs` — 29 assertion:
+- Pure helper: `parseNoClaimComponents` (valid/empty/freeform/missing
+  year), `buildNoClaim`, `calculateClaimPreview` (rumus DPP+PPN-PPH).
+- Endpoint flow: PATCH item tax (rate, recalc submission/workflow
+  cache), PATCH submission noClaim (success + empty rejected), validasi
+  (PPN > 100, DPP < 0).
+
+Cleanup memakai prefix `R7H-TEST-`.
 
 ---
 

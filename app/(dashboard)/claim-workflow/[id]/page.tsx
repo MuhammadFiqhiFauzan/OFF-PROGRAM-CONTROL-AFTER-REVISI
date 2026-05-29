@@ -380,6 +380,34 @@ function guessPrincipalCode(principleName: string | null | undefined): string {
   return "GCPI";
 }
 
+/**
+ * R7h — parse komponen No Claim Excel-style dari string `noClaim`. Pattern:
+ * `{sequence}/{distributor}-{principal}/{MM}/{YYYY}`. Bila format tidak
+ * cocok, return null. Caller pakai null untuk fallback default Makassar +
+ * SUPER/GCPI saat menampilkan No.2 dan Bulan kosong di table.
+ */
+function parseNoClaimComponents(value: string | null | undefined): {
+  sequence: string;
+  distributorCode: string;
+  principalCode: string;
+  month: string;
+  year: string;
+} | null {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(
+    /^([A-Za-z0-9]+)\/([A-Za-z0-9]+)-([A-Za-z0-9]+)\/(\d{2})\/(\d{4})$/,
+  );
+  if (!match) return null;
+  return {
+    sequence: match[1],
+    distributorCode: match[2],
+    principalCode: match[3],
+    month: match[4],
+    year: match[5],
+  };
+}
+
 function getSubmissionTitle(submission: Submission): string {
   const label = (submission.scopeLabel || "").trim();
   if (label) return label;
@@ -511,6 +539,7 @@ function getGuidanceClass(tone: GuidanceTone): string {
 
 const SUBMISSION_LAYOUT_STORAGE_KEY = "claimWorkflowSubmissionLayoutMode";
 type SubmissionLayoutMode =
+  | "excel"
   | "master"
   | "accordion"
   | "card"
@@ -522,6 +551,11 @@ const SUBMISSION_LAYOUT_OPTIONS: Array<{
   label: string;
   hint: string;
 }> = [
+  {
+    value: "excel",
+    label: "Excel Input",
+    hint: "Tabel mirip BASE Godrej. Default untuk staff.",
+  },
   {
     value: "master",
     label: "Master Detail",
@@ -552,7 +586,7 @@ const SUBMISSION_LAYOUT_OPTIONS: Array<{
 const ALLOWED_LAYOUT_MODES = SUBMISSION_LAYOUT_OPTIONS.map((opt) => opt.value);
 
 function readStoredLayoutMode(): SubmissionLayoutMode {
-  if (typeof window === "undefined") return "master";
+  if (typeof window === "undefined") return "excel";
   try {
     const raw = window.localStorage.getItem(SUBMISSION_LAYOUT_STORAGE_KEY);
     if (raw && (ALLOWED_LAYOUT_MODES as ReadonlyArray<string>).includes(raw)) {
@@ -561,7 +595,7 @@ function readStoredLayoutMode(): SubmissionLayoutMode {
   } catch {
     // localStorage might be unavailable; fallback to default.
   }
-  return "master";
+  return "excel";
 }
 
 // R7 UX experiment — group submissions ke 3 lifecycle stage besar agar
@@ -800,7 +834,7 @@ export default function ClaimWorkflowDetailPage() {
   // pilihan ke localStorage agar mengikuti preferensi user lintas
   // navigasi. Tidak diserialisasi ke backend.
   const [submissionLayoutMode, setSubmissionLayoutMode] =
-    useState<SubmissionLayoutMode>("master");
+    useState<SubmissionLayoutMode>("excel");
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(
     null,
   );
@@ -828,6 +862,38 @@ export default function ClaimWorkflowDetailPage() {
   >({});
   // R7g — Per Item action state.
   const [creatingPerItem, setCreatingPerItem] = useState(false);
+  // R7h — Excel Input Mode state. Draft per item (No.2 + Bulan + DPP/PPN/PPH).
+  // Tax (DPP/PPN/PPH) inline edit ke PATCH /items/[itemId] yang sudah ada
+  // (ppnRate/pphRate). No Claim tetap di-save lewat PATCH submission.
+  // Toolbar punya global generator settings (distributor/principal/year)
+  // supaya kolom No.2 + Bulan per row tetap ringkas.
+  const [excelDistributorCode, setExcelDistributorCode] = useState("SUPER");
+  const [excelPrincipalCode, setExcelPrincipalCode] = useState("GCPI");
+  const [excelYear, setExcelYear] = useState("2026");
+  const [excelDefaultMonth, setExcelDefaultMonth] = useState("01");
+  const [excelSearch, setExcelSearch] = useState("");
+  const [excelStatusFilter, setExcelStatusFilter] = useState<
+    "all" | "needs_no_claim" | "needs_docs" | "outstanding" | "paid"
+  >("all");
+  type ExcelRowDraft = {
+    sequence: string;
+    month: string;
+    noClaimDraft: string;
+    dpp: string;
+    ppnRate: string;
+    pphRate: string;
+    initialNoClaim: string;
+    initialDpp: string;
+    initialPpnRate: string;
+    initialPphRate: string;
+  };
+  const [excelRowDrafts, setExcelRowDrafts] = useState<
+    Record<string, ExcelRowDraft>
+  >({});
+  const [excelRowSavingId, setExcelRowSavingId] = useState<string>("");
+  // Track items yang sudah pernah di-init agar perubahan default toolbar
+  // (year/month) tidak menimpa draft user yang aktif.
+  const excelInitializedItemsRef = useRef<Set<string>>(new Set());
 
   const loadDetail = useCallback(async () => {
     if (!id) return;
@@ -959,6 +1025,89 @@ export default function ClaimWorkflowDetailPage() {
       return filtered;
     });
   }, [submissions]);
+
+  // R7h — initial default toolbar month/year dari Asia/Makassar saat mount.
+  // Setelah itu user boleh ganti, tidak di-overwrite ulang.
+  const excelToolbarInitializedRef = useRef(false);
+  useEffect(() => {
+    if (excelToolbarInitializedRef.current) return;
+    excelToolbarInitializedRef.current = true;
+    const parts = getMakassarDateParts();
+    setExcelDefaultMonth(parts.month);
+    setExcelYear(parts.year);
+  }, []);
+
+  // R7h — sinkronkan principal default dari workflow.principleName.
+  useEffect(() => {
+    if (!workflow) return;
+    const guess = guessPrincipalCode(workflow.principleName);
+    setExcelPrincipalCode((prev) => (prev === "GCPI" || prev === "") ? guess : prev);
+  }, [workflow]);
+
+  // R7h — initialize draft per item saat items berubah. Item baru / belum
+  // pernah ter-init akan diisi dari current data + parsing No Claim.
+  // Item yang sudah ter-init tidak dipaksa reset (preserve user editing).
+  useEffect(() => {
+    if (items.length === 0) {
+      excelInitializedItemsRef.current = new Set();
+      setExcelRowDrafts({});
+      return;
+    }
+    const submissionByItem = new Map<string, Submission>();
+    for (const sub of submissions) {
+      // do nothing here; lookup by item.claimSubmissionId below
+      void sub;
+    }
+    setExcelRowDrafts((prev) => {
+      const next: Record<string, ExcelRowDraft> = { ...prev };
+      const seen = new Set<string>();
+      for (const item of items) {
+        seen.add(item.id);
+        if (excelInitializedItemsRef.current.has(item.id)) continue;
+        const sub = submissions.find((s) => s.id === item.claimSubmissionId) ||
+          null;
+        const noClaim = sub?.noClaim || "";
+        const parsed = parseNoClaimComponents(noClaim);
+        next[item.id] = {
+          sequence: parsed?.sequence ?? "",
+          month: parsed?.month ?? excelDefaultMonth,
+          noClaimDraft: noClaim,
+          dpp: String(item.dpp ?? 0),
+          ppnRate: String(item.ppnRate ?? 0),
+          pphRate: String(item.pphRate ?? 0),
+          initialNoClaim: noClaim,
+          initialDpp: String(item.dpp ?? 0),
+          initialPpnRate: String(item.ppnRate ?? 0),
+          initialPphRate: String(item.pphRate ?? 0),
+        };
+        excelInitializedItemsRef.current.add(item.id);
+      }
+      // Drop drafts untuk item yang sudah hilang.
+      for (const draftId of Object.keys(next)) {
+        if (!seen.has(draftId)) {
+          delete next[draftId];
+          excelInitializedItemsRef.current.delete(draftId);
+        }
+      }
+      // Bila server me-refresh data (mis. setelah save), sync initial
+      // baseline tanpa overwrite draft text yang masih dirty.
+      for (const item of items) {
+        const draft = next[item.id];
+        if (!draft) continue;
+        const sub = submissions.find((s) => s.id === item.claimSubmissionId) ||
+          null;
+        const noClaim = sub?.noClaim || "";
+        next[item.id] = {
+          ...draft,
+          initialNoClaim: noClaim,
+          initialDpp: String(item.dpp ?? 0),
+          initialPpnRate: String(item.ppnRate ?? 0),
+          initialPphRate: String(item.pphRate ?? 0),
+        };
+      }
+      return next;
+    });
+  }, [items, submissions, excelDefaultMonth]);
 
   const editable =
     canEditItems &&
@@ -1457,6 +1606,115 @@ export default function ClaimWorkflowDetailPage() {
       setMessage(errorMessage);
     } finally {
       setCreatingPerItem(false);
+    }
+  };
+
+  // R7h — Excel Input Mode handler: simpan satu row table.
+  // Memanggil PATCH item (DPP/PPN/PPH) bila tax dirty, dan PATCH submission
+  // (noClaim) bila No Claim dirty. Mengambil endpoint existing R7b/R7c
+  // tanpa membuat API baru. Tidak auto-save; dipanggil dari tombol "Simpan".
+  const saveExcelRow = async (item: WorkflowItem) => {
+    const draft = excelRowDrafts[item.id];
+    if (!draft) return;
+    const submission = submissions.find(
+      (s) => s.id === item.claimSubmissionId,
+    );
+    const taxDirty =
+      String(draft.dpp) !== String(draft.initialDpp) ||
+      String(draft.ppnRate) !== String(draft.initialPpnRate) ||
+      String(draft.pphRate) !== String(draft.initialPphRate);
+    const noClaimTrimmed = draft.noClaimDraft.trim();
+    const noClaimDirty = noClaimTrimmed !== String(draft.initialNoClaim || "");
+
+    if (!taxDirty && !noClaimDirty) {
+      toast.info?.("Tidak ada perubahan untuk disimpan.");
+      return;
+    }
+
+    // Validasi tax (mirror backend route).
+    if (taxDirty) {
+      const dpp = Number(draft.dpp);
+      const ppn = Number(draft.ppnRate);
+      const pph = Number(draft.pphRate);
+      if (!Number.isFinite(dpp) || dpp < 0) {
+        toast.error("DPP harus angka >= 0.");
+        return;
+      }
+      if (!Number.isFinite(ppn) || ppn < 0 || ppn > 100) {
+        toast.error("PPN % harus angka 0-100.");
+        return;
+      }
+      if (!Number.isFinite(pph) || pph < 0 || pph > 100) {
+        toast.error("PPH % harus angka 0-100.");
+        return;
+      }
+    }
+    // Validasi No Claim.
+    if (noClaimDirty) {
+      if (!noClaimTrimmed) {
+        toast.error("No Claim wajib diisi.");
+        return;
+      }
+      if (!submission) {
+        toast.error(
+          "Item belum punya Paket No Claim. Klik 'Buat Paket per Baris / Item' di toolbar.",
+        );
+        return;
+      }
+    }
+
+    setExcelRowSavingId(item.id);
+    setMessage("");
+    try {
+      if (taxDirty) {
+        const response = await fetch(
+          `/api/claim-workflow/${id}/items/${item.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dpp: draft.dpp,
+              ppnRate: draft.ppnRate,
+              pphRate: draft.pphRate,
+            }),
+          },
+        );
+        const result = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (!response.ok || !result.ok) {
+          throw new Error(result.error || "Gagal menyimpan tax item.");
+        }
+      }
+      if (noClaimDirty && submission) {
+        const response = await fetch(
+          `/api/claim-workflow/${id}/submissions/${submission.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ noClaim: noClaimTrimmed }),
+          },
+        );
+        const result = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (!response.ok || !result.ok) {
+          throw new Error(result.error || "Gagal menyimpan No Claim.");
+        }
+      }
+      toast.success("Baris klaim tersimpan.");
+      setMessage("Baris klaim tersimpan.");
+      await loadDetail();
+    } catch (err) {
+      const errorMessage = err instanceof Error
+        ? err.message
+        : "Gagal menyimpan baris.";
+      toast.error(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setExcelRowSavingId("");
     }
   };
 
@@ -2659,7 +2917,489 @@ export default function ClaimWorkflowDetailPage() {
         )}
 
         {/* Submissions content per layout */}
-        {submissions.length === 0 ? (
+        {submissionLayoutMode === "excel" ? (
+          /* R7h — Excel Input Mode (default).
+             Tabel mirip sheet BASE: setiap baris = satu claim_workflow_item.
+             No.2 + Bulan + No Claim per row, plus DPP/PPN%/PPH% inline.
+             No Claim disimpan ke claim_submission.noClaim; tax disimpan ke
+             claim_workflow_item via PATCH item existing. */
+          (() => {
+            const filteredItems = items.filter((it) => {
+              const sub = submissions.find((s) => s.id === it.claimSubmissionId);
+              const noClaim = sub?.noClaim || "";
+              const haystack = `${it.noSurat || ""} ${it.outlet || ""} ${it.jenisPromosi || ""} ${noClaim}`.toLowerCase();
+              const search = excelSearch.trim().toLowerCase();
+              if (search && !haystack.includes(search)) return false;
+              if (excelStatusFilter === "needs_no_claim") {
+                if (noClaim) return false;
+              } else if (excelStatusFilter === "needs_docs") {
+                if (!sub) return false;
+                if (isSubmissionDocumentsComplete(sub)) return false;
+              } else if (excelStatusFilter === "outstanding") {
+                if (!sub) return false;
+                if (Number(sub.remainingAmount || 0) <= 0) return false;
+              } else if (excelStatusFilter === "paid") {
+                if (!sub) return false;
+                if (Number(sub.remainingAmount || 0) > 0) return false;
+              }
+              return true;
+            });
+            const totalRows = items.length;
+            return (
+              <div className="mt-5 space-y-4">
+                {/* Toolbar */}
+                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="flex flex-1 min-w-[200px] flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Cari (No Surat / Outlet / Perihal / No Claim)
+                      <input
+                        type="text"
+                        value={excelSearch}
+                        onChange={(event) => setExcelSearch(event.target.value)}
+                        placeholder="Ketik untuk filter…"
+                        className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Filter
+                      <select
+                        value={excelStatusFilter}
+                        onChange={(event) =>
+                          setExcelStatusFilter(
+                            event.target.value as typeof excelStatusFilter,
+                          )
+                        }
+                        className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/60"
+                      >
+                        <option value="all">Semua</option>
+                        <option value="needs_no_claim">Belum No Claim</option>
+                        <option value="needs_docs">Belum Dokumen</option>
+                        <option value="outstanding">Outstanding</option>
+                        <option value="paid">Paid</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Distributor
+                      <input
+                        type="text"
+                        value={excelDistributorCode}
+                        onChange={(event) =>
+                          setExcelDistributorCode(event.target.value)
+                        }
+                        className="w-24 rounded-lg border border-white/10 bg-black/40 px-2 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Principal
+                      <input
+                        type="text"
+                        value={excelPrincipalCode}
+                        onChange={(event) =>
+                          setExcelPrincipalCode(event.target.value)
+                        }
+                        className="w-20 rounded-lg border border-white/10 bg-black/40 px-2 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Tahun
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={excelYear}
+                        onChange={(event) =>
+                          setExcelYear(event.target.value)
+                        }
+                        className="w-20 rounded-lg border border-white/10 bg-black/40 px-2 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Bulan default
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={2}
+                        value={excelDefaultMonth}
+                        onChange={(event) =>
+                          setExcelDefaultMonth(event.target.value)
+                        }
+                        className="w-16 rounded-lg border border-white/10 bg-black/40 px-2 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">
+                    <p className="text-[11px] text-slate-400">
+                      {filteredItems.length} dari {totalRows} baris ditampilkan ·
+                      Default bulan/tahun mengikuti Asia/Makassar.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {canEditItems && editable && (
+                        <button
+                          type="button"
+                          disabled={creatingPerItem || items.length === 0}
+                          onClick={() => void submitCreatePerItem()}
+                          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                          title={
+                            items.length === 0
+                              ? "Workflow belum memiliki item klaim."
+                              : undefined
+                          }
+                        >
+                          {creatingPerItem
+                            ? "Memproses..."
+                            : "Buat Paket per Baris / Item"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void loadDetail()}
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table */}
+                {totalRows === 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-center text-sm text-slate-400">
+                    Belum ada item klaim untuk workflow ini.
+                  </div>
+                ) : filteredItems.length === 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-center text-sm text-slate-400">
+                    Tidak ada baris yang cocok dengan filter saat ini.
+                  </div>
+                ) : (
+                  <div className="overflow-auto rounded-xl border border-white/10">
+                    <table className="min-w-[1700px] text-left text-sm">
+                      <thead className="bg-black/40 text-[11px] uppercase tracking-wider text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">No.</th>
+                          <th className="px-3 py-2 font-semibold">No Claim</th>
+                          <th className="px-3 py-2 font-semibold">Perihal</th>
+                          <th className="px-3 py-2 font-semibold">Periode</th>
+                          <th className="px-3 py-2 font-semibold">Surat Program</th>
+                          <th className="px-3 py-2 font-semibold">Outlet</th>
+                          <th className="px-3 py-2 text-right font-semibold">DPP</th>
+                          <th className="px-3 py-2 text-right font-semibold">PPN %</th>
+                          <th className="px-3 py-2 text-right font-semibold">PPN Value</th>
+                          <th className="px-3 py-2 text-right font-semibold">PPH %</th>
+                          <th className="px-3 py-2 text-right font-semibold">PPH Value</th>
+                          <th className="px-3 py-2 text-right font-semibold">Nilai Klaim</th>
+                          <th className="px-3 py-2 font-semibold">No.2</th>
+                          <th className="px-3 py-2 font-semibold">Bulan</th>
+                          <th className="px-3 py-2 font-semibold">Dokumen</th>
+                          <th className="px-3 py-2 text-right font-semibold">Paid</th>
+                          <th className="px-3 py-2 text-right font-semibold">Outstanding</th>
+                          <th className="px-3 py-2 font-semibold">Status</th>
+                          <th className="px-3 py-2 font-semibold">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {filteredItems.map((item, idx) => {
+                          const draft = excelRowDrafts[item.id];
+                          if (!draft) return null;
+                          const sub = submissions.find(
+                            (s) => s.id === item.claimSubmissionId,
+                          );
+                          const dppNum = Number(draft.dpp || 0) || 0;
+                          const ppnNum = Number(draft.ppnRate || 0) || 0;
+                          const pphNum = Number(draft.pphRate || 0) || 0;
+                          const ppnValue = +(dppNum * ppnNum / 100).toFixed(2);
+                          const pphValue = +(dppNum * pphNum / 100).toFixed(2);
+                          const nilaiKlaim = +(dppNum + ppnValue - pphValue).toFixed(2);
+                          const taxDirty =
+                            String(draft.dpp) !== String(draft.initialDpp) ||
+                            String(draft.ppnRate) !== String(draft.initialPpnRate) ||
+                            String(draft.pphRate) !== String(draft.initialPphRate);
+                          const noClaimDirty =
+                            draft.noClaimDraft.trim() !==
+                            String(draft.initialNoClaim || "");
+                          const dirty = taxDirty || noClaimDirty;
+                          const docsCount = sub
+                            ? getSubmissionDocumentsCompletedCount(sub)
+                            : 0;
+                          const remaining = sub
+                            ? Number(sub.remainingAmount || 0)
+                            : 0;
+                          const paid = sub ? Number(sub.totalPaid || 0) : 0;
+                          const updateDraft = (patch: Partial<ExcelRowDraft>) => {
+                            setExcelRowDrafts((prev) => ({
+                              ...prev,
+                              [item.id]: { ...prev[item.id], ...patch },
+                            }));
+                          };
+                          const generateNoClaim = () => {
+                            const seq = formatNoClaimSequence(draft.sequence);
+                            if (!seq) {
+                              toast.error("Isi No.2 dulu untuk generate.");
+                              return;
+                            }
+                            const month = draft.month.trim();
+                            if (!/^(0[1-9]|1[0-2])$/.test(month)) {
+                              toast.error("Bulan harus 01-12.");
+                              return;
+                            }
+                            if (!/^\d{4}$/.test(excelYear.trim())) {
+                              toast.error("Tahun harus 4 digit.");
+                              return;
+                            }
+                            const distributor = excelDistributorCode.trim();
+                            const principal = excelPrincipalCode.trim();
+                            if (!distributor || !principal) {
+                              toast.error("Distributor & Principal wajib di toolbar.");
+                              return;
+                            }
+                            const generated = `${seq}/${distributor}-${principal}/${month}/${excelYear.trim()}`;
+                            updateDraft({ noClaimDraft: generated });
+                          };
+                          const inputClass =
+                            "w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white outline-none focus:border-indigo-500/60";
+                          const numberInputClass =
+                            "w-24 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-right tabular-nums text-sm text-white outline-none focus:border-indigo-500/60";
+                          const tinyInputClass =
+                            "w-16 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-right tabular-nums text-sm text-white outline-none focus:border-indigo-500/60";
+                          return (
+                            <tr
+                              key={item.id}
+                              className={`text-slate-300 ${dirty ? "bg-amber-500/5" : ""}`}
+                            >
+                              <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">
+                                {idx + 1}
+                              </td>
+                              <td className="px-3 py-2">
+                                {sub ? (
+                                  editable && canAssignNoClaim ? (
+                                    <input
+                                      type="text"
+                                      value={draft.noClaimDraft}
+                                      onChange={(event) =>
+                                        updateDraft({
+                                          noClaimDraft: event.target.value,
+                                        })
+                                      }
+                                      placeholder="01/SUPER-GCPI/02/2026"
+                                      className="w-44 rounded-md border border-white/10 bg-black/40 px-2 py-1 font-mono text-xs text-emerald-200 outline-none focus:border-indigo-500/60"
+                                    />
+                                  ) : (
+                                    <span className="font-mono text-xs text-emerald-200">
+                                      {draft.noClaimDraft || "—"}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-[11px] italic text-amber-300">
+                                    Belum punya paket
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-xs">
+                                {item.jenisPromosi || "-"}
+                              </td>
+                              <td className="px-3 py-2 text-xs">
+                                {item.periode || "-"}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
+                                {item.noSurat || "-"}
+                              </td>
+                              <td className="px-3 py-2 text-xs">
+                                {item.outlet || "-"}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {editable ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    value={draft.dpp}
+                                    onChange={(event) =>
+                                      updateDraft({ dpp: event.target.value })
+                                    }
+                                    className={numberInputClass}
+                                  />
+                                ) : (
+                                  rupiah(item.dpp)
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {editable ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="any"
+                                    value={draft.ppnRate}
+                                    onChange={(event) =>
+                                      updateDraft({ ppnRate: event.target.value })
+                                    }
+                                    className={tinyInputClass}
+                                  />
+                                ) : (
+                                  `${item.ppnRate}%`
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                                {rupiah(ppnValue)}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {editable ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="any"
+                                    value={draft.pphRate}
+                                    onChange={(event) =>
+                                      updateDraft({ pphRate: event.target.value })
+                                    }
+                                    className={tinyInputClass}
+                                  />
+                                ) : (
+                                  `${item.pphRate}%`
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                                {rupiah(pphValue)}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold tabular-nums text-white">
+                                {rupiah(nilaiKlaim)}
+                              </td>
+                              <td className="px-3 py-2">
+                                {editable && canAssignNoClaim ? (
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={draft.sequence}
+                                    onChange={(event) =>
+                                      updateDraft({ sequence: event.target.value })
+                                    }
+                                    placeholder="01"
+                                    className={`${inputClass} w-16 font-mono`}
+                                  />
+                                ) : (
+                                  <span className="font-mono text-xs text-slate-400">
+                                    {draft.sequence || "—"}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                {editable && canAssignNoClaim ? (
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    maxLength={2}
+                                    value={draft.month}
+                                    onChange={(event) =>
+                                      updateDraft({ month: event.target.value })
+                                    }
+                                    placeholder={excelDefaultMonth}
+                                    className={`${inputClass} w-14 font-mono`}
+                                  />
+                                ) : (
+                                  <span className="font-mono text-xs text-slate-400">
+                                    {draft.month || "—"}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                {sub ? (
+                                  <span
+                                    className={`text-xs font-bold ${docsCount === 3 ? "text-emerald-300" : "text-amber-300"}`}
+                                    title="Letter / Summary / Kwitansi"
+                                  >
+                                    {docsCount}/3
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-slate-500">
+                                    —
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {sub ? rupiah(paid) : "—"}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {sub
+                                  ? remaining > 0
+                                    ? (
+                                      <span className="text-amber-200">
+                                        {rupiah(remaining)}
+                                      </span>
+                                    )
+                                    : (
+                                      <span className="text-emerald-300">
+                                        Lunas
+                                      </span>
+                                    )
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {sub ? (
+                                  <span
+                                    className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(sub.status)}`}
+                                  >
+                                    {displayClaimStatusLabel(sub.status)}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-slate-500">
+                                    —
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-wrap gap-1.5">
+                                  {editable && canAssignNoClaim && sub && (
+                                    <button
+                                      type="button"
+                                      onClick={generateNoClaim}
+                                      className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-bold text-indigo-200 hover:bg-indigo-500/20"
+                                      title="Generate No Claim dari No.2 + Bulan + Toolbar"
+                                    >
+                                      Generate
+                                    </button>
+                                  )}
+                                  {editable && (
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        !dirty ||
+                                        excelRowSavingId === item.id ||
+                                        excelRowSavingId !== ""
+                                      }
+                                      onClick={() => void saveExcelRow(item)}
+                                      className="rounded-md bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-indigo-500 disabled:opacity-40"
+                                    >
+                                      {excelRowSavingId === item.id
+                                        ? "Menyimpan…"
+                                        : "Simpan"}
+                                    </button>
+                                  )}
+                                  {sub && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedSubmissionId(sub.id);
+                                        setSubmissionLayoutMode("master");
+                                      }}
+                                      className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-slate-200 hover:bg-white/10"
+                                      title="Buka Master Detail untuk paket ini"
+                                    >
+                                      Kelola Paket
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })()
+        ) : submissions.length === 0 ? (
           <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-6 text-center">
             <p className="text-sm font-bold text-white">Belum ada Paket No Claim.</p>
             <p className="mt-1 text-xs text-slate-400">
