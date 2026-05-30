@@ -414,7 +414,7 @@ const legacyBackfill = [
      SET normalized_type = CASE
        WHEN ${legacyKey} IN ('display','off display','off-display','endcap','endcap support') THEN 'Display'
        WHEN ${legacyKey} IN ('visibility','visibilty','visibilyty','visibilityy','visiblity','visibiliti','visibilitas','area visibility') THEN 'Visibility'
-       WHEN ${legacyKey} IN ('promo on store','promo onstore','promo on-store','promo instore','promo in store','promo') THEN 'Promo On Store'
+       WHEN ${legacyKey} IN ('promo on store','promo onstore','promo on-store','promo instore','promo in store') THEN 'Promo On Store'
        WHEN ${legacyKey} IN ('event','off event') THEN 'Event'
        WHEN ${legacyKey} IN ('sample','sampling','sampling area','sampel') THEN 'Sample'
        ELSE 'Sample'

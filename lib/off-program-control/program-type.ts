@@ -73,13 +73,13 @@ const EXPLICIT_ALIASES: Record<string, OffProgramType> = {
   "off-display": "Display",
   endcap: "Display",
   "endcap support": "Display",
-  // Promo On Store
+  // Promo On Store (hanya bentuk multi-kata; "Promo" telanjang TIDAK dipetakan
+  // ke sini agar data lama "Promo" jatuh ke fallback Sample sesuai aturan revisi).
   "promo on store": "Promo On Store",
   "promo onstore": "Promo On Store",
   "promo on-store": "Promo On Store",
   "promo instore": "Promo On Store",
   "promo in store": "Promo On Store",
-  promo: "Promo On Store",
   // Event
   event: "Event",
   "off event": "Event",
