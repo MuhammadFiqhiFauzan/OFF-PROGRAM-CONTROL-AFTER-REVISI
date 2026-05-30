@@ -385,6 +385,55 @@ for (const sql of migrations) {
   }
 }
 
+// --- Backfill metadata legacy tipe program (revisi A / Prioritas 5) ---
+// Data lama (pre-dropdown) tidak punya metadata legacy. Backfill ini:
+//  1) Menandai data lama sebagai legacy (type_is_legacy=1) -> badge "Data Lama".
+//  2) Menyimpan jejak nilai tipe asli ke original_type (tidak menghapus type).
+//  3) Mengisi normalized_type dari hasil normalisasi (exact/alias) atau fallback Sample.
+// Heuristik "data lama": baris dengan normalized_type masih NULL (input baru selalu
+// mengisi normalized_type). Semua statement idempotent: setelah terisi, WHERE tidak
+// lagi cocok pada run berikutnya.
+const legacyKey = "LOWER(TRIM(COALESCE(type, '')))";
+const legacyBackfill = [
+  // 1) Tandai data lama sebagai legacy SEBELUM normalized_type diisi.
+  //    Termasuk data yang exact match dropdown (tetap "Data Lama").
+  `UPDATE off_batch_item
+     SET type_is_legacy = 1
+   WHERE normalized_type IS NULL
+     AND (type_is_legacy = 0 OR type_is_legacy IS NULL);`,
+  // 2) Simpan jejak nilai tipe asli (jangan hapus type tanpa menyimpan original_type).
+  `UPDATE off_batch_item
+     SET original_type = type
+   WHERE (original_type IS NULL OR original_type = '')
+     AND type IS NOT NULL
+     AND type <> '';`,
+  // 3) Isi normalized_type: exact + alias umum -> dropdown final, selain itu Sample.
+  //    Mirror dari EXPLICIT_ALIASES di lib/off-program-control/program-type.ts.
+  //    Catatan: typo berat / nilai tak dikenal aman jatuh ke fallback "Sample".
+  `UPDATE off_batch_item
+     SET normalized_type = CASE
+       WHEN ${legacyKey} IN ('display','off display','off-display','endcap','endcap support') THEN 'Display'
+       WHEN ${legacyKey} IN ('visibility','visibilty','visibilyty','visibilityy','visiblity','visibiliti','visibilitas','area visibility') THEN 'Visibility'
+       WHEN ${legacyKey} IN ('promo on store','promo onstore','promo on-store','promo instore','promo in store','promo') THEN 'Promo On Store'
+       WHEN ${legacyKey} IN ('event','off event') THEN 'Event'
+       WHEN ${legacyKey} IN ('sample','sampling','sampling area','sampel') THEN 'Sample'
+       ELSE 'Sample'
+     END
+   WHERE normalized_type IS NULL;`,
+];
+
+for (const sql of legacyBackfill) {
+  try {
+    await db.execute(sql);
+  } catch (error) {
+    // Toleransi bila kolom belum ada di skema sangat lama; jangan gagalkan init.
+    const message = String(error?.message || error);
+    if (!/no such column|no such table/i.test(message)) {
+      throw error;
+    }
+  }
+}
+
 await db.execute(
   `UPDATE user SET role = 'viewer' WHERE role IS NULL OR role = '';`,
 );

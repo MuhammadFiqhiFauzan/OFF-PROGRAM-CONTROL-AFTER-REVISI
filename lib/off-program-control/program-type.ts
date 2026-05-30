@@ -194,6 +194,28 @@ export function isOffProgramType(value: unknown): value is OffProgramType {
 }
 
 /**
+ * Resolusi tipe khusus DATA LAMA dari database (migrasi/legacy read).
+ *
+ * Beda dengan resolveProgramType (untuk input baru dari form):
+ * - Untuk data lama, exact match dropdown TETAP ditandai typeIsLegacy=true,
+ *   karena data tersebut berasal dari sebelum sistem dropdown ada dan harus
+ *   menampilkan badge "Data Lama" + menjaga jejak originalType.
+ * - originalType selalu mempertahankan nilai asli dari DB (tidak dihapus).
+ * - Tipe tidak dikenali tetap dipaksa ke fallback (Sample) + forcedToFallback.
+ *
+ * Gunakan helper ini HANYA untuk migrasi/baca data lama, JANGAN untuk input baru
+ * agar perilaku form (exact = bukan legacy) tidak rusak.
+ */
+export function resolveLegacyProgramType(value: unknown): ResolvedProgramType {
+  const resolved = resolveProgramType(value);
+  return {
+    ...resolved,
+    // Paksa tandai legacy untuk semua data lama, termasuk yang exact match.
+    typeIsLegacy: true,
+  };
+}
+
+/**
  * Resolusi tipe untuk PENYIMPANAN yang menghormati originalType dari client.
  *
  * Aturan revisi A.10: jangan hilangkan nilai tipe lama. Bila client mengirim
