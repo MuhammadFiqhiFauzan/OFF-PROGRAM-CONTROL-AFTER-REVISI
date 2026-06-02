@@ -118,6 +118,63 @@ export function buildDefaultSubmissionFromWorkflow(
 // =============================================================================
 
 /**
+ * Phase R7 BLOCKER FIX: Helper untuk menentukan apakah submission adalah
+ * submission aktif (punya data meaningful) atau submission kosong yang harus
+ * diabaikan dari count dan gate.
+ *
+ * Submission aktif adalah submission yang memenuhi salah satu:
+ * - totalClaim > 0, ATAU
+ * - itemCount > 0 (punya minimal 1 item assigned)
+ *
+ * Default submission kosong (scope=per_pengajuan, 0 item, 0 total) yang
+ * dibuat saat create workflow dari OFF akan ter-filter sebagai non-aktif.
+ *
+ * Usage:
+ * - Mark Ready gate: validasi hanya submission aktif
+ * - GET detail route: count hanya submission aktif
+ * - UI display: tampilkan hanya submission aktif
+ */
+export function isActiveSubmission(submission: {
+    totalClaim?: number | string | null;
+    itemCount?: number | null;
+}): boolean {
+    const totalClaim = Number(submission.totalClaim || 0);
+    const itemCount = Number(submission.itemCount || 0);
+    return totalClaim > 0 || itemCount > 0;
+}
+
+/**
+ * Ambil daftar submission aktif untuk workflow. Filter submission kosong.
+ * Dipakai oleh gate dan count yang harus abaikan default submission kosong.
+ */
+export async function getActiveSubmissions(
+    workflowId: string,
+    executor: DbExecutor = db,
+): Promise<Array<ClaimSubmissionRow & { itemCount: number }>> {
+    // Fetch submissions dengan item count via subquery
+    const submissions = await executor
+        .select({
+            submission: claimSubmission,
+            itemCount: sql<number>`(
+                SELECT COUNT(*)
+                FROM ${claimWorkflowItem}
+                WHERE ${claimWorkflowItem.claimSubmissionId} = ${claimSubmission.id}
+            )`.as("itemCount"),
+        })
+        .from(claimSubmission)
+        .where(eq(claimSubmission.claimWorkflowId, workflowId))
+        .orderBy(asc(claimSubmission.createdAt));
+
+    // Filter hanya submission aktif
+    return submissions
+        .map((row) => ({
+            ...row.submission,
+            itemCount: Number(row.itemCount || 0),
+        }))
+        .filter(isActiveSubmission);
+}
+
+/**
  * Ambil semua submission untuk satu workflow, urut createdAt asc.
  * Tidak mutate apapun. Bisa dipanggil di luar atau di dalam transaksi.
  */
