@@ -96,6 +96,8 @@ type Submission = {
   receiptGeneratedAt?: string | Date | null;
 };
 
+type StaffViewMode = "simple" | "berkas";
+
 const SUBMISSION_SCOPE_OPTIONS: { value: string; label: string }[] = [
   { value: "per_pengajuan", label: "Per Pengajuan" },
   { value: "per_program", label: "Per Program" },
@@ -155,6 +157,7 @@ type DetailResult = {
   noClaimList?: string[];
   noClaimDisplay?: string | null;
   canEditItems?: boolean;
+  isReadOnly?: boolean; // BLOCKER FIX #3: Flag read-only eksplisit
   canGenerateClaimLetter?: boolean;
   canGenerateSummary?: boolean;
   canGenerateReceipt?: boolean;
@@ -728,6 +731,7 @@ export default function ClaimWorkflowDetailPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
   const [canEditItems, setCanEditItems] = useState(false);
+  const [isReadOnly, setIsReadOnly] = useState(false);
   const [canGenerateClaimLetter, setCanGenerateClaimLetter] = useState(false);
   const [canGenerateSummary, setCanGenerateSummary] = useState(false);
   const [canGenerateReceipt, setCanGenerateReceipt] = useState(false);
@@ -795,6 +799,7 @@ export default function ClaimWorkflowDetailPage() {
   // R7j — Detail Claim row inline. Hanya satu row bisa expand pada satu
   // waktu. Klik "Detail" / "Kelola Detail" toggle expansion.
   const [excelDetailRowId, setExcelDetailRowId] = useState<string>("");
+  const [staffViewMode, setStaffViewMode] = useState<StaffViewMode>("simple");
   // R7j — Panduan Kerja Claim collapsible help. Default collapsed.
   const [showPanduan, setShowPanduan] = useState(false);
   // R7j corrective — Teknis / Riwayat collapsible. Items raw table,
@@ -875,6 +880,7 @@ export default function ClaimWorkflowDetailPage() {
       setPayments(result.payments || []);
       setPaymentSummary(result.paymentSummary || null);
       setCanEditItems(Boolean(result.canEditItems));
+      setIsReadOnly(Boolean(result.isReadOnly)); // BLOCKER FIX #3: Flag read-only eksplisit dari backend
       setCanGenerateClaimLetter(Boolean(result.canGenerateClaimLetter));
       setCanGenerateSummary(Boolean(result.canGenerateSummary));
       setCanGenerateReceipt(Boolean(result.canGenerateReceipt));
@@ -1025,8 +1031,10 @@ export default function ClaimWorkflowDetailPage() {
     });
   }, [items, submissions, excelDefaultMonth]);
 
+  // BLOCKER FIX #3: Editable hanya jika bukan read-only dan status Draft/Need Revision
   const editable =
     canEditItems &&
+    !isReadOnly &&
     (workflow?.status === claimWorkflowStatuses.draft ||
       workflow?.status === claimWorkflowStatuses.needRevision);
   const noClaimEditable =
@@ -1787,6 +1795,32 @@ export default function ClaimWorkflowDetailPage() {
     ? submissions.find((s) => s.id === selectedDetailItem.claimSubmissionId) ||
       null
     : null;
+  const submissionItemCountById = new Map<string, number>();
+  for (const item of items) {
+    if (!item.claimSubmissionId) continue;
+    submissionItemCountById.set(
+      item.claimSubmissionId,
+      (submissionItemCountById.get(item.claimSubmissionId) ?? 0) + 1,
+    );
+  }
+  const berkasClaimRows = submissions.map((submission) => {
+    const itemCount =
+      submission.itemCount ?? submissionItemCountById.get(submission.id) ?? 0;
+    const totalClaim = Number(submission.totalClaim || 0);
+    const isActive = itemCount > 0 || totalClaim > 0;
+    return {
+      submission,
+      itemCount,
+      totalClaim,
+      docsCount: getSubmissionDocumentsCompletedCount(submission),
+      isActive,
+    };
+  });
+  const activeBerkasCount = berkasClaimRows.filter((row) => row.isActive).length;
+  const activeNoClaimCount = berkasClaimRows.filter(
+    (row) => row.isActive && String(row.submission.noClaim || "").trim(),
+  ).length;
+  const emptyBerkasCount = berkasClaimRows.filter((row) => !row.isActive).length;
 
   // R7j — getSubmissionItems dihapus karena renderSubmissionDetailPanel
   // (advanced layout lama) sudah tidak ada. Detail Claim panel inline
@@ -1817,6 +1851,27 @@ export default function ClaimWorkflowDetailPage() {
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-1">
+              <div className="flex items-center gap-1">
+                <span className="px-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Tampilan
+                </span>
+                {(["simple", "berkas"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setStaffViewMode(mode)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                      staffViewMode === mode
+                        ? "bg-indigo-600 text-white shadow-sm shadow-indigo-950/60"
+                        : "text-slate-300 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    {mode === "simple" ? "Simple" : "Dengan Berkas Claim"}
+                  </button>
+                ))}
+              </div>
+            </div>
             {canEditItems && transitions.length > 0 && (
               <div className="flex flex-wrap justify-end gap-2">
                 {transitions.map((action) => {
@@ -1848,8 +1903,9 @@ export default function ClaimWorkflowDetailPage() {
             { key: "totalClaim", label: "Total Claim", value: rupiah(workflow.totalClaim) },
             { key: "totalPaid", label: "Total Paid", value: rupiah(workflow.totalPaid) },
             { key: "remainingAmount", label: "Outstanding", value: rupiah(workflow.remainingAmount) },
-            { key: "items", label: "Jumlah Baris Claim", value: String(items.length) },
-            { key: "submissions", label: "Jumlah No Claim", value: String(submissionCount) },
+            { key: "items", label: "Baris Claim", value: String(items.length) },
+            { key: "activeNoClaim", label: "No Claim Aktif", value: String(activeNoClaimCount) },
+            { key: "activeBerkas", label: "Berkas Aktif", value: String(activeBerkasCount) },
           ].map((card) => (
             <div key={card.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
               <p className="text-xs font-semibold text-slate-500">{card.label}</p>
@@ -1868,6 +1924,111 @@ export default function ClaimWorkflowDetailPage() {
         <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
           {message}
         </div>
+      )}
+
+      {staffViewMode === "berkas" && (
+        <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-bold text-white">Berkas Claim</h2>
+              <p className="mt-1 max-w-3xl text-sm text-slate-400">
+                Satu Berkas Claim = satu No Claim. Dokumen, pembayaran,
+                outstanding, dan close diproses per Berkas Claim.
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                Mark Ready seharusnya mengecek semua Berkas Claim aktif:
+                No Claim ada dan dokumen 3/3. Berkas kosong diabaikan.
+              </p>
+            </div>
+            {emptyBerkasCount > 0 && (
+              <span className="rounded-full border border-slate-600/50 bg-slate-900/60 px-3 py-1 text-[11px] font-bold text-slate-300">
+                {emptyBerkasCount} berkas kosong diabaikan
+              </span>
+            )}
+          </div>
+          <div className="mt-4 grid gap-2 xl:grid-cols-3">
+            {berkasClaimRows.length === 0 ? (
+              <p className="rounded-lg border border-white/10 bg-black/20 px-3 py-4 text-sm text-slate-500">
+                Belum ada Berkas Claim.
+              </p>
+            ) : (
+              berkasClaimRows.map((row) => {
+                const submission = row.submission;
+                const remaining = Number(submission.remainingAmount || 0);
+                return (
+                  <div
+                    key={submission.id}
+                    className={`rounded-lg border p-3 ${
+                      row.isActive
+                        ? "border-white/10 bg-black/30"
+                        : "border-slate-700/40 bg-slate-950/40 opacity-70"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-mono text-xs font-bold text-emerald-200">
+                          {submission.noClaim || "Belum ada No Claim"}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-slate-400">
+                          {submission.scopeLabel || "Berkas Claim"}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          row.isActive
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                            : "border-slate-600/50 bg-slate-800/40 text-slate-400"
+                        }`}
+                      >
+                        {row.isActive ? "Aktif" : "Kosong"}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <p className="text-slate-500">Item</p>
+                        <p className="font-bold text-white">{row.itemCount}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Dokumen</p>
+                        <p className={row.docsCount === 3 ? "font-bold text-emerald-300" : "font-bold text-amber-300"}>
+                          {row.docsCount}/3
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Nilai Claim</p>
+                        <p className="font-bold text-white">{rupiah(row.totalClaim)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Paid</p>
+                        <p className="font-bold text-emerald-200">{rupiah(submission.totalPaid)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Outstanding</p>
+                        <p className={remaining > 0 ? "font-bold text-amber-200" : "font-bold text-emerald-300"}>
+                          {remaining > 0 ? rupiah(remaining) : "Lunas"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Status</p>
+                        <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(submission.status)}`}>
+                          {displayClaimStatusLabel(submission.status)}
+                        </span>
+                      </div>
+                    </div>
+                    {!row.isActive && (
+                      <p className="mt-3 rounded-md border border-slate-700/40 bg-black/20 px-2 py-1.5 text-[11px] text-slate-400">
+                        Berkas kosong - tidak punya item, jadi diabaikan saat Mark Ready.
+                      </p>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <p className="mt-3 text-[11px] text-slate-500">
+            Teknis: Berkas Claim disimpan sebagai submission.
+          </p>
+        </section>
       )}
 
 
@@ -2425,6 +2586,9 @@ export default function ClaimWorkflowDetailPage() {
               <p className="mt-1 text-sm text-slate-400">
                 {selectedDetailItem.outlet || selectedDetailItem.jenisPromosi || "Baris claim"}
               </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Berkas Claim adalah satu pengajuan No Claim ke principal.
+              </p>
               <p className="mt-2 font-mono text-xs text-emerald-200">
                 {selectedDetailSubmission.noClaim || "Belum ada No Claim"}
               </p>
@@ -2436,6 +2600,33 @@ export default function ClaimWorkflowDetailPage() {
             >
               Tutup
             </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Ringkasan Baris Claim
+              </p>
+              <p className="mt-1 text-sm font-bold text-white">
+                {selectedDetailItem.jenisPromosi || selectedDetailItem.outlet || "Baris claim"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Berkas Claim
+              </p>
+              <p className="mt-1 font-mono text-xs font-bold text-emerald-200">
+                {selectedDetailSubmission.noClaim || "Belum ada No Claim"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Status Close
+              </p>
+              <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusTone(selectedDetailSubmission.status)}`}>
+                {displayClaimStatusLabel(selectedDetailSubmission.status)}
+              </span>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-4">
@@ -2567,6 +2758,15 @@ export default function ClaimWorkflowDetailPage() {
             <p>
               Setiap baris di Daftar Claim mengikuti pola kerja sheet BASE: isi No. Urut dan Bulan Claim, generate No Claim, cek DPP/PPN/PPH, lalu Simpan.
             </p>
+            <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+              <p className="font-bold text-white">Apa itu Berkas Claim?</p>
+              <ul className="mt-2 space-y-1">
+                <li>Berkas Claim adalah satu pengajuan No Claim ke principal.</li>
+                <li>Satu Berkas Claim punya No Claim, item claim, dokumen, pembayaran, outstanding, dan status close.</li>
+                <li>Biasanya satu baris claim menjadi satu Berkas Claim.</li>
+                <li>Jika ada Berkas Claim kosong, itu tidak diproses.</li>
+              </ul>
+            </div>
             <div className="grid gap-3 lg:grid-cols-2">
               <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                 <p className="font-bold text-white">Urutan Kerja</p>
