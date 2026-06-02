@@ -12,6 +12,8 @@ import {
 import {
     canActorReadClaimWorkflow,
     claimWorkflowStatuses,
+    getActiveSubmissions,
+    isActiveSubmission,
     recalcPaymentTotals,
     requireClaimSession,
 } from "@/lib/claim-workflow";
@@ -64,6 +66,9 @@ export async function GET(_request: Request, context: Context) {
         // bisa menampilkan section Submissions tanpa fetch tambahan.
         // Belum mengganti tampilan workflow-level (noClaim cache, PDF
         // paths, payment) — itu R7c/R7d.
+        // BLOCKER FIX #2: Ambil submissions dengan itemCount dan filter aktif.
+        // Submission aktif = totalClaim > 0 atau itemCount > 0.
+        // Default submission kosong (per_pengajuan, 0 item) diabaikan dari count.
         const submissions = await db
             .select()
             .from(claimSubmission)
@@ -85,7 +90,18 @@ export async function GET(_request: Request, context: Context) {
                 submissionItemCountMap.set(row.claimSubmissionId, Number(row.count || 0));
             }
         }
-        const noClaimList = submissions
+
+        // Attach itemCount ke setiap submission untuk filter aktif
+        const submissionsWithItemCount = submissions.map((s) => ({
+            ...s,
+            itemCount: submissionItemCountMap.get(s.id) ?? 0,
+        }));
+
+        // Filter submission aktif (abaikan default kosong)
+        const activeSubmissions = submissionsWithItemCount.filter(isActiveSubmission);
+
+        // noClaimList hanya dari submission aktif
+        const noClaimList = activeSubmissions
             .map((s) => s.noClaim)
             .filter((value): value is string => typeof value === "string" && value.length > 0);
         // Resolve display name untuk No Claim assignor agar UI tidak harus
@@ -210,25 +226,27 @@ export async function GET(_request: Request, context: Context) {
             },
             // Phase R7b — Multi No Claim:
             // Submissions list selalu disertakan supaya UI bisa render
-            // section Submissions. `submissionCount` dan
-            // `hasMultipleSubmissions` adalah hint cepat untuk UI.
-            // `noClaimDisplay` membantu UI memilih label single vs
-            // multiple tanpa harus join sendiri.
-            submissions: submissions.map((s) => ({
-                ...s,
-                itemCount: submissionItemCountMap.get(s.id) ?? 0,
-            })),
-            submissionCount: submissions.length,
-            hasMultipleSubmissions: submissions.length > 1,
+            // section Submissions.
+            //
+            // BLOCKER FIX #2 & #3:
+            // - submissionCount = count submission aktif saja (bukan semua)
+            // - activeSubmissions = submission dengan totalClaim > 0 atau itemCount > 0
+            // - canEditItems HANYA untuk admin/claim (bukan staff read-only)
+            // - isReadOnly flag eksplisit untuk staff
+            submissions: submissionsWithItemCount,
+            submissionCount: activeSubmissions.length,
+            hasMultipleSubmissions: activeSubmissions.length > 1,
+            activeSubmissionCount: activeSubmissions.length,
             noClaimList,
-            noClaimDisplay: submissions.length === 0
+            noClaimDisplay: activeSubmissions.length === 0
                 ? row.workflow.noClaim ?? null
-                : submissions.length === 1
+                : activeSubmissions.length === 1
                     ? noClaimList[0] ?? null
                     : noClaimList.length > 0
                         ? `Multiple No Claim (${noClaimList.length})`
                         : null,
             canEditItems: canManageClaim,
+            isReadOnly: !canManageClaim,
             canGenerateClaimLetter,
             canGenerateSummary,
             canGenerateReceipt,
