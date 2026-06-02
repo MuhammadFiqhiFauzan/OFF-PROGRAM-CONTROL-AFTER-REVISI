@@ -61,6 +61,7 @@ mulai R7b ke depan.
 | R7g   | Excel-style No Claim generator (pola Godrej `seq/SUPER-GCPI/MM/YYYY`) + scope `per_item` + endpoint `POST /[id]/submissions/from-items`. Tidak menyentuh schema; default month/year pakai zona `Asia/Makassar`. | DONE     |
 | R7h   | Excel BASE Input Mode UI: tabel mirip sheet BASE Godrej dengan inline edit DPP/PPN%/PPH%, kolom No.2/Bulan, dan generate No Claim per row. Default mode tampilan jadi `excel`. Reuse PATCH item + PATCH submission existing; tidak ada API baru. | DONE     |
 | R7i   | Staff Excel Mode simplification: switcher disederhanakan jadi `[Daftar Claim] [Advanced]` dengan submode lama tersembunyi di Advanced. Istilah "Paket" diganti "No Claim/Baris Claim" di UI default. Form "Buat Paket" + workflow-level Document section disembunyikan dari default Daftar Claim untuk multi-submission. | DONE     |
+| R7j   | Single Staff Excel Mode + Panduan Kerja Claim: hapus seluruh layout eksperimen (Master Detail / Accordion / Kartu / Fokus / Status Board) + Advanced switcher. Halaman detail hanya punya 1 mode tampilan: Daftar Claim. Tambah panel Detail Claim inline (expanded row) untuk dokumen + summary pembayaran per baris. Tambah tombol Panduan Kerja Claim sebagai help collapsible. Default tampilan: Header → Toolbar → Tabel Daftar Claim. Workflow-level Document section + Items raw + Pembayaran Principal + Close Workflow + Audit semuanya di balik collapsible "Teknis / Riwayat" (default tertutup). | DONE     |
 
 Semua phase di atas additive. Tidak ada kolom dihapus / di-rename di
 R7a-R7e. Tabel `claim_peka_report` / status PEKA tetap retired (lihat
@@ -715,6 +716,135 @@ contract tidak berubah). Regression suite tetap dijalankan:
 `scripts/test-r7c-documents.mjs`, `scripts/test-r7d-submission-payments.mjs`,
 `scripts/test-r7e-close-reports.mjs`, `scripts/test-r7g-excel-no-claim.mjs`,
 `scripts/test-r7h-excel-input-mode.mjs` — semua 0 FAIL.
+
+---
+
+## Phase R7j — Single Staff Excel Mode + Panduan Kerja Claim (DONE)
+
+R7j hanya menyentuh frontend halaman detail dan dokumentasi. Tidak ada
+endpoint baru, schema tidak berubah, business logic R7b–R7i tetap sama.
+
+### Tujuan
+
+Menyederhanakan halaman detail Claim Workflow menjadi satu mode
+tampilan saja: **Daftar Claim** (Excel BASE). Semua layout eksperimen
+sebelumnya dihapus dari kode supaya halaman lebih ringkas dan staff
+tidak melihat mode pilihan apa pun. Tambah fitur **Panduan Kerja Claim**
+sebagai help collapsible untuk mengajari staff cara mengerjakan workflow
+claim end-to-end.
+
+### Yang Dihapus
+
+- Layout eksperimen: Master Detail, Accordion, Kartu, Fokus, Status
+  Board (~400 baris JSX dihapus dari `page.tsx`).
+- Switcher 2-tier `[Daftar Claim] [Advanced]` + submode kecil.
+- Konstanta `SUBMISSION_LAYOUT_OPTIONS`, `ADVANCED_SUBMODES`,
+  `ALLOWED_LAYOUT_MODES`, helper `isAdvancedSubmode`,
+  `readStoredLayoutMode`, type `SubmissionLayoutMode`.
+- useEffect hidrasi + persist localStorage layout mode.
+- useEffect accordion default-open + ref `accordionInitializedKeyRef`.
+- Helper `renderSubmissionDetailPanel` + `getSubmissionItems` (dipakai
+  hanya oleh advanced layouts).
+- Card Advanced "Buat Paket per Baris / Item" + form "Buat Kelompok
+  Claim Manual" — keduanya dihapus dari default view. Endpoint
+  `POST /[id]/submissions` tetap ada di backend tapi tidak dipanggil
+  dari UI staff R7j.
+
+### Yang Ditambah
+
+- **Panduan Kerja Claim**: tombol di pojok kanan section Daftar Claim
+  (`showPanduan` state). Default collapsed. Saat dibuka menampilkan:
+  - Urutan kerja 10 langkah.
+  - Penjelasan 13 kolom tabel (grid 2 kolom).
+  - Rumus (PPN Value, PPH Value, Nilai Klaim, Outstanding).
+  - Troubleshooting (4 skenario).
+  - Catatan penting (format Excel, zona Makassar, sync OFF).
+- **Detail Claim panel** (expanded row inline): tombol "Detail" di
+  kolom Aksi setiap row. Klik → row expand jadi `<tr colSpan=19>` di
+  bawah row utama dengan:
+  - Header: scope label + No Claim mono.
+  - Ringkasan nilai: DPP / PPN / PPH / Nilai Klaim.
+  - Dokumen 3 kartu (Letter / Summary / Kwitansi) dengan tombol Buka PDF
+    + Generate / Regenerate (reuse R7c handler `generateSubmissionDocument`).
+  - Summary pembayaran read-only: Total Paid / Outstanding / Status.
+  - Helper note: pencatatan pembayaran principal + close masih lewat
+    section workflow-level di bawah halaman.
+  - Hanya satu row bisa expand sekaligus (state `excelDetailRowId`).
+
+### Workflow-level Document Section
+
+- Sekarang hanya muncul untuk **single-submission** workflow saja.
+  Untuk multi-No-Claim, dokumen dikelola lewat tombol Detail per row.
+- Helper amber multi-submission dihapus karena sudah ditangani lewat
+  Detail panel inline.
+
+### Backend tetap submission
+
+- `claim_submission` tetap ada sebagai container No Claim di DB.
+- `claim_submission.noClaim` tetap source-of-truth.
+- Semua endpoint R7b/R7c/R7d/R7e/R7g/R7h tetap berfungsi — UI hanya
+  berhenti memanggil endpoint POST submission (Buat Kelompok Manual).
+- Endpoint POST submissions/from-items + PATCH submission noClaim +
+  PATCH item tax + generate document tetap dipakai.
+
+### Yang TIDAK diubah
+
+- Schema database. Tidak ada ALTER/DROP/RENAME.
+- Backend route. Endpoint generate dokumen, payment, close, reports —
+  semua identik R7b–R7i.
+- Business logic R7c/R7d/R7e/R7g.
+- Section "Items" raw table di bawah, "Pembayaran Principal", "Close
+  Workflow", dan "Audit" — tetap muncul untuk admin/claim. Asumsi:
+  tidak dipindah ke per-row di R7j karena di luar scope yang
+  diizinkan.
+- PEKA / EC / CN tetap retired.
+- R7f direct/manual source masih deferred.
+
+### Test
+
+Tidak ada test baru di R7j (perubahan murni presentational; backend
+kontrak tidak berubah). Regression suite tetap dijalankan dan semua
+hijau:
+- `scripts/test-r7c-documents.mjs` — 88 PASS
+- `scripts/test-r7d-submission-payments.mjs` — 41 PASS
+- `scripts/test-r7e-close-reports.mjs` — 36 PASS
+- `scripts/test-r7g-excel-no-claim.mjs` — 36 PASS
+- `scripts/test-r7h-excel-input-mode.mjs` — 29 PASS
+
+### Corrective pass (R7j-2)
+
+Pass koreksi setelah review menunjukkan beberapa section teknis masih
+mendominasi default view:
+
+- **Hapus** section "No Claim per Baris" multi (`hasMultipleSubmissions ? ...`)
+  + section "No Claim" single workflow-level. Editor No Claim sekarang
+  hanya per-baris di kolom Daftar Claim + tombol Detail.
+- **Hapus** section "Dokumen Klaim" workflow-level (sebelumnya hanya
+  hidden untuk multi). Generate dokumen sekarang hanya lewat tombol
+  Detail per baris claim.
+- **Wrap** section "Items" raw table + "Pembayaran Principal" workflow-level
+  + "Close Workflow" + "Audit" ke dalam satu collapsible card bertajuk
+  **"Teknis / Riwayat"** (state `showTechnical`, default false). Klik
+  toggle untuk membuka. Section ini fungsional tapi tidak terlihat
+  default; dipertahankan supaya admin/claim tetap bisa pencatat
+  pembayaran principal + close workflow + lihat audit log tanpa
+  mengganggu staff yang fokus mengisi tabel BASE.
+- **Rename** id anchor `paket-no-claim-section` → `daftar-claim-section`.
+- **Rename** copy guidance: "X paket selesai" → "X baris selesai",
+  "Buat paket pertama" → "Buat baris claim pertama", "Pilih paket"
+  → "Pilih baris claim", "Close paket" → "Close baris", "Cek detail
+  paket" → "Cek detail baris", confirm "Buat satu Paket No Claim..."
+  → "Siapkan satu baris claim...".
+
+Default page order final:
+1. Header Ringkasan workflow.
+2. Panel "Langkah Berikutnya".
+3. Section **Daftar Claim** (heading + Panduan Kerja Claim collapsed +
+   banner Siapkan Baris Claim + toolbar + tabel + Detail Claim panel).
+4. Collapsible **Teknis / Riwayat** (Items / Pembayaran / Close /
+   Audit, default tertutup).
+
+Net file size: 4446 → 3183 baris (-1263).
 
 ---
 

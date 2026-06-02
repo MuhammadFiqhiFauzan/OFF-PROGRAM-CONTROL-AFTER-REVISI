@@ -217,6 +217,37 @@ tidak berubah, regression R7c/R7d/R7e/R7g/R7h harus tetap hijau.
 
 ---
 
+## Section K — R7j Single Staff Excel Mode + Panduan Kerja Claim
+
+R7j menghapus seluruh layout eksperimen dan switcher mode. Halaman
+detail hanya punya satu tampilan: Daftar Claim. Tambah Detail Claim
+panel inline dan Panduan Kerja Claim.
+
+| # | Step | Expected |
+|---|------|----------|
+| K1 | Buka detail Claim Workflow. | Tidak ada switcher mode tampilan. Hanya satu render path: tabel Daftar Claim. |
+| K2 | Cari kata "Paket" / "Submission" di halaman default. | Tidak ada di section utama (boleh ada di "Items" raw table footer dan "Audit"). |
+| K3 | Tombol **Panduan Kerja Claim** ada di pojok kanan atas section Daftar Claim. | Default collapsed. Klik membuka panel berisi: Urutan Kerja (10 langkah), Penjelasan Kolom (13 entri), Rumus, Troubleshooting (4 skenario), Catatan Penting. |
+| K4 | Klik tombol **Panduan Kerja Claim** kembali. | Panel tertutup. Tombol kembali ke teks "Panduan Kerja Claim". |
+| K5 | Banner "Siapkan Baris Claim" tetap muncul saat ada item belum dipaketkan. | Klik tombol → endpoint `submissions/from-items` mode `all_unassigned`. Toast sukses. |
+| K6 | Banner berubah jadi "Semua baris claim sudah siap diberi No Claim." setelah K5 atau saat semua item sudah `per_item`. | Sesuai. |
+| K7 | Tombol **Detail** di kolom Aksi setiap row. | Klik → row expand jadi sub-row dengan `colSpan=19`. Tombol berubah jadi "Tutup Detail". |
+| K8 | Detail panel inline isinya. | Header: scope label + No Claim mono. Ringkasan: DPP / PPN / PPH / Nilai Klaim. Dokumen 3 kartu (Letter/Summary/Kwitansi) dengan tombol Buka PDF + Generate. Summary pembayaran: Paid / Outstanding / Status. Helper note tentang section workflow-level. |
+| K9 | Klik **Generate** di kartu Letter/Summary/Kwitansi dalam Detail panel. | Memanggil endpoint R7c per submission. Toast sukses. PDF path muncul. Detail reload. |
+| K10 | Buka Detail row A, lalu klik Detail row B. | Row A otomatis collapse, row B expand. Hanya satu detail terbuka pada satu waktu. |
+| K11 | Workflow multi-No-Claim, scroll ke bawah. | Section workflow-level "Dokumen Klaim" tidak muncul. |
+| K12 | Workflow single-No-Claim. | Section workflow-level "Dokumen Klaim" tetap muncul untuk generate manual. |
+| K13 | Edit DPP/PPN/PPH inline + Simpan. | PATCH item endpoint dipanggil. Detail Claim panel di row tetap konsisten setelah reload. |
+| K14 | Edit No. Urut + Bulan Claim + klik Generate kemudian Simpan. | No Claim tersimpan ke `claim_submission.noClaim` (PATCH submission). |
+| K15 | Staff (`claim_workflow.view` only). | Tidak ada input edit DPP/PPN/PPH/No Claim/No.2/Bulan. Tombol "Siapkan Baris Claim" tidak tampil. Tombol "Detail" tetap tampil dan menampilkan panel read-only. Tombol Generate dokumen tidak tampil bila `canEditItems` false. |
+| K16 | localStorage `claimWorkflowSubmissionLayoutMode`. | R7j tidak baca dan tidak tulis key ini. Nilai legacy yang tertinggal di browser tidak berpengaruh. |
+| K17 | Regression: `node scripts/test-r7c-documents.mjs`, `r7d-submission-payments`, `r7e-close-reports`, `r7g-excel-no-claim`, `r7h-excel-input-mode`. | Semua 0 FAIL. |
+| K18 | (R7j-2 corrective) Default view setelah workflow load. | Tidak ada section "No Claim per Baris", "No Claim", atau "Dokumen Klaim" workflow-level. Heading utama "Daftar Claim" muncul tepat setelah Header + Langkah Berikutnya. |
+| K19 | (R7j-2) Items raw table + Pembayaran Principal + Close Workflow + Audit. | Semua tersembunyi di balik card collapsible **Teknis / Riwayat** (default tertutup). Klik judul untuk buka. |
+| K20 | (R7j-2) Copy guidance bilingual. | "X baris selesai" (bukan "paket"). Dialog confirm Siapkan Baris Claim memakai kata "baris claim". |
+
+---
+
 ## Sign-off
 
 | Section | Status | Notes |
@@ -231,5 +262,6 @@ tidak berubah, regression R7c/R7d/R7e/R7g/R7h harus tetap hijau.
 | H. R7g Excel-style No Claim + Per Item | | |
 | I. R7h Excel BASE Input Mode | | |
 | J. R7i Staff Excel Mode Simplification | | |
+| K. R7j Single Staff Excel Mode + Panduan Kerja Claim | | |
 
 QA dijalankan oleh: ___________________  Tanggal: __________
