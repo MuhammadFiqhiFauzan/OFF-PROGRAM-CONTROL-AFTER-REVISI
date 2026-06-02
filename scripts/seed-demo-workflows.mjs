@@ -108,7 +108,7 @@ async function tableExists(name) {
 async function ensureTables() {
     const required = [
         "off_batch", "off_batch_item", "off_payment", "off_audit_log",
-        "claim_workflow", "claim_workflow_item", "claim_payment",
+        "claim_workflow", "claim_submission", "claim_workflow_item", "claim_payment",
         "claim_audit_log",
     ];
     const missing = [];
@@ -137,9 +137,17 @@ async function cleanupOldDemo() {
     );
     const offIds = offBatchIds.rows.map((r) => r.id);
 
-    const cwfIds = await db.execute(
-        "SELECT id FROM claim_workflow WHERE claim_workflow_no LIKE 'DEMO-CLAIM-%'",
-    );
+    const cwfIds = offIds.length > 0
+        ? await db.execute({
+            sql: `SELECT id FROM claim_workflow
+                  WHERE claim_workflow_no LIKE 'DEMO-CLAIM-%'
+                     OR claim_workflow_no LIKE 'CLM/DEMO-OFF-%'
+                     OR off_batch_id IN (${offIds.map(() => "?").join(",")})`,
+            args: offIds,
+        })
+        : await db.execute(
+            "SELECT id FROM claim_workflow WHERE claim_workflow_no LIKE 'DEMO-CLAIM-%' OR claim_workflow_no LIKE 'CLM/DEMO-OFF-%'",
+        );
     const claimIds = cwfIds.rows.map((r) => r.id);
 
     if (claimIds.length > 0) {
@@ -147,8 +155,12 @@ async function cleanupOldDemo() {
         await db.execute({ sql: `DELETE FROM claim_audit_log WHERE claim_workflow_id IN (${placeholders})`, args: claimIds });
         await db.execute({ sql: `DELETE FROM claim_payment WHERE claim_workflow_id IN (${placeholders})`, args: claimIds });
         await db.execute({ sql: `DELETE FROM claim_workflow_item WHERE claim_workflow_id IN (${placeholders})`, args: claimIds });
+        await db.execute({ sql: `DELETE FROM claim_submission WHERE claim_workflow_id IN (${placeholders})`, args: claimIds });
     }
-    await db.execute("DELETE FROM claim_workflow WHERE claim_workflow_no LIKE 'DEMO-CLAIM-%'");
+    if (claimIds.length > 0) {
+        const placeholders = claimIds.map(() => "?").join(",");
+        await db.execute({ sql: `DELETE FROM claim_workflow WHERE id IN (${placeholders})`, args: claimIds });
+    }
 
     if (offIds.length > 0) {
         const placeholders = offIds.map(() => "?").join(",");
@@ -666,6 +678,7 @@ async function tryGenerateStubPdf(workflow, options) {
 
 async function insertClaimWorkflow(seq, config, offBatch, principle) {
     const id = randomUUID();
+    const submissionId = randomUUID();
     const claimWorkflowNo = `DEMO-CLAIM-${String(seq).padStart(3, "0")}-${principle.code}`;
     // Phase R1: noClaim utama disimpan di claim_workflow dan disinkronkan
     // ke off_batch_item.no_claim. Demo memakai pola DEMO-NOCLAIM-{seq}/...
@@ -764,6 +777,35 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
         ],
     });
 
+    await db.execute({
+        sql: `INSERT INTO claim_submission (
+            id, claim_workflow_id, no_claim, no_claim_assigned_at, no_claim_assigned_by,
+            scope, scope_label, status,
+            total_dpp, total_ppn, total_pph, total_claim, total_paid, remaining_amount,
+            submitted_to_principal_at,
+            claim_letter_pdf_path, claim_letter_generated_at, claim_letter_generated_by,
+            summary_pdf_path, summary_generated_at, summary_generated_by,
+            receipt_pdf_path, receipt_generated_at, receipt_generated_by,
+            closed_at, closed_by, close_note,
+            created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+            submissionId, id, noClaim, noClaim ? ms(8) : null, noClaim ? ACTOR_ID : null,
+            "per_pengajuan", claimWorkflowNo, config.status,
+            totalDpp, totalPpn, totalPph, totalClaim, totalPaid, remainingAmount,
+            config.hasSubmittedAt ? ms(6) : null,
+            pdfPath, pdfGeneratedAt, pdfPath ? ACTOR_ID : null,
+            summaryPdfPath, summaryGeneratedAt, summaryPdfPath ? ACTOR_ID : null,
+            receiptPdfPath, receiptGeneratedAt, receiptPdfPath ? ACTOR_ID : null,
+            config.isClosed ? ms(1) : null,
+            config.isClosed ? ACTOR_ID : null,
+            config.isClosed
+                ? "DEMO seed: workflow ditutup karena pembayaran lunas dan dokumen lengkap."
+                : null,
+            ACTOR_ID, ms(10), ms(1),
+        ],
+    });
+
     // Sync noClaim ke semua off_batch_item milik OFF batch sumber claim ini.
     // Ini meniru efek transaksi `PATCH /api/claim-workflow/[id]/no-claim`.
     if (noClaim) {
@@ -776,12 +818,12 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
     for (const item of items) {
         await db.execute({
             sql: `INSERT INTO claim_workflow_item (
-                id, claim_workflow_id, off_batch_item_id, no_surat, jenis_promosi,
+                id, claim_workflow_id, claim_submission_id, off_batch_item_id, no_surat, jenis_promosi,
                 periode, outlet, dpp, ppn_rate, ppn_amount, pph_rate, pph_amount, nilai_klaim,
                 status, note, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
-                item.id, id, item.offBatchItemId, item.noSurat, item.jenisPromosi,
+                item.id, id, submissionId, item.offBatchItemId, item.noSurat, item.jenisPromosi,
                 item.periode, item.outlet, item.dpp, item.ppnRate, item.ppnAmount,
                 item.pphRate, item.pphAmount, item.nilaiKlaim,
                 item.status, item.note,
@@ -934,11 +976,11 @@ async function insertClaimWorkflow(seq, config, offBatch, principle) {
     if (config.paidFraction > 0) {
         await db.execute({
             sql: `INSERT INTO claim_payment (
-                id, claim_workflow_id, payment_date, payment_amount, payment_type,
+                id, claim_workflow_id, claim_submission_id, payment_date, payment_amount, payment_type,
                 payment_note, proof_path, created_by, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
-                randomUUID(), id, isoDate(3), totalPaid, "Transfer",
+                randomUUID(), id, submissionId, isoDate(3), totalPaid, "Transfer",
                 "DEMO-PAYMENT seed",
                 null, ACTOR_ID, ms(3), ms(3),
             ],
