@@ -2108,35 +2108,53 @@ export default function ClaimWorkflowDetailPage() {
                             ? Number(sub.remainingAmount || 0)
                             : 0;
                           const paid = sub ? Number(sub.totalPaid || 0) : 0;
-                          const updateDraft = (patch: Partial<ExcelRowDraft>) => {
+                          const saveBlockedByMissingSubmission =
+                            noClaimDirty && !sub;
+                          const updateDraft = (
+                            patch:
+                              | Partial<ExcelRowDraft>
+                              | ((current: ExcelRowDraft) => Partial<ExcelRowDraft>),
+                          ) => {
                             setExcelRowDrafts((prev) => ({
                               ...prev,
-                              [item.id]: { ...draft, ...prev[item.id], ...patch },
+                              [item.id]: {
+                                ...(prev[item.id] ?? draft),
+                                ...(typeof patch === "function"
+                                  ? patch(prev[item.id] ?? draft)
+                                  : patch),
+                              },
                             }));
                           };
                           const generateNoClaim = () => {
-                            const seq = formatNoClaimSequence(draft.sequence);
-                            if (!seq) {
-                              toast.error("Isi No. Urut dulu untuk generate.");
+                            const currentDraft = excelRowDrafts[item.id] ?? draft;
+                            const generatorDraft: NoClaimGeneratorDraft = {
+                              sequence: currentDraft.sequence,
+                              distributorCode: excelDistributorCode,
+                              principalCode: excelPrincipalCode,
+                              month:
+                                currentDraft.month.trim() || excelDefaultMonth,
+                              year: excelYear,
+                            };
+                            const validationError =
+                              validateNoClaimGenerator(generatorDraft);
+                            if (validationError) {
+                              toast.error(validationError);
                               return;
                             }
-                            const month = draft.month.trim();
-                            if (!/^(0[1-9]|1[0-2])$/.test(month)) {
-                              toast.error("Bulan harus 01-12.");
-                              return;
+                            const generated =
+                              buildNoClaimPreview(generatorDraft);
+                            updateDraft({
+                              sequence: formatNoClaimSequence(
+                                generatorDraft.sequence,
+                              ),
+                              month: generatorDraft.month.trim(),
+                              noClaimDraft: generated,
+                            });
+                            if (!sub) {
+                              toast.info?.(
+                                "No Claim sudah dibuat sebagai draft. Klik Siapkan Baris Claim dulu sebelum Simpan.",
+                              );
                             }
-                            if (!/^\d{4}$/.test(excelYear.trim())) {
-                              toast.error("Tahun harus 4 digit.");
-                              return;
-                            }
-                            const distributor = excelDistributorCode.trim();
-                            const principal = excelPrincipalCode.trim();
-                            if (!distributor || !principal) {
-                              toast.error("Distributor & Principal wajib di toolbar.");
-                              return;
-                            }
-                            const generated = `${seq}/${distributor}-${principal}/${month}/${excelYear.trim()}`;
-                            updateDraft({ noClaimDraft: generated });
                           };
                           const inputClass =
                             "w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white outline-none focus:border-indigo-500/60";
@@ -2332,12 +2350,16 @@ export default function ClaimWorkflowDetailPage() {
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex flex-wrap gap-1.5">
-                                  {noClaimEditable && sub && (
+                                  {noClaimEditable && (
                                     <button
                                       type="button"
                                       onClick={generateNoClaim}
                                       className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-bold text-indigo-200 hover:bg-indigo-500/20"
-                                      title="Generate No Claim dari No. Urut, Bulan Claim, Distributor, Principal, dan Tahun"
+                                      title={
+                                        sub
+                                          ? "Generate No Claim dari No. Urut, Bulan Claim, Distributor, Principal, dan Tahun"
+                                          : "Generate draft No Claim. Klik Siapkan Baris Claim sebelum Simpan."
+                                      }
                                     >
                                       Generate
                                     </button>
@@ -2347,11 +2369,17 @@ export default function ClaimWorkflowDetailPage() {
                                       type="button"
                                       disabled={
                                         !dirty ||
+                                        saveBlockedByMissingSubmission ||
                                         excelRowSavingId === item.id ||
                                         excelRowSavingId !== ""
                                       }
                                       onClick={() => void saveExcelRow(item)}
                                       className="rounded-md bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-indigo-500 disabled:opacity-40"
+                                      title={
+                                        saveBlockedByMissingSubmission
+                                          ? "Klik Siapkan Baris Claim dulu sebelum menyimpan No Claim."
+                                          : undefined
+                                      }
                                     >
                                       {excelRowSavingId === item.id
                                         ? "Menyimpan…"
