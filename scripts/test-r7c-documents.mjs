@@ -159,6 +159,27 @@ async function insertWorkflow(suffix) {
     // dengan trick INSERT then DELETE dummy. Untuk simplicity, kita reuse
     // existing off_batch dan hapus claim_workflow-nya kalau ada.
     await db.execute({
+        sql: `DELETE FROM claim_workflow_item
+              WHERE claim_workflow_id IN (
+                  SELECT id FROM claim_workflow WHERE off_batch_id = ? AND claim_workflow_no LIKE ?
+              )`,
+        args: [offBatchId, `${TEST_PREFIX}-%`],
+    });
+    await db.execute({
+        sql: `DELETE FROM claim_submission
+              WHERE claim_workflow_id IN (
+                  SELECT id FROM claim_workflow WHERE off_batch_id = ? AND claim_workflow_no LIKE ?
+              )`,
+        args: [offBatchId, `${TEST_PREFIX}-%`],
+    });
+    await db.execute({
+        sql: `DELETE FROM claim_audit_log
+              WHERE claim_workflow_id IN (
+                  SELECT id FROM claim_workflow WHERE off_batch_id = ? AND claim_workflow_no LIKE ?
+              )`,
+        args: [offBatchId, `${TEST_PREFIX}-%`],
+    });
+    await db.execute({
         sql: "DELETE FROM claim_workflow WHERE off_batch_id = ? AND claim_workflow_no LIKE ?",
         args: [offBatchId, `${TEST_PREFIX}-%`],
     });

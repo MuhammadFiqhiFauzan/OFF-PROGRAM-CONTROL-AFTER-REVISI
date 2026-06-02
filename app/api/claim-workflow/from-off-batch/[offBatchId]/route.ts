@@ -16,6 +16,11 @@ import {
     claimWorkflowStatuses,
     requireClaimSession,
 } from "@/lib/claim-workflow";
+import {
+    getOrCreateDefaultSubmission,
+    recalcSubmissionTotals,
+    recalcWorkflowAggregateFromSubmissions,
+} from "@/lib/claim-workflow/submissions";
 
 type Context = { params: Promise<{ offBatchId: string }> };
 
@@ -139,10 +144,21 @@ export async function POST(request: NextRequest, context: Context) {
 
         // libsql/drizzle transaction: semua insert atomic. Jika satu gagal,
         // tidak ada workflow header tanpa items / tanpa audit yang tertinggal.
+        let defaultSubmissionId: string | null = null;
         await db.transaction(async (tx) => {
             await tx.insert(claimWorkflow).values(workflow);
             if (items.length > 0) {
                 await tx.insert(claimWorkflowItem).values(items);
+            }
+            const [createdWorkflow] = await tx
+                .select()
+                .from(claimWorkflow)
+                .where(eq(claimWorkflow.id, workflowId));
+            if (createdWorkflow) {
+                const defaultSubmission = await getOrCreateDefaultSubmission(tx, createdWorkflow, now);
+                defaultSubmissionId = defaultSubmission.id;
+                await recalcSubmissionTotals(tx, defaultSubmission.id, now);
+                await recalcWorkflowAggregateFromSubmissions(tx, workflowId, now);
             }
             await tx.insert(claimAuditLog).values({
                 id: randomUUID(),
@@ -165,6 +181,7 @@ export async function POST(request: NextRequest, context: Context) {
                 ...workflow,
                 offNoPengajuan: batch.noPengajuan,
                 itemCount: items.length,
+                defaultSubmissionId,
             },
         }, { status: 201 });
     } catch (error) {
