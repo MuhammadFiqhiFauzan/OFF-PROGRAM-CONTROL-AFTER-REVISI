@@ -8,6 +8,8 @@ import {
     claimAuditScopes,
     claimDocumentTypes,
     claimWorkflowStatuses,
+    getActiveSubmissions,
+    isActiveSubmission,
     isPathInsideClaimDocumentRoot,
     requireClaimSession,
     writeClaimAudit,
@@ -166,7 +168,11 @@ export async function POST(request: Request, context: Context) {
 
         // Validation untuk mark_ready: workflow harus memiliki item dan
         // total/komponen pajak per item harus konsisten > 0 sebelum dilock.
-        // Phase R1: tambah wajib noClaim dan claimLetterPdfPath sudah ada.
+        //
+        // BLOCKER FIX #1 (R7 Multi-Submission Aware):
+        // Gate sekarang validasi per submission aktif, bukan workflow cache.
+        // Submission aktif = submission dengan totalClaim > 0 atau itemCount > 0.
+        // Default submission kosong (per_pengajuan, 0 item) diabaikan.
         const items = await db
             .select()
             .from(claimWorkflowItem)
@@ -198,38 +204,64 @@ export async function POST(request: Request, context: Context) {
                     itemId: invalidItem.id,
                 }, { status: 422 });
             }
-            const noClaim = String(workflow.noClaim || "").trim();
-            if (!noClaim) {
+
+            // R7 BLOCKER FIX: Validasi per submission aktif, bukan workflow cache.
+            // Ambil semua submission aktif (ignore default kosong).
+            const activeSubmissions = await getActiveSubmissions(id, db);
+
+            if (activeSubmissions.length === 0) {
                 return NextResponse.json({
                     ok: false,
-                    code: "CLAIM_WORKFLOW_NO_CLAIM_REQUIRED",
-                    error: "No Claim wajib diisi sebelum Ready to Submit. Assign No Claim terlebih dahulu.",
+                    code: "CLAIM_WORKFLOW_NO_ACTIVE_SUBMISSION",
+                    error: "Tidak ada Berkas Claim aktif. Siapkan Baris Claim terlebih dahulu.",
                 }, { status: 422 });
             }
-            if (!workflow.claimLetterPdfPath) {
-                return NextResponse.json({
-                    ok: false,
-                    code: "CLAIM_WORKFLOW_CLAIM_LETTER_REQUIRED",
-                    error: "Claim Letter PDF wajib di-generate sebelum Ready to Submit.",
-                }, { status: 422 });
+
+            // Validasi setiap submission aktif harus lengkap:
+            // - noClaim non-empty
+            // - 3 dokumen PDF tersedia (claimLetterPdfPath, summaryPdfPath, receiptPdfPath)
+            for (const submission of activeSubmissions) {
+                const subNoClaim = String(submission.noClaim || "").trim();
+                const subLabel = submission.scopeLabel || submission.scope || "submission";
+
+                if (!subNoClaim) {
+                    return NextResponse.json({
+                        ok: false,
+                        code: "CLAIM_SUBMISSION_NO_CLAIM_REQUIRED",
+                        error: `Berkas Claim "${subLabel}" belum memiliki No Claim. Assign No Claim terlebih dahulu.`,
+                        submissionId: submission.id,
+                    }, { status: 422 });
+                }
+
+                if (!submission.claimLetterPdfPath) {
+                    return NextResponse.json({
+                        ok: false,
+                        code: "CLAIM_SUBMISSION_CLAIM_LETTER_REQUIRED",
+                        error: `Berkas Claim "${subLabel}" belum memiliki Claim Letter PDF. Generate dokumen terlebih dahulu.`,
+                        submissionId: submission.id,
+                    }, { status: 422 });
+                }
+
+                if (!submission.summaryPdfPath) {
+                    return NextResponse.json({
+                        ok: false,
+                        code: "CLAIM_SUBMISSION_SUMMARY_REQUIRED",
+                        error: `Berkas Claim "${subLabel}" belum memiliki Summary PDF. Generate dokumen terlebih dahulu.`,
+                        submissionId: submission.id,
+                    }, { status: 422 });
+                }
+
+                if (!submission.receiptPdfPath) {
+                    return NextResponse.json({
+                        ok: false,
+                        code: "CLAIM_SUBMISSION_RECEIPT_REQUIRED",
+                        error: `Berkas Claim "${subLabel}" belum memiliki Kwitansi Claim PDF. Generate dokumen terlebih dahulu.`,
+                        submissionId: submission.id,
+                    }, { status: 422 });
+                }
             }
-            // Phase R2: Summary dan Kwitansi Claim juga wajib sebelum
-            // Ready to Submit. Ketiganya membentuk paket dokumen klaim ke
-            // principal.
-            if (!workflow.summaryPdfPath) {
-                return NextResponse.json({
-                    ok: false,
-                    code: "CLAIM_WORKFLOW_SUMMARY_REQUIRED",
-                    error: "Claim Summary PDF wajib di-generate sebelum Ready to Submit.",
-                }, { status: 422 });
-            }
-            if (!workflow.receiptPdfPath) {
-                return NextResponse.json({
-                    ok: false,
-                    code: "CLAIM_WORKFLOW_RECEIPT_REQUIRED",
-                    error: "Kwitansi Claim PDF wajib di-generate sebelum Ready to Submit.",
-                }, { status: 422 });
-            }
+
+            // Semua submission aktif valid. Mark Ready bisa proceed.
         }
 
         const now = new Date();
