@@ -117,6 +117,7 @@ type AuditRow = {
 
 type Payment = {
   id: string;
+  claimSubmissionId?: string | null;
   paymentDate: string;
   paymentAmount: number;
   paymentType?: string | null;
@@ -802,8 +803,7 @@ export default function ClaimWorkflowDetailPage() {
   const [staffViewMode, setStaffViewMode] = useState<StaffViewMode>("simple");
   // R7j — Panduan Kerja Claim collapsible help. Default collapsed.
   const [showPanduan, setShowPanduan] = useState(false);
-  // R7j corrective — Teknis / Riwayat collapsible. Items raw table,
-  // Pembayaran Principal workflow-level, Close Workflow, Audit semua
+  // R7j corrective — Riwayat / Audit collapsible untuk detail internal.
   // dipindah ke section ini agar default view fokus ke tabel Daftar
   // Claim. Default collapsed.
   const [showTechnical, setShowTechnical] = useState(false);
@@ -1291,10 +1291,24 @@ export default function ClaimWorkflowDetailPage() {
       toast.error("Nominal bayar harus lebih dari 0.");
       return;
     }
+
+    let paymentUrl = `/api/claim-workflow/${id}/payments`;
+    if (hasMultipleSubmissions) {
+      const targetSubmissionId =
+        selectedDetailSubmission?.id ||
+        selectedSubmissionId ||
+        null;
+      if (!targetSubmissionId) {
+        toast.error("Pilih Berkas Claim terlebih dahulu.");
+        return;
+      }
+      paymentUrl = `/api/claim-workflow/${id}/submissions/${targetSubmissionId}/payments`;
+    }
+
     setPaymentSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/claim-workflow/${id}/payments`, {
+      const response = await fetch(paymentUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1336,7 +1350,7 @@ export default function ClaimWorkflowDetailPage() {
     }
   };
 
-  const voidPayment = async (paymentId: string) => {
+  const voidPayment = async (payment: Payment) => {
     if (typeof window === "undefined") return;
     const reason = window.prompt(
       "Alasan void pembayaran (wajib diisi):",
@@ -1348,11 +1362,26 @@ export default function ClaimWorkflowDetailPage() {
       toast.error("Alasan void wajib diisi.");
       return;
     }
-    setVoidingId(paymentId);
+
+    let voidUrl = `/api/claim-workflow/${id}/payments/${payment.id}/void`;
+    if (hasMultipleSubmissions) {
+      const targetSubmissionId =
+        payment.claimSubmissionId ||
+        selectedDetailSubmission?.id ||
+        selectedSubmissionId ||
+        null;
+      if (!targetSubmissionId) {
+        toast.error("Pilih Berkas Claim terlebih dahulu.");
+        return;
+      }
+      voidUrl = `/api/claim-workflow/${id}/submissions/${targetSubmissionId}/payments/${payment.id}/void`;
+    }
+
+    setVoidingId(payment.id);
     setMessage("");
     try {
       const response = await fetch(
-        `/api/claim-workflow/${id}/payments/${paymentId}/void`,
+        voidUrl,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1723,6 +1752,20 @@ export default function ClaimWorkflowDetailPage() {
       toast.error("Catatan close wajib diisi.");
       return;
     }
+
+    let closeUrl = `/api/claim-workflow/${id}/close`;
+    if (hasMultipleSubmissions) {
+      const targetSubmissionId =
+        selectedDetailSubmission?.id ||
+        selectedSubmissionId ||
+        null;
+      if (!targetSubmissionId) {
+        toast.error("Pilih Berkas Claim terlebih dahulu.");
+        return;
+      }
+      closeUrl = `/api/claim-workflow/${id}/submissions/${targetSubmissionId}/close`;
+    }
+
     if (typeof window !== "undefined") {
       const confirmed = window.confirm(
         "Tutup Claim Workflow ini? Setelah Closed, payment dan transisi status tidak dapat lagi dilakukan.",
@@ -1732,7 +1775,7 @@ export default function ClaimWorkflowDetailPage() {
     setCloseSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/claim-workflow/${id}/close`, {
+      const response = await fetch(closeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: trimmed }),
@@ -1821,6 +1864,59 @@ export default function ClaimWorkflowDetailPage() {
     (row) => row.isActive && String(row.submission.noClaim || "").trim(),
   ).length;
   const emptyBerkasCount = berkasClaimRows.filter((row) => !row.isActive).length;
+  const closeTargetSubmission =
+    selectedDetailSubmission ||
+    (selectedSubmissionId
+      ? submissions.find((submission) => submission.id === selectedSubmissionId) || null
+      : null) ||
+    (berkasClaimRows.length === 1 ? berkasClaimRows[0].submission : null);
+  const closeTargetPayments = closeTargetSubmission
+    ? payments.filter((payment) => payment.claimSubmissionId === closeTargetSubmission.id)
+    : [];
+  const closeTargetActivePayments = closeTargetPayments.filter(
+    (payment) => payment.voidedAt === null || payment.voidedAt === undefined,
+  );
+  const fallbackActivePayments = payments.filter(
+    (payment) => payment.voidedAt === null || payment.voidedAt === undefined,
+  );
+  const closeTargetActivePaymentCount = closeTargetSubmission
+    ? closeTargetActivePayments.length > 0 || hasMultipleSubmissions
+      ? closeTargetActivePayments.length
+      : fallbackActivePayments.length
+    : 0;
+  const closeTargetTotalClaim = closeTargetSubmission
+    ? Number(closeTargetSubmission.totalClaim || 0)
+    : paymentSummary?.totalClaim ?? 0;
+  const closeTargetTotalPaid = closeTargetSubmission
+    ? Number(closeTargetSubmission.totalPaid || 0)
+    : paymentSummary?.totalPaid ?? 0;
+  const closeTargetRemaining = closeTargetSubmission
+    ? Number(closeTargetSubmission.remainingAmount || 0)
+    : paymentSummary?.remainingAmount ?? 0;
+  const closeChecks = closeTargetSubmission
+    ? [
+      { label: "Status Paid", ok: closeTargetSubmission.status === claimWorkflowStatuses.paid },
+      { label: "Outstanding = 0", ok: closeTargetRemaining === 0 },
+      { label: "Total Paid >= Total Claim", ok: closeTargetTotalPaid >= closeTargetTotalClaim && closeTargetTotalClaim > 0 },
+      { label: "Active payment >= 1", ok: closeTargetActivePaymentCount > 0 },
+      { label: "No Claim ter-assign", ok: Boolean(closeTargetSubmission.noClaim && String(closeTargetSubmission.noClaim).trim()) },
+      { label: "Claim Letter PDF", ok: Boolean(closeTargetSubmission.claimLetterPdfPath) },
+      { label: "Summary PDF", ok: Boolean(closeTargetSubmission.summaryPdfPath) },
+      { label: "Kwitansi Claim PDF", ok: Boolean(closeTargetSubmission.receiptPdfPath) },
+    ]
+    : [
+      { label: "Pilih Berkas Claim", ok: false },
+    ];
+  const localCloseBlockers = closeTargetSubmission
+    ? closeChecks.filter((check) => !check.ok).map((check) => check.label)
+    : ["Pilih Berkas Claim terlebih dahulu."];
+  const displayedCloseBlockers = hasMultipleSubmissions || closeTargetSubmission
+    ? localCloseBlockers
+    : closeBlockers;
+  const canCloseEffective = canEditItems &&
+    Boolean(closeTargetSubmission) &&
+    closeTargetSubmission?.status !== claimWorkflowStatuses.closed &&
+    displayedCloseBlockers.length === 0;
 
   // R7j — getSubmissionItems dihapus karena renderSubmissionDetailPanel
   // (advanced layout lama) sudah tidak ada. Detail Claim panel inline
@@ -2025,9 +2121,6 @@ export default function ClaimWorkflowDetailPage() {
               })
             )}
           </div>
-          <p className="mt-3 text-[11px] text-slate-500">
-            Teknis: Berkas Claim disimpan sebagai submission.
-          </p>
         </section>
       )}
 
@@ -2794,7 +2887,7 @@ export default function ClaimWorkflowDetailPage() {
 
 
 
-      {/* R7j corrective - Teknis / Riwayat. Default collapsed agar fokus default ada di tabel Daftar Claim. Berisi Items raw, Pembayaran Principal workflow-level, Close Workflow, dan Audit. */}
+      {/* R7j corrective - Riwayat / Audit. Default collapsed agar fokus default ada di tabel Daftar Claim. */}
       <div className="rounded-2xl border border-white/10 bg-[#1a1c23]">
         <button
           type="button"
@@ -2802,7 +2895,7 @@ export default function ClaimWorkflowDetailPage() {
           aria-expanded={showTechnical}
           className="flex w-full items-center justify-between gap-2 px-5 py-3 text-left"
         >
-          <span className="text-sm font-bold text-white">Teknis / Riwayat</span>
+          <span className="text-sm font-bold text-white">Riwayat / Audit</span>
           <span className="text-xs text-slate-400">
             {showTechnical ? "Tutup" : "Buka"}
           </span>
@@ -2812,7 +2905,7 @@ export default function ClaimWorkflowDetailPage() {
       <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23] shadow-lg shadow-black/20">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
           <div>
-            <h2 className="font-bold text-white">Teknis / Raw Items</h2>
+            <h2 className="font-bold text-white">Detail Baris Claim</h2>
             <p className="mt-1 text-xs text-slate-400">
               DPP, PPN Rate, PPH Rate, dan catatan dapat diedit hanya saat Draft atau Need Revision.
             </p>
@@ -2995,7 +3088,7 @@ export default function ClaimWorkflowDetailPage() {
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-bold text-white">Teknis / Payment Workflow</h2>
+            <h2 className="font-bold text-white">Riwayat Pembayaran</h2>
             <p className="mt-1 text-sm text-slate-400">
               Catat pembayaran yang masuk dari principal. Dukungan partial
               payment, tidak boleh overpayment. Void dipakai untuk koreksi tanpa hard-delete.
@@ -3150,7 +3243,7 @@ export default function ClaimWorkflowDetailPage() {
                           <button
                             type="button"
                             disabled={voidingId === payment.id}
-                            onClick={() => void voidPayment(payment.id)}
+                            onClick={() => void voidPayment(payment)}
                             className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-bold text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-50"
                           >
                             {voidingId === payment.id ? "Memproses..." : "Void"}
@@ -3172,11 +3265,10 @@ export default function ClaimWorkflowDetailPage() {
       <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-bold text-white">Close Workflow</h2>
+            <h2 className="font-bold text-white">Close Claim</h2>
             <p className="mt-1 text-sm text-slate-400">
-              Tutup Claim Workflow ketika klaim sudah lunas dan dokumen
-              sudah lengkap. Workflow Closed bersifat read-only untuk
-              payment/transition.
+              Tutup Berkas Claim ketika klaim sudah lunas dan dokumen
+              sudah lengkap. Claim yang sudah Closed bersifat read-only.
             </p>
           </div>
         </div>
@@ -3198,17 +3290,13 @@ export default function ClaimWorkflowDetailPage() {
           </div>
         ) : (
           <>
+            {closeTargetSubmission && (
+              <p className="mt-4 text-xs text-slate-400">
+                Syarat close mengikuti Berkas Claim: <span className="font-semibold text-slate-200">{closeTargetSubmission.noClaim || closeTargetSubmission.scopeLabel || "Berkas Claim"}</span>
+              </p>
+            )}
             <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {[
-                { label: "Status Paid", ok: workflow.status === claimWorkflowStatuses.paid },
-                { label: "Outstanding = 0", ok: (paymentSummary?.remainingAmount ?? 0) === 0 },
-                { label: "Total Paid >= Total Claim", ok: (paymentSummary?.totalPaid ?? 0) >= (paymentSummary?.totalClaim ?? 0) && (paymentSummary?.totalClaim ?? 0) > 0 },
-                { label: "Active payment >= 1", ok: (paymentSummary?.activePaymentCount ?? 0) > 0 },
-                { label: "No Claim ter-assign", ok: Boolean(workflow.noClaim && String(workflow.noClaim).trim()) },
-                { label: "Claim Letter PDF", ok: Boolean(workflow.claimLetterPdfPath) },
-                { label: "Summary PDF", ok: Boolean(workflow.summaryPdfPath) },
-                { label: "Kwitansi Claim PDF", ok: Boolean(workflow.receiptPdfPath) },
-              ].map((check) => (
+              {closeChecks.map((check) => (
                 <div
                   key={check.label}
                   className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold ${
@@ -3223,11 +3311,11 @@ export default function ClaimWorkflowDetailPage() {
               ))}
             </div>
 
-            {closeBlockers.length > 0 && (
+            {displayedCloseBlockers.length > 0 && (
               <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
                 <p className="font-bold">Belum bisa Close:</p>
                 <ul className="mt-1 list-inside list-disc space-y-0.5">
-                  {closeBlockers.map((blocker) => (
+                  {displayedCloseBlockers.map((blocker) => (
                     <li key={blocker}>{blocker}</li>
                   ))}
                 </ul>
@@ -3242,19 +3330,19 @@ export default function ClaimWorkflowDetailPage() {
                   onChange={(event) => setCloseNote(event.target.value)}
                   placeholder="Catatan final verifikasi, mis: dokumen lengkap, payment penuh per ..."
                   rows={3}
-                  disabled={!canClose || closeSaving}
+                  disabled={!canCloseEffective || closeSaving}
                   className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50"
                 />
               </label>
               <div className="mt-3 flex items-center justify-between gap-3">
                 <p className="text-[11px] italic text-slate-500">
-                  {canClose
+                  {canCloseEffective
                     ? "Semua syarat terpenuhi. Pastikan catatan terisi sebelum Close."
                     : "Lengkapi syarat di atas untuk mengaktifkan tombol Close."}
                 </p>
                 <button
                   type="button"
-                  disabled={!canClose || closeSaving || !closeNote.trim()}
+                  disabled={!canCloseEffective || closeSaving || !closeNote.trim()}
                   onClick={() => void submitClose()}
                   className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >

@@ -123,6 +123,8 @@ export async function POST(request: Request, context: Context) {
         const fromStatus = workflow.status;
         let toStatus: string;
 
+        let activeSubmissionsForSync: Awaited<ReturnType<typeof getActiveSubmissions>> = [];
+
         if (action === "mark_ready") {
             if (
                 fromStatus !== claimWorkflowStatuses.draft &&
@@ -208,6 +210,7 @@ export async function POST(request: Request, context: Context) {
             // R7 BLOCKER FIX: Validasi per submission aktif, bukan workflow cache.
             // Ambil semua submission aktif (ignore default kosong).
             const activeSubmissions = await getActiveSubmissions(id, db);
+            activeSubmissionsForSync = activeSubmissions;
 
             if (activeSubmissions.length === 0) {
                 return NextResponse.json({
@@ -262,6 +265,15 @@ export async function POST(request: Request, context: Context) {
             }
 
             // Semua submission aktif valid. Mark Ready bisa proceed.
+        } else if (action === "submit_to_principal") {
+            activeSubmissionsForSync = await getActiveSubmissions(id, db);
+            if (activeSubmissionsForSync.length === 0) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_WORKFLOW_NO_ACTIVE_SUBMISSION",
+                    error: "Tidak ada Berkas Claim aktif untuk dikirim ke principal.",
+                }, { status: 422 });
+            }
         }
 
         const now = new Date();
@@ -381,6 +393,50 @@ export async function POST(request: Request, context: Context) {
                 }
                 if (invalidatedSubmissionPdfPaths.length > 0) {
                     auditMetadata.invalidatedSubmissionPdfPaths = invalidatedSubmissionPdfPaths;
+                }
+            }
+
+            if (action === "mark_ready" || action === "submit_to_principal") {
+                const syncedSubmissions: Array<{
+                    submissionId: string;
+                    fromStatus: string;
+                    toStatus: string;
+                }> = [];
+                for (const submission of activeSubmissionsForSync) {
+                    if (
+                        submission.status === claimWorkflowStatuses.closed ||
+                        submission.status === claimWorkflowStatuses.paid ||
+                        submission.status === claimWorkflowStatuses.cancelled ||
+                        submission.status === toStatus
+                    ) {
+                        continue;
+                    }
+                    await tx
+                        .update(claimSubmission)
+                        .set({ status: toStatus, updatedAt: now })
+                        .where(eq(claimSubmission.id, submission.id));
+                    syncedSubmissions.push({
+                        submissionId: submission.id,
+                        fromStatus: submission.status,
+                        toStatus,
+                    });
+                }
+                if (syncedSubmissions.length > 0) {
+                    auditMetadata.syncedSubmissionStatuses = syncedSubmissions;
+                    await writeClaimAudit({
+                        claimWorkflowId: id,
+                        auditScope: claimAuditScopes.workflow,
+                        actor,
+                        action: "claim_submission_status_synced",
+                        fromStatus,
+                        toStatus,
+                        note,
+                        metadata: {
+                            trigger: action,
+                            activeSubmissionCount: activeSubmissionsForSync.length,
+                            syncedSubmissions,
+                        },
+                    }, tx);
                 }
             }
 

@@ -140,6 +140,14 @@ export async function GET(_request: Request, context: Context) {
         const paymentTotals = recalcPaymentTotals(totalClaim, payments);
         const activePayments = payments.filter((p) => p.voidedAt === null);
         const voidedPayments = payments.filter((p) => p.voidedAt !== null);
+        const activePaymentCountBySubmission = new Map<string, number>();
+        for (const payment of activePayments) {
+            if (!payment.claimSubmissionId) continue;
+            activePaymentCountBySubmission.set(
+                payment.claimSubmissionId,
+                (activePaymentCountBySubmission.get(payment.claimSubmissionId) ?? 0) + 1,
+            );
+        }
         const paymentStatus = isPaymentDerivedStatus(row.workflow.status)
             ? paymentTotals.derivedStatus
             : row.workflow.status;
@@ -158,38 +166,37 @@ export async function GET(_request: Request, context: Context) {
         // Bangun closeBlockers terurut sesuai prioritas user-facing.
         // canClose hanya true bila tidak ada blocker dan actor admin/claim.
         const closeBlockers: string[] = [];
-        if (row.workflow.status === claimWorkflowStatuses.closed) {
-            closeBlockers.push("Claim Workflow sudah Closed.");
-        } else if (row.workflow.status === claimWorkflowStatuses.cancelled) {
+        if (activeSubmissions.length === 0) {
+            closeBlockers.push("Belum ada Berkas Claim aktif.");
+        }
+        const closeableSubmissions = activeSubmissions.filter((submission) => {
+            if (submission.status === claimWorkflowStatuses.closed) return false;
+            const submissionTotalClaim = Number(submission.totalClaim || 0);
+            const submissionTotalPaid = Number(submission.totalPaid || 0);
+            const submissionRemaining = Number(submission.remainingAmount || 0);
+            const activePaymentCount = activePaymentCountBySubmission.get(submission.id) ?? 0;
+            return (
+                submission.status === claimWorkflowStatuses.paid &&
+                String(submission.noClaim || "").trim() !== "" &&
+                submissionTotalClaim > 0 &&
+                activePaymentCount > 0 &&
+                submissionTotalPaid >= submissionTotalClaim &&
+                submissionRemaining === 0 &&
+                Boolean(submission.claimLetterPdfPath) &&
+                Boolean(submission.summaryPdfPath) &&
+                Boolean(submission.receiptPdfPath)
+            );
+        });
+        const openSubmissions = activeSubmissions.filter(
+            (submission) => submission.status !== claimWorkflowStatuses.closed,
+        );
+        if (row.workflow.status === claimWorkflowStatuses.cancelled) {
             closeBlockers.push("Claim Workflow sudah Cancelled, tidak dapat di-Close.");
-        } else if (row.workflow.status !== claimWorkflowStatuses.paid) {
-            closeBlockers.push("Workflow belum berstatus Paid.");
         }
-        if (!String(row.workflow.noClaim || "").trim()) {
-            closeBlockers.push("No Claim belum diisi.");
+        if (openSubmissions.length > 0 && closeableSubmissions.length === 0) {
+            closeBlockers.push("Belum ada Berkas Claim yang memenuhi syarat Close.");
         }
-        if (!(totalClaim > 0)) {
-            closeBlockers.push("Total Claim harus lebih dari 0.");
-        }
-        if (activePayments.length === 0) {
-            closeBlockers.push("Belum ada pembayaran aktif.");
-        }
-        if (paymentTotals.totalPaid < totalClaim) {
-            closeBlockers.push("Total Paid belum mencapai Total Claim.");
-        }
-        if (paymentTotals.remainingAmount > 0) {
-            closeBlockers.push("Outstanding belum 0.");
-        }
-        if (!row.workflow.claimLetterPdfPath) {
-            closeBlockers.push("Claim Letter PDF belum dibuat.");
-        }
-        if (!row.workflow.summaryPdfPath) {
-            closeBlockers.push("Summary PDF belum dibuat.");
-        }
-        if (!row.workflow.receiptPdfPath) {
-            closeBlockers.push("Kwitansi Claim PDF belum dibuat.");
-        }
-        const canClose = canManageClaim && closeBlockers.length === 0;
+        const canClose = canManageClaim && closeableSubmissions.length > 0;
 
         return NextResponse.json({
             ok: true,

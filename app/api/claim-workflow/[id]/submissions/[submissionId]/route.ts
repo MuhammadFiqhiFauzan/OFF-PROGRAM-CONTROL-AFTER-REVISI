@@ -11,6 +11,7 @@
  *           satu submission. Audit `claim_submission_updated` dan
  *           opsional `no_claim_assigned` + `no_claim_synced_to_off`.
  */
+import { unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -27,6 +28,7 @@ import {
     claimSubmissionScopeList,
     claimWorkflowStatuses,
     isSubmissionEditableWorkflowStatus,
+    isPathInsideClaimDocumentRoot,
     NO_CLAIM_MAX_LENGTH,
     requireClaimSession,
     SCOPE_LABEL_MAX_LENGTH,
@@ -222,6 +224,10 @@ export async function PATCH(request: Request, context: Context) {
 
             const previousNoClaim = submission.noClaim;
             const noClaimChanged = nextNoClaim !== undefined && nextNoClaim !== previousNoClaim;
+            const invalidatedDocumentPaths: Array<{
+                type: "letter" | "summary" | "receipt";
+                path: string;
+            }> = [];
 
             // Cek duplicate global bila noClaim baru non-null.
             if (noClaimChanged && nextNoClaim) {
@@ -256,6 +262,28 @@ export async function PATCH(request: Request, context: Context) {
                 updatePayload.noClaim = nextNoClaim;
                 updatePayload.noClaimAssignedAt = nextNoClaim ? now : null;
                 updatePayload.noClaimAssignedBy = nextNoClaim ? actor.id : null;
+            }
+            if (noClaimChanged) {
+                if (submission.claimLetterPdfPath) {
+                    invalidatedDocumentPaths.push({ type: "letter", path: submission.claimLetterPdfPath });
+                }
+                if (submission.summaryPdfPath) {
+                    invalidatedDocumentPaths.push({ type: "summary", path: submission.summaryPdfPath });
+                }
+                if (submission.receiptPdfPath) {
+                    invalidatedDocumentPaths.push({ type: "receipt", path: submission.receiptPdfPath });
+                }
+                if (invalidatedDocumentPaths.length > 0) {
+                    updatePayload.claimLetterPdfPath = null;
+                    updatePayload.claimLetterGeneratedAt = null;
+                    updatePayload.claimLetterGeneratedBy = null;
+                    updatePayload.summaryPdfPath = null;
+                    updatePayload.summaryGeneratedAt = null;
+                    updatePayload.summaryGeneratedBy = null;
+                    updatePayload.receiptPdfPath = null;
+                    updatePayload.receiptGeneratedAt = null;
+                    updatePayload.receiptGeneratedBy = null;
+                }
             }
 
             await tx
@@ -302,14 +330,26 @@ export async function PATCH(request: Request, context: Context) {
                     .from(claimSubmission)
                     .where(eq(claimSubmission.claimWorkflowId, id));
                 if (allSubmissions.length === 1 && allSubmissions[0].id === submissionId) {
+                    const workflowUpdatePayload: Partial<typeof claimWorkflow.$inferInsert> = {
+                        noClaim: nextNoClaim,
+                        noClaimAssignedAt: nextNoClaim ? now : null,
+                        noClaimAssignedBy: nextNoClaim ? actor.id : null,
+                        updatedAt: now,
+                    };
+                    if (invalidatedDocumentPaths.length > 0) {
+                        workflowUpdatePayload.claimLetterPdfPath = null;
+                        workflowUpdatePayload.claimLetterGeneratedAt = null;
+                        workflowUpdatePayload.claimLetterGeneratedBy = null;
+                        workflowUpdatePayload.summaryPdfPath = null;
+                        workflowUpdatePayload.summaryGeneratedAt = null;
+                        workflowUpdatePayload.summaryGeneratedBy = null;
+                        workflowUpdatePayload.receiptPdfPath = null;
+                        workflowUpdatePayload.receiptGeneratedAt = null;
+                        workflowUpdatePayload.receiptGeneratedBy = null;
+                    }
                     await tx
                         .update(claimWorkflow)
-                        .set({
-                            noClaim: nextNoClaim,
-                            noClaimAssignedAt: nextNoClaim ? now : null,
-                            noClaimAssignedBy: nextNoClaim ? actor.id : null,
-                            updatedAt: now,
-                        })
+                        .set(workflowUpdatePayload)
                         .where(eq(claimWorkflow.id, id));
                     workflowNoClaimMirrored = true;
                 }
@@ -334,6 +374,7 @@ export async function PATCH(request: Request, context: Context) {
                     noClaimChanged,
                     syncedItemCount,
                     workflowNoClaimMirrored,
+                    invalidatedDocumentPaths,
                 },
             }, tx);
 
@@ -369,12 +410,29 @@ export async function PATCH(request: Request, context: Context) {
                         },
                     }, tx);
                 }
+                if (invalidatedDocumentPaths.length > 0) {
+                    await writeClaimAudit({
+                        claimWorkflowId: id,
+                        claimSubmissionId: submissionId,
+                        auditScope: claimAuditScopes.submission,
+                        actor,
+                        action: "no_claim_changed_invalidated_documents",
+                        fromStatus: submission.status,
+                        toStatus: submission.status,
+                        metadata: {
+                            previousNoClaim,
+                            newNoClaim: nextNoClaim,
+                            invalidatedDocumentPaths,
+                        },
+                    }, tx);
+                }
             }
 
             return {
                 ok: true,
                 syncedItemCount,
                 workflowNoClaimMirrored,
+                invalidatedDocumentPaths,
             } as const;
         });
 
@@ -385,18 +443,35 @@ export async function PATCH(request: Request, context: Context) {
             );
         }
 
+        const { submissionId: paramSubmissionId } = await context.params;
+        for (const entry of result.invalidatedDocumentPaths) {
+            if (!isPathInsideClaimDocumentRoot(entry.path)) continue;
+            await unlink(entry.path).catch((error) => {
+                console.warn("[CLAIM SUBMISSION NO CLAIM INVALIDATE UNLINK FAILED]", {
+                    submissionId: paramSubmissionId,
+                    type: entry.type,
+                    path: entry.path,
+                    error,
+                });
+            });
+        }
+
         const [updated] = await db
             .select()
             .from(claimSubmission)
-            .where(eq(claimSubmission.id, (await context.params).submissionId));
+            .where(eq(claimSubmission.id, paramSubmissionId));
 
         return NextResponse.json({
             ok: true,
             success: true,
             submission: updated,
+            warning: result.invalidatedDocumentPaths.length > 0
+                ? "No Claim berubah, dokumen lama dikosongkan dan perlu dibuat ulang."
+                : undefined,
             sync: {
                 syncedItemCount: result.syncedItemCount,
                 workflowNoClaimMirrored: result.workflowNoClaimMirrored,
+                invalidatedDocumentCount: result.invalidatedDocumentPaths.length,
             },
         });
     } catch (error) {
