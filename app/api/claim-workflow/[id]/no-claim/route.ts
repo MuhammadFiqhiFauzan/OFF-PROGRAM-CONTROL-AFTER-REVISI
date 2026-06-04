@@ -37,6 +37,7 @@ import {
     canActorReadClaimWorkflow,
     claimAuditScopes,
     claimWorkflowStatuses,
+    getOffFinanceGateForNoClaim,
     NO_CLAIM_MAX_LENGTH,
     requireClaimSession,
     writeClaimAudit,
@@ -186,6 +187,33 @@ export async function PATCH(request: Request, context: Context) {
                         status: 409,
                         code: "NO_CLAIM_CLOSED_LOCKED",
                         message: "No Claim tidak bisa diubah setelah workflow Closed.",
+                    },
+                } as const;
+            }
+
+            // Gate status: No Claim hanya boleh diubah saat Draft atau Need Revision.
+            if (
+                workflow.status !== claimWorkflowStatuses.draft &&
+                workflow.status !== claimWorkflowStatuses.needRevision
+            ) {
+                return {
+                    error: {
+                        status: 409,
+                        code: "NO_CLAIM_STATUS_LOCKED",
+                        message: `No Claim hanya bisa diubah saat workflow Draft atau Need Revision. Status saat ini: ${workflow.status}.`,
+                    },
+                } as const;
+            }
+
+            // Gate OFF Finance: No Claim hanya boleh di-assign jika OFF
+            // Finance sudah Paid (internal payment, bukan claim payment).
+            const offFinanceGate = await getOffFinanceGateForNoClaim(tx, workflow.offBatchId);
+            if (!offFinanceGate.isPaid) {
+                return {
+                    error: {
+                        status: 409,
+                        code: "OFF_FINANCE_NOT_PAID_FOR_NO_CLAIM",
+                        message: offFinanceGate.reason || "Menunggu validasi keuangan OFF Program. No Claim baru bisa dibuat setelah Finance OFF Paid.",
                     },
                 } as const;
             }

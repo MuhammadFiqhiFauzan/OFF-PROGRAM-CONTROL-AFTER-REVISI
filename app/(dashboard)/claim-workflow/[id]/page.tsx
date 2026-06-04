@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   claimWorkflowStatuses,
@@ -170,6 +170,16 @@ type DetailResult = {
   canGenerateSummary?: boolean;
   canGenerateReceipt?: boolean;
   canAssignNoClaim?: boolean;
+  canGenerateNoClaim?: boolean;
+  noClaimGateReason?: string | null;
+  offFinanceStatus?: string | null;
+  offStatus?: string | null;
+  offPaymentSummary?: {
+    totalNominal: number;
+    totalPaid: number;
+    isFullyPaid: boolean;
+  } | null;
+  activeSubmissionMissingNoClaimCount?: number;
   canRecordPayment?: boolean;
   canVoidPayment?: boolean;
   canClose?: boolean;
@@ -732,7 +742,10 @@ function SubmissionMetaRow({
 
 export default function ClaimWorkflowDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const id = String(params.id || "");
+  const focusNoClaim = searchParams.get("focus") === "no-claim";
+  const noClaimSectionRef = useRef<HTMLDivElement>(null);
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [items, setItems] = useState<WorkflowItem[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
@@ -748,6 +761,8 @@ export default function ClaimWorkflowDetailPage() {
   const [canVoidPayment, setCanVoidPayment] = useState(false);
   const [canClose, setCanClose] = useState(false);
   const [closeBlockers, setCloseBlockers] = useState<string[]>([]);
+  const [canGenerateNoClaim, setCanGenerateNoClaim] = useState(false);
+  const [noClaimGateReason, setNoClaimGateReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditError, setAuditError] = useState("");
@@ -897,6 +912,8 @@ export default function ClaimWorkflowDetailPage() {
       setCanVoidPayment(Boolean(result.canVoidPayment));
       setCanClose(Boolean(result.canClose));
       setCloseBlockers(result.closeBlockers || []);
+      setCanGenerateNoClaim(Boolean(result.canGenerateNoClaim));
+      setNoClaimGateReason(result.noClaimGateReason ?? null);
       // Phase R7b — Multi No Claim: populate submissions list.
       setSubmissions(result.submissions || []);
       setSubmissionCount(result.submissionCount ?? (result.submissions?.length ?? 0));
@@ -935,6 +952,13 @@ export default function ClaimWorkflowDetailPage() {
   useEffect(() => {
     void loadDetail();
   }, [loadDetail]);
+
+  // Auto-scroll to No Claim section when ?focus=no-claim is present
+  useEffect(() => {
+    if (focusNoClaim && !loading && noClaimSectionRef.current) {
+      noClaimSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [focusNoClaim, loading]);
 
   // R7j — Layout mode dihapus. useEffect hidrasi dan persist
   // localStorage untuk submissionLayoutMode tidak dibutuhkan lagi.
@@ -2044,6 +2068,30 @@ export default function ClaimWorkflowDetailPage() {
           {message}
         </div>
       )}
+
+      {/* No Claim Gate Info Section — scroll target for ?focus=no-claim */}
+      <div ref={noClaimSectionRef}>
+        {!canGenerateNoClaim && noClaimGateReason && (
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+              No Claim — Belum Bisa Generate
+            </p>
+            <p className="mt-2 text-sm text-amber-200">
+              {noClaimGateReason}
+            </p>
+          </div>
+        )}
+        {canGenerateNoClaim && focusNoClaim && (
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">
+              No Claim — Siap Generate
+            </p>
+            <p className="mt-2 text-sm text-emerald-200">
+              Finance OFF sudah Paid. Anda dapat mengisi No Claim pada baris claim di bawah.
+            </p>
+          </div>
+        )}
+      </div>
 
       {staffViewMode === "berkas" && (
         <section className="rounded-2xl border border-white/10 bg-[#1a1c23] p-5">

@@ -27,6 +27,7 @@ import {
     claimAuditScopes,
     claimSubmissionScopeList,
     claimWorkflowStatuses,
+    getOffFinanceGateForNoClaim,
     isSubmissionEditableWorkflowStatus,
     isPathInsideClaimDocumentRoot,
     NO_CLAIM_MAX_LENGTH,
@@ -228,6 +229,23 @@ export async function PATCH(request: Request, context: Context) {
                 type: "letter" | "summary" | "receipt";
                 path: string;
             }> = [];
+
+            // Gate OFF Finance: No Claim hanya boleh di-assign jika OFF
+            // Finance sudah Paid. Gate hanya aktif saat noClaim berubah
+            // ke nilai non-null (assign baru atau ganti). Clear (null)
+            // diizinkan tanpa gate supaya user bisa reset jika salah.
+            if (noClaimChanged && nextNoClaim) {
+                const offFinanceGate = await getOffFinanceGateForNoClaim(tx, workflow.offBatchId);
+                if (!offFinanceGate.isPaid) {
+                    return {
+                        error: {
+                            status: 409,
+                            code: "OFF_FINANCE_NOT_PAID_FOR_NO_CLAIM",
+                            message: offFinanceGate.reason || "Menunggu validasi keuangan OFF Program. No Claim baru bisa dibuat setelah Finance OFF Paid.",
+                        },
+                    } as const;
+                }
+            }
 
             // Cek duplicate global bila noClaim baru non-null.
             if (noClaimChanged && nextNoClaim) {

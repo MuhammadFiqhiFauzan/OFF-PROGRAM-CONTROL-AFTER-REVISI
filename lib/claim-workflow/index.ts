@@ -16,3 +16,4 @@ export * from "./submissions";
 // generator + serve PDF (workflow-level legacy + submission-level baru).
 export * from "./document-paths";
 export * from "./no-claim-rules";
+export * from "./off-finance-gate";

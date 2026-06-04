@@ -26,7 +26,22 @@ type ClaimWorkflowListRow = {
   totalClaim: number;
   totalPaid: number;
   remainingAmount: number;
+  noClaim?: string | null;
   createdAt: string | Date;
+  // R7h — OFF finance gate fields
+  offFinanceStatus?: string | null;
+  offStatus?: string | null;
+  offPaymentSummary?: {
+    totalNominal: number;
+    totalPaid: number;
+    isFullyPaid: boolean;
+  } | null;
+  activeSubmissionCount?: number;
+  activeSubmissionMissingNoClaimCount?: number;
+  noClaimList?: string[];
+  documentStatus?: string | null;
+  canGenerateNoClaim?: boolean;
+  noClaimGateReason?: string | null;
 };
 
 type OutstandingRow = {
@@ -51,7 +66,7 @@ type OutstandingSummary = {
   totalOutstanding: number;
 };
 
-type ListTab = "all" | "outstanding" | "paid";
+type ListTab = "all" | "ready_no_claim" | "waiting_finance" | "docs_incomplete" | "ready_submit" | "submitted" | "outstanding" | "paid" | "closed";
 
 function rupiah(value: number) {
   return `Rp ${Number(value || 0).toLocaleString("id-ID")}`;
@@ -106,6 +121,7 @@ export default function ClaimWorkflowPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<ListTab>("all");
+  const [search, setSearch] = useState("");
   const [outstanding, setOutstanding] = useState<OutstandingRow[]>([]);
   const [outstandingSummary, setOutstandingSummary] = useState<OutstandingSummary | null>(null);
   const [outstandingLoading, setOutstandingLoading] = useState(true);
@@ -184,16 +200,57 @@ export default function ClaimWorkflowPage() {
   }, []);
 
   const filteredRows = useMemo(() => {
-    if (tab === "all") return rows;
+    // Step 1: text search across multiple fields
+    let result = rows;
+    const q = search.trim().toLowerCase();
+    if (q) {
+      result = result.filter((row) => {
+        const fields = [
+          row.claimWorkflowNo,
+          row.noClaim,
+          row.principleName,
+          row.offNoPengajuan,
+          row.status,
+          row.offFinanceStatus,
+          row.documentStatus,
+          ...(row.noClaimList || []),
+        ];
+        return fields.some((f) => f && String(f).toLowerCase().includes(q));
+      });
+    }
+
+    // Step 2: tab filter
+    if (tab === "all") return result;
+    if (tab === "ready_no_claim") {
+      return result.filter((row) => row.canGenerateNoClaim === true);
+    }
+    if (tab === "waiting_finance") {
+      return result.filter((row) => row.offFinanceStatus !== "Paid");
+    }
+    if (tab === "docs_incomplete") {
+      return result.filter((row) => row.documentStatus === "none" || row.documentStatus === "partial");
+    }
+    if (tab === "ready_submit") {
+      return result.filter((row) => row.status === claimWorkflowStatuses.readyToSubmit);
+    }
+    if (tab === "submitted") {
+      return result.filter((row) => row.status === claimWorkflowStatuses.submittedToPrincipal);
+    }
     if (tab === "outstanding") {
-      return rows.filter((row) => row.remainingAmount > 0 && (
+      return result.filter((row) => row.remainingAmount > 0 && (
         row.status === claimWorkflowStatuses.submittedToPrincipal ||
         row.status === claimWorkflowStatuses.partiallyPaid ||
         row.status === claimWorkflowStatuses.outstanding
       ));
     }
-    return rows.filter((row) => row.status === claimWorkflowStatuses.paid || row.status === claimWorkflowStatuses.closed);
-  }, [rows, tab]);
+    if (tab === "paid") {
+      return result.filter((row) => row.status === claimWorkflowStatuses.paid);
+    }
+    if (tab === "closed") {
+      return result.filter((row) => row.status === claimWorkflowStatuses.closed);
+    }
+    return result;
+  }, [rows, tab, search]);
 
   const metrics = useMemo(
     () => [
@@ -368,34 +425,48 @@ export default function ClaimWorkflowPage() {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23] shadow-lg shadow-black/20">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
           <div>
             <h2 className="text-base font-bold text-white">Daftar Claim Workflow</h2>
             {!loading && !error && (
               <p className="mt-1 text-xs text-slate-500">
-                {filteredRows.length} workflow ditampilkan ({tab})
+                {filteredRows.length} workflow ditampilkan ({tab === "all" ? "semua" : tab.replace(/_/g, " ")})
               </p>
             )}
           </div>
-          <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/30 p-1 text-xs">
-            {([
-              { key: "all", label: "All" },
-              { key: "outstanding", label: "Outstanding" },
-              { key: "paid", label: "Paid / Closed" },
-            ] as Array<{ key: ListTab; label: string }>).map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => setTab(option.key)}
-                className={`rounded-full px-3 py-1.5 font-bold transition ${
-                  tab === option.key
-                    ? "bg-indigo-600 text-white"
-                    : "text-slate-300 hover:bg-white/10"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className="flex flex-col items-end gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari: nomor, no claim, principal, nota, status..."
+              className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500/50 focus:outline-none"
+            />
+            <div className="flex flex-wrap items-center gap-1 rounded-full border border-white/10 bg-black/30 p-1 text-xs">
+              {([
+                { key: "all", label: "Semua" },
+                { key: "ready_no_claim", label: "Siap Generate No Claim" },
+                { key: "waiting_finance", label: "Menunggu Finance" },
+                { key: "docs_incomplete", label: "Belum Lengkap Dokumen" },
+                { key: "ready_submit", label: "Ready to Submit" },
+                { key: "submitted", label: "Submitted" },
+                { key: "outstanding", label: "Outstanding" },
+                { key: "closed", label: "Closed" },
+              ] as Array<{ key: ListTab; label: string }>).map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setTab(option.key)}
+                  className={`rounded-full px-3 py-1.5 font-bold transition ${
+                    tab === option.key
+                      ? "bg-indigo-600 text-white"
+                      : "text-slate-300 hover:bg-white/10"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {loading ? (
@@ -430,7 +501,9 @@ export default function ClaimWorkflowPage() {
                   <th scope="col" className="px-5 py-3 text-right font-semibold">Total Paid</th>
                   <th scope="col" className="px-5 py-3 text-right font-semibold">Outstanding</th>
                   <th scope="col" className="px-5 py-3 font-semibold">Status</th>
+                  <th scope="col" className="px-5 py-3 font-semibold">Finance OFF</th>
                   <th scope="col" className="px-5 py-3 font-semibold">Created At</th>
+                  <th scope="col" className="px-5 py-3 font-semibold">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -475,8 +548,33 @@ export default function ClaimWorkflowPage() {
                         {displayClaimStatusLabel(row.status)}
                       </span>
                     </td>
+                    <td className="whitespace-nowrap px-5 py-4">
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                          row.offFinanceStatus === "Paid"
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                            : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                        }`}
+                      >
+                        {row.offFinanceStatus || "-"}
+                      </span>
+                    </td>
                     <td className="whitespace-nowrap px-5 py-4 text-slate-400">
                       {createdDate(row.createdAt)}
+                    </td>
+                    <td className="whitespace-nowrap px-5 py-4">
+                      {row.canGenerateNoClaim ? (
+                        <Link
+                          href={`/claim-workflow/${row.id}?focus=no-claim`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-bold text-indigo-200 transition hover:bg-indigo-500/20"
+                        >
+                          Buka Generate No Claim
+                        </Link>
+                      ) : row.noClaimGateReason ? (
+                        <span className="text-xs text-slate-500" title={row.noClaimGateReason}>
+                          {row.offFinanceStatus !== "Paid" ? "Menunggu Finance" : "-"}
+                        </span>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

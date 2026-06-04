@@ -13,6 +13,7 @@ import {
     canActorReadClaimWorkflow,
     claimWorkflowStatuses,
     getActiveSubmissions,
+    getOffFinanceGateForNoClaim,
     isActiveSubmission,
     recalcPaymentTotals,
     requireClaimSession,
@@ -155,6 +156,26 @@ export async function GET(_request: Request, context: Context) {
             row.workflow.status !== paymentTotals.derivedStatus;
         const canAssignNoClaim = canManageClaim &&
             row.workflow.status !== claimWorkflowStatuses.closed;
+
+        // OFF Finance gate for No Claim generation
+        const offFinanceGate = await getOffFinanceGateForNoClaim(db, row.workflow.offBatchId);
+        const isEditableStatus = (
+            row.workflow.status === claimWorkflowStatuses.draft ||
+            row.workflow.status === claimWorkflowStatuses.needRevision
+        );
+        const activeSubsMissingNoClaim = activeSubmissions.filter(
+            (s) => !s.noClaim || String(s.noClaim).trim() === "",
+        );
+        const canGenerateNoClaim = canManageClaim && offFinanceGate.isPaid && isEditableStatus && activeSubsMissingNoClaim.length > 0;
+        const noClaimGateReason = !canManageClaim
+            ? "Role Anda tidak memiliki akses untuk assign No Claim."
+            : !offFinanceGate.isPaid
+                ? offFinanceGate.reason || "Menunggu validasi keuangan OFF Program. No Claim baru bisa dibuat setelah Finance OFF Paid."
+                : !isEditableStatus
+                    ? `Status workflow ${row.workflow.status} tidak mengizinkan edit No Claim.`
+                    : activeSubsMissingNoClaim.length === 0
+                        ? "Semua submission aktif sudah memiliki No Claim."
+                        : null;
         const paymentAllowed = (
             paymentStatus === claimWorkflowStatuses.submittedToPrincipal ||
             paymentStatus === claimWorkflowStatuses.partiallyPaid
@@ -258,6 +279,16 @@ export async function GET(_request: Request, context: Context) {
             canGenerateSummary,
             canGenerateReceipt,
             canAssignNoClaim,
+            canGenerateNoClaim,
+            noClaimGateReason,
+            offFinanceStatus: offFinanceGate.financeStatus,
+            offStatus: offFinanceGate.offStatus,
+            offPaymentSummary: {
+                totalNominal: offFinanceGate.totalNominal,
+                totalPaid: offFinanceGate.totalPaid,
+                isFullyPaid: offFinanceGate.isFullyPaid,
+            },
+            activeSubmissionMissingNoClaimCount: activeSubsMissingNoClaim.length,
             canRecordPayment,
             canVoidPayment,
             canClose,
