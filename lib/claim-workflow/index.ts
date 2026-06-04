@@ -15,3 +15,4 @@ export * from "./submissions";
 // Helper terpusat untuk path file dokumen klaim. Dipakai oleh route
 // generator + serve PDF (workflow-level legacy + submission-level baru).
 export * from "./document-paths";
+export * from "./no-claim-rules";

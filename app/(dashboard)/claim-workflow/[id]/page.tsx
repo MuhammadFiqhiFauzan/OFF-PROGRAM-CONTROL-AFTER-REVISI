@@ -9,6 +9,12 @@ import {
   displayClaimStatusLabel,
   isLegacyPekaStatus,
 } from "@/lib/claim-workflow/constants";
+import {
+  type NoClaimRule,
+  buildNoClaimFromRule,
+  getNoClaimRuleVariants,
+  resolveNoClaimRule,
+} from "@/lib/claim-workflow/no-claim-rules";
 
 type TransitionAction =
   | "mark_ready"
@@ -20,6 +26,7 @@ type Workflow = {
   claimWorkflowNo: string;
   offBatchId: string;
   offNoPengajuan?: string | null;
+  principleCode: string;
   principleName: string;
   status: string;
   // R7a — Multi No Claim: source type / aggregate status optional pada
@@ -375,13 +382,13 @@ function buildNoClaimPreview(draft: NoClaimGeneratorDraft): string {
 }
 
 /**
- * Tebak kode principal dari nama principle workflow. Default fallback "GCPI"
- * (Godrej Consumer Products Indonesia) sesuai pola Excel sumber R7g.
+ * Resolve No Claim key from DB principleCode using no-claim-rules mapping.
+ * Returns the Excel-style key (e.g. "GCPI" for GDI, "KN" for KINO) or
+ * empty string if not mapped.
  */
-function guessPrincipalCode(principleName: string | null | undefined): string {
-  const name = String(principleName || "").toLowerCase();
-  if (name.includes("godrej") || name.includes("gcpi")) return "GCPI";
-  return "GCPI";
+function resolveNoClaimKeyFromRule(principleCode: string): string {
+  const rule = resolveNoClaimRule(principleCode);
+  return rule?.noClaimKey ?? "";
 }
 
 /**
@@ -835,7 +842,8 @@ export default function ClaimWorkflowDetailPage() {
   // Toolbar punya global generator settings (distributor/principal/year)
   // supaya kolom No.2 + Bulan per row tetap ringkas.
   const [excelDistributorCode, setExcelDistributorCode] = useState("SUPER");
-  const [excelPrincipalCode, setExcelPrincipalCode] = useState("GCPI");
+  const [excelPrincipalCode, setExcelPrincipalCode] = useState("");
+  const [excelVariantKey, setExcelVariantKey] = useState<string>("");
   const [excelYear, setExcelYear] = useState("2026");
   const [excelDefaultMonth, setExcelDefaultMonth] = useState("01");
   const [excelSearch, setExcelSearch] = useState("");
@@ -959,11 +967,25 @@ export default function ClaimWorkflowDetailPage() {
     setExcelYear(parts.year);
   }, []);
 
-  // R7h — sinkronkan principal default dari workflow.principleName.
+  // Resolve current No Claim rule from toolbar principal code + variant.
+  const excelCurrentRule: NoClaimRule | undefined = excelPrincipalCode
+    ? resolveNoClaimRule(excelPrincipalCode, excelVariantKey || undefined)
+    : undefined;
+  const excelVariants = excelPrincipalCode
+    ? getNoClaimRuleVariants(excelPrincipalCode)
+    : [];
+  const excelHasVariants = excelVariants.length > 0;
+
+  // R7h — sinkronkan principal default dari workflow.principleCode (via rule).
   useEffect(() => {
     if (!workflow) return;
-    const guess = guessPrincipalCode(workflow.principleName);
-    setExcelPrincipalCode((prev) => (prev === "GCPI" || prev === "") ? guess : prev);
+    const key = resolveNoClaimKeyFromRule(workflow.principleCode);
+    setExcelPrincipalCode((prev) => (prev === "" || prev === "GCPI") ? key : prev);
+    // Set default variant jika rule punya variants.
+    const variants = getNoClaimRuleVariants(workflow.principleCode);
+    if (variants.length > 0 && !excelVariantKey) {
+      setExcelVariantKey(variants[0].variantKey);
+    }
   }, [workflow]);
 
   // R7h — initialize draft per item saat items berubah. Item baru / belum
@@ -1503,12 +1525,13 @@ export default function ClaimWorkflowDetailPage() {
 
   // R7g — Handler initialize generator draft + mode untuk satu submission.
   // Dipanggil saat user pertama kali switch ke mode "Generate dari Excel".
-  // Default month/year dari Asia/Makassar; principal code di-tebak dari nama
-  // principle workflow.
+  // Default month/year dari Asia/Makassar; principal code dari rule mapping.
   const ensureGeneratorDraft = (submissionId: string) => {
     if (submissionGeneratorDraft[submissionId]) return;
     const parts = getMakassarDateParts();
-    const principal = guessPrincipalCode(workflow?.principleName);
+    const principal = workflow?.principleCode
+      ? resolveNoClaimKeyFromRule(workflow.principleCode)
+      : "";
     setSubmissionGeneratorDraft((prev) => ({
       ...prev,
       [submissionId]: {
@@ -2220,9 +2243,28 @@ export default function ClaimWorkflowDetailPage() {
                         onChange={(event) =>
                           setExcelPrincipalCode(event.target.value)
                         }
+                        placeholder="No Claim Key"
                         className="w-20 rounded-lg border border-white/10 bg-black/40 px-2 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
                       />
                     </label>
+                    {excelHasVariants && (
+                      <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        Varian
+                        <select
+                          value={excelVariantKey}
+                          onChange={(event) =>
+                            setExcelVariantKey(event.target.value)
+                          }
+                          className="w-20 rounded-lg border border-white/10 bg-black/40 px-2 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500/60"
+                        >
+                          {excelVariants.map((v) => (
+                            <option key={v.variantKey} value={v.variantKey}>
+                              {v.variantKey}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                       Tahun
                       <input
@@ -2253,6 +2295,7 @@ export default function ClaimWorkflowDetailPage() {
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">
                     <p className="text-[11px] text-slate-400">
                       {filteredItems.length} dari {totalRows} baris ditampilkan. Isi No. Urut dan Bulan Claim di dekat kolom No Claim, lalu klik Generate.
+                      {" "}Format mengikuti pola Excel principle. No Claim tetap bisa disesuaikan manual sebelum disimpan.
                       {noClaimLockedReason ? ` ${noClaimLockedReason}` : ""}
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -2381,27 +2424,48 @@ export default function ClaimWorkflowDetailPage() {
                           };
                           const generateNoClaim = () => {
                             const currentDraft = excelRowDrafts[item.id] ?? draft;
-                            const generatorDraft: NoClaimGeneratorDraft = {
-                              sequence: currentDraft.sequence,
-                              distributorCode: excelDistributorCode,
-                              principalCode: excelPrincipalCode,
-                              month:
-                                currentDraft.month.trim() || excelDefaultMonth,
-                              year: excelYear,
-                            };
-                            const validationError =
-                              validateNoClaimGenerator(generatorDraft);
-                            if (validationError) {
-                              toast.error(validationError);
+                            const seq = currentDraft.sequence.trim();
+                            const month = (currentDraft.month.trim() || excelDefaultMonth);
+                            const year = excelYear;
+
+                            if (!seq) {
+                              toast.error("Nomor urut wajib diisi.");
                               return;
                             }
-                            const generated =
-                              buildNoClaimPreview(generatorDraft);
+                            if (!month) {
+                              toast.error("Bulan wajib diisi.");
+                              return;
+                            }
+                            if (!year) {
+                              toast.error("Tahun wajib diisi.");
+                              return;
+                            }
+
+                            let generated = "";
+                            if (excelCurrentRule) {
+                              generated = buildNoClaimFromRule(excelCurrentRule, {
+                                sequence: seq,
+                                month,
+                                year,
+                                variantKey: excelVariantKey || undefined,
+                              });
+                            }
+                            // Fallback: jika rule tidak tersedia atau pattern
+                            // tidak menghasilkan output, pakai format legacy.
+                            if (!generated) {
+                              const principal = excelPrincipalCode.trim();
+                              const distributor = excelDistributorCode.trim();
+                              if (!principal || !distributor) {
+                                toast.error("Principal dan Distributor wajib diisi.");
+                                return;
+                              }
+                              const mm = month.padStart(2, "0");
+                              generated = `${formatNoClaimSequence(seq)}/${distributor}-${principal}/${mm}/${year}`;
+                            }
+
                             updateDraft({
-                              sequence: formatNoClaimSequence(
-                                generatorDraft.sequence,
-                              ),
-                              month: generatorDraft.month.trim(),
+                              sequence: formatNoClaimSequence(seq),
+                              month: month.trim(),
                               noClaimDraft: generated,
                             });
                             if (!sub) {
