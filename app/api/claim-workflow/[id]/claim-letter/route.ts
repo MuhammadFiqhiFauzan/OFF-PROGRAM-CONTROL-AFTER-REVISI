@@ -71,21 +71,17 @@ export async function POST(_request: Request, context: Context) {
                 if (!current || !generationAllowed(current.status)) {
                     throw new Error("Claim Workflow status berubah sebelum Claim Letter PDF tersimpan.");
                 }
-                // Phase R7c — Multi No Claim guard:
-                // Route legacy hanya valid untuk single-submission workflow.
-                // Multi-submission wajib pakai route per submission supaya
-                // tiap No Claim punya PDF sendiri.
+
+                // Phase R7c+R8: Combined Claim Letter for multi-submission.
+                // Route ini sekarang mendukung:
+                // - Single submission: generate + mirror ke submission (legacy)
+                // - Multi submission: generate combined letter workflow-level
+                //   (berisi semua item dari semua active submissions)
                 const submissions = await tx
                     .select({ id: claimSubmission.id })
                     .from(claimSubmission)
                     .where(eq(claimSubmission.claimWorkflowId, id));
-                if (submissions.length > 1) {
-                    throw Object.assign(
-                        new Error("Workflow memiliki beberapa submission. Generate Claim Letter lewat submission."),
-                        { code: "MULTI_SUBMISSION_LETTER_ROUTE_DISABLED" },
-                    );
-                }
-                const targetSubmissionId = submissions[0]?.id ?? null;
+                const targetSubmissionId = submissions.length === 1 ? submissions[0]?.id ?? null : null;
 
                 previousPdfPath = current.claimLetterPdfPath ?? null;
                 await tx.update(claimWorkflow).set({
@@ -96,7 +92,7 @@ export async function POST(_request: Request, context: Context) {
                 }).where(eq(claimWorkflow.id, id));
 
                 // Mirror ke single submission supaya source-of-truth
-                // submission konsisten dengan cache workflow.
+                // submission konsisten dengan cache workflow (legacy compat).
                 if (targetSubmissionId) {
                     await tx.update(claimSubmission).set({
                         claimLetterPdfPath: result.filePath,
@@ -107,6 +103,10 @@ export async function POST(_request: Request, context: Context) {
                     mirroredSubmissionId = targetSubmissionId;
                 }
 
+                const auditAction = submissions.length > 1
+                    ? "claim_letter_combined_generated"
+                    : "claim_letter_generated";
+
                 await writeClaimAudit({
                     claimWorkflowId: id,
                     claimSubmissionId: targetSubmissionId,
@@ -114,17 +114,18 @@ export async function POST(_request: Request, context: Context) {
                         ? claimAuditScopes.submission
                         : claimAuditScopes.workflow,
                     actor,
-                    action: "claim_letter_generated",
+                    action: auditAction,
                     fromStatus: current.status,
                     toStatus: current.status,
                     metadata: {
                         workflowId: id,
                         submissionId: targetSubmissionId,
+                        submissionCount: submissions.length,
                         documentType: claimDocumentTypes.letter,
                         filePath: result.filePath,
                         itemCount: items.length,
                         totalClaim: Number(current.totalClaim || 0),
-                        viaLegacyWorkflowRoute: true,
+                        combined: submissions.length > 1,
                         ...(previousPdfPath ? { previousClaimLetterPdfPath: previousPdfPath } : {}),
                     },
                 }, tx);
@@ -133,19 +134,6 @@ export async function POST(_request: Request, context: Context) {
             // Transaction rolled back: hapus PDF yang sudah terlanjur ditulis ke disk
             // supaya tidak meninggalkan orphan file di runtime/claim-workflow/letters.
             await unlink(result.filePath).catch(() => {});
-            const code = transactionError && typeof transactionError === "object"
-                && "code" in (transactionError as Record<string, unknown>)
-                ? String((transactionError as Record<string, unknown>).code)
-                : null;
-            if (code === "MULTI_SUBMISSION_LETTER_ROUTE_DISABLED") {
-                return NextResponse.json({
-                    ok: false,
-                    code,
-                    error: transactionError instanceof Error
-                        ? transactionError.message
-                        : "Workflow memiliki beberapa submission. Generate Claim Letter lewat submission.",
-                }, { status: 409 });
-            }
             throw transactionError;
         }
 

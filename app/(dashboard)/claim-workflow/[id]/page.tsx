@@ -851,6 +851,9 @@ export default function ClaimWorkflowDetailPage() {
   >({});
   // R7g — Per Item action state.
   const [creatingPerItem, setCreatingPerItem] = useState(false);
+  // Auto No Claim mass generation state
+  const [autoNoClaimSaving, setAutoNoClaimSaving] = useState(false);
+  const [rowModes, setRowModes] = useState<Record<string, { mode: "own" | "same_as"; sameAsItemId?: string }>>({});
   // R7h — Excel Input Mode state. Draft per item (No.2 + Bulan + DPP/PPN/PPH).
   // Tax (DPP/PPN/PPH) inline edit ke PATCH /items/[itemId] yang sudah ada
   // (ppnRate/pphRate). No Claim tetap di-save lewat PATCH submission.
@@ -1666,7 +1669,7 @@ export default function ClaimWorkflowDetailPage() {
       }
       if (!submission) {
         toast.error(
-          "Baris ini belum siap diberi No Claim. Klik 'Siapkan Baris Claim' di toolbar.",
+          "Baris ini belum memiliki submission. Gunakan Generate No Claim Massal untuk membuat submission otomatis.",
         );
         return;
       }
@@ -2350,18 +2353,70 @@ export default function ClaimWorkflowDetailPage() {
                       {canEditItems && editable && (
                         <button
                           type="button"
-                          disabled={creatingPerItem || items.length === 0}
-                          onClick={() => void submitCreatePerItem()}
+                          disabled={autoNoClaimSaving || items.length === 0 || !canGenerateNoClaim}
+                          onClick={async () => {
+                            if (!workflow) return;
+                            setAutoNoClaimSaving(true);
+                            setMessage("");
+                            try {
+                              // Build rowModes from current state
+                              const modes = items.map((item) => {
+                                const rm = rowModes[item.id];
+                                if (rm && rm.mode === "same_as" && rm.sameAsItemId) {
+                                  return { itemId: item.id, mode: "same_as" as const, sameAsItemId: rm.sameAsItemId };
+                                }
+                                return { itemId: item.id, mode: "own" as const };
+                              });
+                              const startSeq = (excelRowDrafts[items[0]?.id]?.sequence || "1").trim() || "1";
+                              const response = await fetch(
+                                `/api/claim-workflow/${id}/submissions/auto-no-claim`,
+                                {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    startSequence: startSeq,
+                                    month: excelDefaultMonth,
+                                    year: excelYear,
+                                    variantKey: excelVariantKey || undefined,
+                                    rowModes: modes,
+                                  }),
+                                },
+                              );
+                              const result = (await response.json()) as {
+                                ok?: boolean;
+                                error?: string;
+                                groups?: Array<{ noClaim: string; itemIds: string[]; submissionId: string }>;
+                                invalidatedDocumentCount?: number;
+                              };
+                              if (!response.ok || !result.ok) {
+                                throw new Error(result.error || "Gagal generate No Claim massal.");
+                              }
+                              const groupCount = result.groups?.length ?? 0;
+                              const itemCount = result.groups?.reduce((sum, g) => sum + g.itemIds.length, 0) ?? 0;
+                              const successMsg = `No Claim berhasil dibuat: ${groupCount} No Claim untuk ${itemCount} baris.${result.invalidatedDocumentCount ? ` ${result.invalidatedDocumentCount} dokumen lama di-reset.` : ""}`;
+                              toast.success(successMsg);
+                              setMessage(successMsg);
+                              await loadDetail();
+                            } catch (err) {
+                              const errorMessage = err instanceof Error ? err.message : "Gagal generate No Claim massal.";
+                              toast.error(errorMessage);
+                              setMessage(errorMessage);
+                            } finally {
+                              setAutoNoClaimSaving(false);
+                            }
+                          }}
                           className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
                           title={
-                            items.length === 0
-                              ? "Workflow belum memiliki item klaim."
-                              : undefined
+                            !canGenerateNoClaim && noClaimGateReason
+                              ? noClaimGateReason
+                              : items.length === 0
+                                ? "Workflow belum memiliki item klaim."
+                                : undefined
                           }
                         >
-                          {creatingPerItem
+                          {autoNoClaimSaving
                             ? "Memproses..."
-                            : "Siapkan Baris Claim"}
+                            : "Generate No Claim Massal"}
                         </button>
                       )}
                       <button
@@ -2394,6 +2449,7 @@ export default function ClaimWorkflowDetailPage() {
                         <tr>
                           <th className="px-3 py-2 font-semibold">No.</th>
                           <th className="px-3 py-2 font-semibold">No Claim</th>
+                          <th className="px-3 py-2 font-semibold text-indigo-200">Mode</th>
                           <th className="px-3 py-2 font-semibold text-indigo-200">No. Urut</th>
                           <th className="px-3 py-2 font-semibold text-indigo-200">Bulan Claim</th>
                           <th className="px-3 py-2 font-semibold">Perihal</th>
@@ -2516,11 +2572,6 @@ export default function ClaimWorkflowDetailPage() {
                               month: month.trim(),
                               noClaimDraft: generated,
                             });
-                            if (!sub) {
-                              toast.info?.(
-                                "No Claim sudah dibuat sebagai draft. Klik Siapkan Baris Claim dulu sebelum Simpan.",
-                              );
-                            }
                           };
                           const inputClass =
                             "w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white outline-none focus:border-indigo-500/60";
@@ -2558,6 +2609,52 @@ export default function ClaimWorkflowDetailPage() {
                                 ) : (
                                   <span className="text-[11px] italic text-amber-300">
                                     Belum siap
+                                  </span>
+                                )}
+                              </td>
+                              {/* Mode No Claim column */}
+                              <td className="px-3 py-2">
+                                {noClaimEditable ? (
+                                  <select
+                                    value={
+                                      rowModes[item.id]?.mode === "same_as"
+                                        ? `same_as:${rowModes[item.id]?.sameAsItemId ?? ""}`
+                                        : "own"
+                                    }
+                                    onChange={(event) => {
+                                      const val = event.target.value;
+                                      if (val === "own") {
+                                        setRowModes((prev) => ({
+                                          ...prev,
+                                          [item.id]: { mode: "own" },
+                                        }));
+                                      } else if (val.startsWith("same_as:")) {
+                                        const targetId = val.slice("same_as:".length);
+                                        setRowModes((prev) => ({
+                                          ...prev,
+                                          [item.id]: { mode: "same_as", sameAsItemId: targetId },
+                                        }));
+                                      }
+                                    }}
+                                    className="w-40 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-1.5 py-1 text-[11px] text-indigo-200 outline-none focus:border-indigo-400"
+                                  >
+                                    <option value="own">No Claim sendiri</option>
+                                    {items
+                                      .filter((other) => other.id !== item.id)
+                                      .map((other, otherIdx) => (
+                                        <option
+                                          key={other.id}
+                                          value={`same_as:${other.id}`}
+                                        >
+                                          Samakan dgn Baris {items.indexOf(other) + 1}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">
+                                    {rowModes[item.id]?.mode === "same_as"
+                                      ? `= Baris ${items.findIndex((i) => i.id === rowModes[item.id]?.sameAsItemId) + 1}`
+                                      : "Sendiri"}
                                   </span>
                                 )}
                               </td>

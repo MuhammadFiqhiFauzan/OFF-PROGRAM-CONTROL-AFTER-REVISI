@@ -222,7 +222,13 @@ export async function POST(request: Request, context: Context) {
 
             // Validasi setiap submission aktif harus lengkap:
             // - noClaim non-empty
-            // - 3 dokumen PDF tersedia (claimLetterPdfPath, summaryPdfPath, receiptPdfPath)
+            // - Summary PDF per submission wajib
+            // - Kwitansi PDF per submission wajib
+            // - Claim Letter: gabungan workflow-level ATAU per submission
+            //   (hybrid mode — combined letter di workflow.claimLetterPdfPath
+            //   menggantikan requirement per submission)
+            const hasWorkflowCombinedLetter = Boolean(workflow.claimLetterPdfPath);
+
             for (const submission of activeSubmissions) {
                 const subNoClaim = String(submission.noClaim || "").trim();
                 const subLabel = submission.scopeLabel || submission.scope || "submission";
@@ -236,11 +242,12 @@ export async function POST(request: Request, context: Context) {
                     }, { status: 422 });
                 }
 
-                if (!submission.claimLetterPdfPath) {
+                // Claim Letter: cek combined workflow-level ATAU per submission
+                if (!hasWorkflowCombinedLetter && !submission.claimLetterPdfPath) {
                     return NextResponse.json({
                         ok: false,
-                        code: "CLAIM_SUBMISSION_CLAIM_LETTER_REQUIRED",
-                        error: `Berkas Claim "${subLabel}" belum memiliki Claim Letter PDF. Generate dokumen terlebih dahulu.`,
+                        code: "CLAIM_LETTER_COMBINED_REQUIRED",
+                        error: `Claim Letter PDF belum dibuat. Generate Claim Letter gabungan terlebih dahulu.`,
                         submissionId: submission.id,
                     }, { status: 422 });
                 }
