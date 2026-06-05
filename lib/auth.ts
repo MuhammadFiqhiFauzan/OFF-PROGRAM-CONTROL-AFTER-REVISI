@@ -17,6 +17,10 @@ if (databaseFile?.startsWith("/")) {
 const authDb = drizzle(createClient({ url: databaseUrl }), { schema });
 
 export const auth = betterAuth({
+    trustedOrigins: [
+        "http://localhost:3000",
+        "https://p1t43ntr-3000.asse.devtunnels.ms",
+    ],
     database: drizzleAdapter(authDb, {
         provider: "sqlite",
         schema: {
