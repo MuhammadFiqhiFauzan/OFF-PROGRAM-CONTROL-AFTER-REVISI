@@ -293,3 +293,215 @@ export async function generateClaimReceiptPdf(
     await writeFile(filePath, pdf);
     return { filePath, pdf };
 }
+
+// =============================================================================
+// Kwitansi Gabungan (Combined) — A4 Landscape, 4 kwitansi per halaman (2x2)
+// =============================================================================
+// Phase R7 doc rule: Kwitansi digabung dalam 1 PDF workflow-level untuk
+// semua No Claim/submission aktif. Layout A4 Landscape, grid 2 kolom x 2
+// baris (maks 4 kwitansi per halaman). Bila > 4 submission, lanjut ke
+// halaman berikutnya. Ukuran diperkecil agar muat.
+
+const LS_PAGE_WIDTH = 841.89; // A4 landscape width (= A4 portrait height)
+const LS_PAGE_HEIGHT = 595.28; // A4 landscape height
+const LS_MARGIN = 24;
+const LS_GUTTER = 16;
+
+type CombinedReceiptEntry = {
+    submission: ClaimSubmissionRow;
+    items: ClaimWorkflowItemRow[];
+};
+
+function drawMiniReceipt(
+    page: PDFPage,
+    font: PDFFont,
+    bold: PDFFont,
+    workflow: ClaimWorkflowRow,
+    entry: CombinedReceiptEntry,
+    cellX: number,
+    cellY: number,
+    cellW: number,
+    cellH: number,
+    generatedAt: Date,
+) {
+    const submission = entry.submission;
+    const totalClaim = Number(submission.totalClaim || 0);
+
+    // Card frame.
+    page.drawRectangle({
+        x: cellX,
+        y: cellY,
+        width: cellW,
+        height: cellH,
+        borderWidth: 1,
+        borderColor: rgb(0.08, 0.19, 0.3),
+        color: rgb(1, 1, 1),
+    });
+
+    // Header band.
+    const headerH = 26;
+    page.drawRectangle({
+        x: cellX,
+        y: cellY + cellH - headerH,
+        width: cellW,
+        height: headerH,
+        color: rgb(0.08, 0.19, 0.32),
+    });
+    page.drawText("KWITANSI CLAIM", {
+        x: cellX + 10,
+        y: cellY + cellH - 17,
+        size: 11,
+        font: bold,
+        color: rgb(1, 1, 1),
+    });
+
+    const innerMaxChars = Math.max(24, Math.floor((cellW - 90) / (9 * 0.55)));
+    let y = cellY + cellH - headerH - 18;
+    const labelX = cellX + 10;
+    const valueX = cellX + 92;
+
+    const row = (label: string, value: string) => {
+        page.drawText(label, { x: labelX, y, size: 8, font: bold, color: rgb(0.22, 0.27, 0.34) });
+        page.drawText(":", { x: valueX - 8, y, size: 8, font: bold });
+        page.drawText(fitText(value, innerMaxChars), { x: valueX, y, size: 8.5, font });
+        y -= 14;
+    };
+
+    row("No. Claim", asciiText(submission.noClaim || "-"));
+    row("Diajukan ke", recipientName(workflow));
+    row("Rincian", summarizeItems(entry.items));
+    row("Total Item", `${entry.items.length} item`);
+
+    // Nominal box.
+    const boxH = 34;
+    const boxY = y - boxH + 4;
+    const boxX = cellX + 10;
+    const boxW = cellW - 20;
+    page.drawRectangle({
+        x: boxX,
+        y: boxY,
+        width: boxW,
+        height: boxH,
+        borderWidth: 0.8,
+        borderColor: rgb(0.08, 0.19, 0.3),
+        color: rgb(0.95, 0.97, 1),
+    });
+    page.drawText("Jumlah Klaim", {
+        x: boxX + 8,
+        y: boxY + boxH - 12,
+        size: 7.5,
+        font: bold,
+        color: rgb(0.22, 0.27, 0.34),
+    });
+    page.drawText(`Rp ${rupiah(totalClaim)}`, {
+        x: boxX + 8,
+        y: boxY + 8,
+        size: 13,
+        font: bold,
+        color: rgb(0.08, 0.19, 0.3),
+    });
+
+    // Terbilang.
+    const terbilangText = `Terbilang: ${terbilangRupiah(totalClaim)}`;
+    page.drawText(fitText(terbilangText, Math.max(40, Math.floor((cellW - 20) / (7 * 0.55)))), {
+        x: cellX + 10,
+        y: boxY - 12,
+        size: 7,
+        font,
+        color: rgb(0.18, 0.22, 0.28),
+    });
+
+    // Footer: tanggal + entitas.
+    const dateText = `Makassar, ${indonesianLongDate(generatedAt)}`;
+    page.drawText(dateText, {
+        x: cellX + cellW - 10 - font.widthOfTextAtSize(dateText, 7.5),
+        y: cellY + 30,
+        size: 7.5,
+        font,
+        color: rgb(0.15, 0.18, 0.24),
+    });
+    page.drawText("CV. Surya Perkasa", {
+        x: cellX + cellW - 10 - bold.widthOfTextAtSize("CV. Surya Perkasa", 8),
+        y: cellY + 14,
+        size: 8,
+        font: bold,
+        color: rgb(0.08, 0.19, 0.3),
+    });
+}
+
+async function buildCombinedClaimReceiptPdf(
+    workflow: ClaimWorkflowRow,
+    entries: CombinedReceiptEntry[],
+    generatedAt: Date,
+): Promise<Buffer> {
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.setTitle(`Kwitansi Claim Gabungan ${workflow.claimWorkflowNo}`);
+    pdfDoc.setSubject(`Kwitansi Claim Gabungan - ${recipientName(workflow)}`);
+    pdfDoc.setCreator("AccAPI Claim Workflow");
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    const usableW = LS_PAGE_WIDTH - LS_MARGIN * 2;
+    const usableH = LS_PAGE_HEIGHT - LS_MARGIN * 2;
+    const cellW = (usableW - LS_GUTTER) / 2;
+    const cellH = (usableH - LS_GUTTER) / 2;
+
+    // Posisi sel grid 2x2 (urutan: kiri-atas, kanan-atas, kiri-bawah, kanan-bawah).
+    const cellPositions = [
+        { x: LS_MARGIN, y: LS_MARGIN + cellH + LS_GUTTER },
+        { x: LS_MARGIN + cellW + LS_GUTTER, y: LS_MARGIN + cellH + LS_GUTTER },
+        { x: LS_MARGIN, y: LS_MARGIN },
+        { x: LS_MARGIN + cellW + LS_GUTTER, y: LS_MARGIN },
+    ];
+
+    const safeEntries = entries.length > 0 ? entries : [];
+    for (let i = 0; i < safeEntries.length; i += 4) {
+        const page = pdfDoc.addPage([LS_PAGE_WIDTH, LS_PAGE_HEIGHT]);
+        const pageEntries = safeEntries.slice(i, i + 4);
+        pageEntries.forEach((entry, idx) => {
+            const pos = cellPositions[idx];
+            drawMiniReceipt(
+                page,
+                font,
+                bold,
+                workflow,
+                entry,
+                pos.x,
+                pos.y,
+                cellW,
+                cellH,
+                generatedAt,
+            );
+        });
+    }
+
+    // Bila tidak ada entry, tetap buat 1 halaman kosong agar PDF valid.
+    if (safeEntries.length === 0) {
+        pdfDoc.addPage([LS_PAGE_WIDTH, LS_PAGE_HEIGHT]);
+    }
+
+    return Buffer.from(await pdfDoc.save());
+}
+
+/**
+ * Generate Kwitansi gabungan workflow-level (A4 Landscape, 2x2 per page).
+ * Disimpan di folder legacy receipts/ supaya `claim_workflow.receiptPdfPath`
+ * menunjuk ke file gabungan ini sebagai source-of-truth kwitansi.
+ */
+export async function generateCombinedClaimReceiptPdf(
+    workflow: ClaimWorkflowRow,
+    entries: CombinedReceiptEntry[],
+    generatedAt: Date,
+) {
+    const pdf = await buildCombinedClaimReceiptPdf(workflow, entries, generatedAt);
+    if (pdf.byteLength === 0) throw new Error("Combined Claim Receipt PDF output is empty.");
+    const directory = path.join(process.cwd(), "runtime", "claim-workflow", "receipts");
+    await mkdir(directory, { recursive: true });
+    const timestamp = formatDocumentTimestamp(generatedAt);
+    const filePath = path.join(
+        directory,
+        `${safeFileName(workflow.claimWorkflowNo)}-receipt-combined-${timestamp}.pdf`,
+    );
+    await writeFile(filePath, pdf);
+    return { filePath, pdf };
+}

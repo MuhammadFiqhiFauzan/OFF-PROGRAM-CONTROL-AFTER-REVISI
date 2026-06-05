@@ -320,3 +320,61 @@ export async function generateClaimSummaryPdf(
     await writeFile(filePath, pdf);
     return { filePath, pdf };
 }
+
+// =============================================================================
+// Combined Claim Summary — 1 PDF gabungan workflow-level
+// =============================================================================
+
+type CombinedSummaryEntry = {
+    submission: ClaimSubmissionRow;
+    items: ClaimWorkflowItemRow[];
+};
+
+/**
+ * Generate 1 PDF Summary gabungan untuk seluruh workflow. Setiap
+ * submission aktif mendapat section summary sendiri (halaman baru) di
+ * dalam PDF yang sama. Disimpan ke workflow.summaryPdfPath.
+ */
+export async function generateCombinedClaimSummaryPdf(
+    workflow: ClaimWorkflowRow,
+    entries: CombinedSummaryEntry[],
+    generatedAt: Date,
+) {
+    const mergedDoc = await PDFDocument.create();
+    mergedDoc.setTitle(`Summary Claim Gabungan ${workflow.claimWorkflowNo}`);
+    mergedDoc.setCreator("AccAPI Claim Workflow");
+
+    for (const entry of entries) {
+        const effectiveWorkflow: ClaimWorkflowRow = {
+            ...workflow,
+            noClaim: entry.submission.noClaim,
+            totalDpp: Number(entry.submission.totalDpp || 0),
+            totalPpn: Number(entry.submission.totalPpn || 0),
+            totalPph: Number(entry.submission.totalPph || 0),
+            totalClaim: Number(entry.submission.totalClaim || 0),
+        };
+        const singlePdf = await buildClaimSummaryPdf(effectiveWorkflow, entry.items, generatedAt);
+        const singleDoc = await PDFDocument.load(singlePdf);
+        const pageIndices = singleDoc.getPageIndices();
+        const copiedPages = await mergedDoc.copyPages(singleDoc, pageIndices);
+        for (const page of copiedPages) {
+            mergedDoc.addPage(page);
+        }
+    }
+
+    if (entries.length === 0) {
+        mergedDoc.addPage([595.28, 841.89]);
+    }
+
+    const pdf = Buffer.from(await mergedDoc.save());
+    if (pdf.byteLength === 0) throw new Error("Combined Claim Summary PDF output is empty.");
+
+    const directory = path.join(process.cwd(), "runtime", "claim-workflow", "summaries");
+    await mkdir(directory, { recursive: true });
+    const timestamp = formatDocumentTimestamp(generatedAt);
+    const safeNo = String(workflow.claimWorkflowNo || "claim-workflow")
+        .normalize("NFKD").replace(/[^\x20-\x7E]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "claim-workflow";
+    const filePath = path.join(directory, `${safeNo}-summary-combined-${timestamp}.pdf`);
+    await writeFile(filePath, pdf);
+    return { filePath, pdf };
+}

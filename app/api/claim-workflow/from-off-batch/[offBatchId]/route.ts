@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
     claimAuditLog,
+    claimSubmission,
     claimWorkflow,
     claimWorkflowItem,
     offBatch,
@@ -12,15 +13,14 @@ import {
 import {
     calculateClaimAmount,
     calculateRemainingAmount,
+    claimSubmissionScopes,
+    claimSubmissionStatuses,
     claimWorkflowOffRequirements,
     claimWorkflowStatuses,
     requireClaimSession,
+    SCOPE_LABEL_MAX_LENGTH,
 } from "@/lib/claim-workflow";
-import {
-    getOrCreateDefaultSubmission,
-    recalcSubmissionTotals,
-    recalcWorkflowAggregateFromSubmissions,
-} from "@/lib/claim-workflow/submissions";
+import { recalcWorkflowAggregateFromSubmissions } from "@/lib/claim-workflow/submissions";
 
 type Context = { params: Promise<{ offBatchId: string }> };
 
@@ -37,6 +37,28 @@ function normalizeMetadata(value: unknown): Record<string, unknown> | null {
         return null;
     }
     return value as Record<string, unknown>;
+}
+
+function deriveItemScopeLabel(item: {
+    id: string;
+    toko?: string | null;
+    namaProgram?: string | null;
+    periode?: string | null;
+    noSurat?: string | null;
+}): string {
+    const candidates = [
+        item.toko,
+        item.namaProgram,
+        item.periode,
+        item.noSurat,
+    ];
+    for (const candidate of candidates) {
+        if (typeof candidate === "string") {
+            const trimmed = candidate.trim();
+            if (trimmed) return trimmed.slice(0, SCOPE_LABEL_MAX_LENGTH);
+        }
+    }
+    return `Item Klaim ${item.id.slice(0, 8)}`;
 }
 
 export async function POST(request: NextRequest, context: Context) {
@@ -91,11 +113,50 @@ export async function POST(request: NextRequest, context: Context) {
             .where(eq(offBatchItem.batchId, offBatchId));
         const now = new Date();
         const workflowId = randomUUID();
+        const submissionByOffItemId = new Map<string, string>();
+        const submissions = offItems.map((item) => {
+            const amount = calculateClaimAmount(Number(item.nominal || 0), ppnRate, pphRate);
+            const submissionId = randomUUID();
+            submissionByOffItemId.set(item.id, submissionId);
+            return {
+                id: submissionId,
+                claimWorkflowId: workflowId,
+                noClaim: null,
+                noClaimAssignedAt: null,
+                noClaimAssignedBy: null,
+                scope: claimSubmissionScopes.perItem,
+                scopeLabel: deriveItemScopeLabel(item),
+                status: claimSubmissionStatuses.draft,
+                totalDpp: amount.dpp,
+                totalPpn: amount.ppnAmount,
+                totalPph: amount.pphAmount,
+                totalClaim: amount.nilaiKlaim,
+                totalPaid: 0,
+                remainingAmount: calculateRemainingAmount(amount.nilaiKlaim, 0),
+                submittedToPrincipalAt: null,
+                claimLetterPdfPath: null,
+                claimLetterGeneratedAt: null,
+                claimLetterGeneratedBy: null,
+                summaryPdfPath: null,
+                summaryGeneratedAt: null,
+                summaryGeneratedBy: null,
+                receiptPdfPath: null,
+                receiptGeneratedAt: null,
+                receiptGeneratedBy: null,
+                closedAt: null,
+                closedBy: null,
+                closeNote: null,
+                createdBy: actor.id,
+                createdAt: now,
+                updatedAt: now,
+            };
+        });
         const items = offItems.map((item) => {
             const amount = calculateClaimAmount(Number(item.nominal || 0), ppnRate, pphRate);
             return {
                 id: randomUUID(),
                 claimWorkflowId: workflowId,
+                claimSubmissionId: submissionByOffItemId.get(item.id) ?? null,
                 offBatchItemId: item.id,
                 noSurat: item.noSurat,
                 jenisPromosi: item.namaProgram,
@@ -137,6 +198,8 @@ export async function POST(request: NextRequest, context: Context) {
             offBatchId,
             noPengajuan: batch.noPengajuan,
             itemCount: items.length,
+            submissionMode: "per_item",
+            activeSubmissionCount: submissions.length,
             dppSource: "off_batch_item.nominal",
             ppnRate,
             pphRate,
@@ -144,22 +207,17 @@ export async function POST(request: NextRequest, context: Context) {
 
         // libsql/drizzle transaction: semua insert atomic. Jika satu gagal,
         // tidak ada workflow header tanpa items / tanpa audit yang tertinggal.
-        let defaultSubmissionId: string | null = null;
+        let activeSubmissionCount = 0;
         await db.transaction(async (tx) => {
             await tx.insert(claimWorkflow).values(workflow);
+            if (submissions.length > 0) {
+                await tx.insert(claimSubmission).values(submissions);
+                activeSubmissionCount = submissions.length;
+            }
             if (items.length > 0) {
                 await tx.insert(claimWorkflowItem).values(items);
             }
-            const [createdWorkflow] = await tx
-                .select()
-                .from(claimWorkflow)
-                .where(eq(claimWorkflow.id, workflowId));
-            if (createdWorkflow) {
-                const defaultSubmission = await getOrCreateDefaultSubmission(tx, createdWorkflow, now);
-                defaultSubmissionId = defaultSubmission.id;
-                await recalcSubmissionTotals(tx, defaultSubmission.id, now);
-                await recalcWorkflowAggregateFromSubmissions(tx, workflowId, now);
-            }
+            await recalcWorkflowAggregateFromSubmissions(tx, workflowId, now);
             await tx.insert(claimAuditLog).values({
                 id: randomUUID(),
                 claimWorkflowId: workflowId,
@@ -181,7 +239,7 @@ export async function POST(request: NextRequest, context: Context) {
                 ...workflow,
                 offNoPengajuan: batch.noPengajuan,
                 itemCount: items.length,
-                defaultSubmissionId,
+                activeSubmissionCount,
             },
         }, { status: 201 });
     } catch (error) {

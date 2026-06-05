@@ -283,25 +283,32 @@ async function seed() {
             ],
         });
 
-        // 5. INSERT Claim Submission — default per_pengajuan, no noClaim
-        const submissionId = randomUUID();
-        await db.execute({
-            sql: `INSERT INTO claim_submission (
-                id, claim_workflow_id, scope, scope_label, status,
-                no_claim, total_dpp, total_ppn, total_pph, total_claim,
-                total_paid, remaining_amount,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            args: [
-                submissionId, workflowId, "per_pengajuan", claimWorkflowNo, "Draft",
-                null, totalNominal, 0, 0, totalNominal,
-                0, totalNominal,
-                ms(paidDaysAgo - 1), ms(paidDaysAgo - 1),
-            ],
-        });
-
-        // 6. INSERT Claim Workflow Items (same as OFF items, linked to submission)
+        // 5. INSERT Claim Submissions — per_item (one submission per item)
+        const submissionIds = [];
         for (const item of items) {
+            const submissionId = randomUUID();
+            submissionIds.push(submissionId);
+            const dpp = item.nominal;
+            await db.execute({
+                sql: `INSERT INTO claim_submission (
+                    id, claim_workflow_id, scope, scope_label, status,
+                    no_claim, total_dpp, total_ppn, total_pph, total_claim,
+                    total_paid, remaining_amount,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    submissionId, workflowId, "per_item", `${item.namaProgram} - ${item.toko}`, "Draft",
+                    null, dpp, 0, 0, dpp,
+                    0, dpp,
+                    ms(paidDaysAgo - 1), ms(paidDaysAgo - 1),
+                ],
+            });
+        }
+
+        // 6. INSERT Claim Workflow Items (each linked to its own submission)
+        for (let j = 0; j < items.length; j++) {
+            const item = items[j];
+            const submissionId = submissionIds[j];
             const dpp = item.nominal;
             await db.execute({
                 sql: `INSERT INTO claim_workflow_item (
