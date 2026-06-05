@@ -35,7 +35,7 @@ export default function OffNotificationBell({ problems }: OffNotificationBellPro
     const dangerCount = visible.filter((p) => p.severity === "danger").length;
 
     return (
-        <div className="mb-6 space-y-2">
+        <div className="mb-6 space-y-3">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-bold text-[var(--luxury-text)]">
@@ -85,19 +85,6 @@ export default function OffNotificationBell({ problems }: OffNotificationBellPro
                             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 <span className="text-[10px] text-[var(--luxury-subtle)]">
                                     {problem.principleName}
-                                </span>
-                                <span className="text-[10px] text-[var(--luxury-subtle)]">•</span>
-                                <span className="text-[10px] font-medium text-[var(--luxury-subtle)]">
-                                    Ditujukan ke: {problem.notifyRoles.filter(r => r !== "admin").map(r => {
-                                        const labels: Record<string, string> = {
-                                            supervisor: "Supervisor",
-                                            sales_manager: "Sales Manager",
-                                            claim: "Claim",
-                                            operational_manager: "OM",
-                                            finance: "Keuangan",
-                                        };
-                                        return labels[r] || r;
-                                    }).join(", ")}
                                 </span>
                             </div>
                         </div>

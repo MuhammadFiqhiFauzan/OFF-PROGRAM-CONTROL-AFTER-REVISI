@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 /*
  * Tujuan: Dashboard OFF Program Control bergaya warm luxury untuk cockpit admin, pengajuan, tinjauan, persetujuan, klaim, pembayaran, audit, dan tutup periode.
@@ -101,22 +101,18 @@ const tabs: Array<{ key: TabKey; label: string }> = [
 
 const adminViewGroups: Array<{
   title: string;
-  desc: string;
   tabs: TabKey[];
 }> = [
   {
     title: "Monitoring",
-    desc: "Health system, semua status, dan histori audit.",
     tabs: ["overview", "audit"],
   },
   {
     title: "Approval Flow",
-    desc: "Antrean approval lintas Supervisor, Sales Manager, dan OM.",
     tabs: ["supervisor", "sales", "om"],
   },
   {
     title: "Financial & Claim",
-    desc: "Validasi klaim, pembayaran, dan finalisasi dokumen.",
     tabs: ["claim", "finance"],
   },
 ];
@@ -998,14 +994,14 @@ function buildAdminQueueStats(batches: OffApiBatch[]) {
       key: "supervisor",
       label: "Supervisor",
       count: batches.filter(isSupervisorEditableBatch).length,
-      desc: "Draf atau revisi yang perlu dirapikan.",
+      desc: "Ada pengajuan yang belum selesai atau perlu diperbaiki.",
       icon: FileText,
     },
     {
       key: "sales",
       label: "Sales Manager",
       count: batches.filter(isSmActionableBatch).length,
-      desc: "Menunggu review benar/salah data.",
+      desc: "Data menunggu diperiksa oleh Sales Manager.",
       icon: Send,
     },
     {
@@ -1019,7 +1015,7 @@ function buildAdminQueueStats(batches: OffApiBatch[]) {
       key: "om",
       label: "Operational Manager",
       count: batches.filter(isOmActionableBatch).length,
-      desc: "Menunggu keputusan OM.",
+      desc: "Menunggu persetujuan Manajer Operasional.",
       icon: ShieldCheck,
     },
     {
@@ -1033,7 +1029,7 @@ function buildAdminQueueStats(batches: OffApiBatch[]) {
       key: "final",
       label: "Final Klaim",
       count: batches.filter(isFinalClaimActionableBatch).length,
-      desc: "Sudah dibayar, belum verifikasi final.",
+      desc: "Sudah dibayar, menunggu konfirmasi dokumen akhir.",
       icon: ListChecks,
     },
   ];
@@ -1080,7 +1076,7 @@ function filterFinanceBatchesByStatus(batches: OffApiBatch[], status: string) {
 function MonitoringSearch({
   value,
   onChange,
-  placeholder = "Cari nomor pengajuan, principal, kode, status, atau nomor klaim",
+  placeholder = "Ketik nama principal, nomor, atau status pengajuan",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -1201,10 +1197,10 @@ function PeriodFilter({
           </button>
         )}
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <label className="block">
           <span className="mb-1 block text-[11px] font-semibold text-slate-500">
-            Jenis Tanggal
+            Cari Berdasarkan Tanggal
           </span>
           <select
             value={value.periodType}
@@ -1230,7 +1226,7 @@ function PeriodFilter({
         </label>
         <label className="block">
           <span className="mb-1 block text-[11px] font-semibold text-slate-500">
-            Mode
+            Cara Pencarian
           </span>
           <select
             value={value.mode}
@@ -1506,7 +1502,7 @@ function CompactFilterToolbar({
             type="button"
             onClick={onReset}
             disabled={!hasActiveFilters}
-            className="inline-flex items-center justify-center rounded-xl border border-[#d4ad61]/35 bg-[#fffaf0]/90 px-4 py-2.5 text-sm font-bold text-[#574839] hover:bg-[#f2d28a]/20 disabled:cursor-not-allowed disabled:opacity-40"
+            className="text-sm font-semibold text-[#7a664c] underline px-2 py-2 hover:text-[#2d241b] disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline"
           >
             Reset
           </button>
@@ -1596,20 +1592,17 @@ function CompactSubmissionTable({
     "Principal",
     "Nominal",
     "Status Saat Ini",
-    "PIC / Role Berikutnya",
+    "Penanggung Jawab",
     "Deadline",
     "Aksi",
   ];
 
   return (
     <section className="rounded-2xl bg-[#1a1c23]/45 p-4 shadow-xl">
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-6 flex items-center gap-3">
         <h3 className="flex items-center gap-2 text-base font-bold text-white">
           <ReceiptText className="text-teal-300" size={18} /> {title}
         </h3>
-        <span className="rounded-lg bg-black/25 px-3 py-1 text-xs font-bold text-slate-400">
-          {batches.length} data
-        </span>
       </div>
       {batches.length === 0 ? (
         <EmptyState title={emptyText} />
@@ -1661,7 +1654,7 @@ function CompactSubmissionTable({
                   <button
                     type="button"
                     onClick={() => onSelect(batch)}
-                    className="flex-1 rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs font-bold text-teal-200 hover:bg-teal-500/20"
+                    className="flex-1 rounded-lg bg-teal-600 px-4 py-2 text-xs font-bold text-white hover:bg-teal-500"
                   >
                     {actionLabel(batch)}
                   </button>
@@ -1675,9 +1668,10 @@ function CompactSubmissionTable({
                         OFF_KWITANSI_DISABLED ||
                         printingReceiptBatchId === batch.id
                       }
-                      className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-200 hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Cetak Kwitansi"
+                      className="rounded-lg border border-white/15 px-2 py-2 text-slate-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Kwitansi
+                      <ReceiptText size={15} />
                     </button>
                   )}
                 </div>
@@ -1744,11 +1738,11 @@ function CompactSubmissionTable({
                       )}
                     </td>
                     <td className="px-4 py-4">
-                      <div className="flex min-w-[150px] flex-col gap-2">
+                      <div className="flex min-w-[150px] items-center gap-2">
                         <button
                           type="button"
                           onClick={() => onSelect(batch)}
-                          className="rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs font-bold text-teal-200 hover:bg-teal-500/20"
+                          className="rounded-lg bg-teal-600 px-4 py-2 text-xs font-bold text-white hover:bg-teal-500"
                         >
                           {actionLabel(batch)}
                         </button>
@@ -1767,15 +1761,11 @@ function CompactSubmissionTable({
                             title={
                               OFF_KWITANSI_DISABLED
                                 ? OFF_KWITANSI_DISABLED_MESSAGE
-                                : undefined
+                                : "Cetak Kwitansi"
                             }
-                            className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-200 hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-lg border border-white/15 px-2 py-2 text-slate-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {OFF_KWITANSI_DISABLED
-                              ? OFF_KWITANSI_DISABLED_MESSAGE
-                              : printingReceiptBatchId === batch.id
-                                ? "Membuat..."
-                                : "Cetak Kwitansi"}
+                            <ReceiptText size={15} />
                           </button>
                         )}
                       </div>
@@ -2035,7 +2025,7 @@ function ClaimComparisonSummary({
   return (
     <section className="rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-4 shadow-xl">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-bold text-white">Pengajuan vs Klaim</h2>
+        <h2 className="text-lg font-bold text-white">Perbandingan Pengajuan &amp; Klaim</h2>
         <span
           className={`rounded-md border px-3 py-1 text-xs font-bold ${
             comparison.isMatched
@@ -2108,7 +2098,7 @@ function PeriodClosurePanel({
     if (
       action === "close" &&
       !window.confirm(
-        "Apakah Anda yakin ingin menutup periode ini? Setelah ditutup, data pada periode ini tidak dapat diubah kecuali oleh Admin.",
+        "Tutup periode ini? Setelah dikunci, data tidak bisa diubah lagi.",
       )
     ) {
       return;
@@ -2192,7 +2182,7 @@ function PeriodClosurePanel({
           { label: "Total Diajukan", value: `Rp ${comparison.totalSubmitted.toLocaleString("id-ID")}` },
           { label: "Total Diklaim", value: `Rp ${comparison.totalClaimed.toLocaleString("id-ID")}` },
           { label: "Selisih", value: `Rp ${Math.abs(comparison.difference).toLocaleString("id-ID")}` },
-          { label: "Status Pencocokan", value: comparison.status },
+          { label: "Kesesuaian Data", value: comparison.status },
         ].map((item) => (
           <div key={item.label} className="rounded-xl bg-black/25 px-3 py-3">
             <p className="text-xs font-semibold text-slate-500">{item.label}</p>
@@ -2200,12 +2190,12 @@ function PeriodClosurePanel({
           </div>
         ))}
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-6 flex flex-wrap items-center gap-4">
         <button
           type="button"
           disabled={isSubmitting || !canClosePeriod}
           onClick={() => submitPeriodAction("close")}
-          className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Tutup Periode
         </button>
@@ -2214,9 +2204,9 @@ function PeriodClosurePanel({
             type="button"
             disabled={isSubmitting}
             onClick={() => submitPeriodAction("unlock")}
-            className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-bold text-amber-200 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="text-xs font-semibold text-amber-400 underline hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Buka Kunci Periode
+            Buka kunci periode ini
           </button>
         )}
       </div>
@@ -2289,7 +2279,7 @@ function SummaryStrip({ metrics }: { metrics: MetricItem[] }) {
             return (
               <div
                 key={metric.label}
-                className="flex min-h-14 items-center justify-between gap-3 rounded-xl bg-black/25 px-3 py-2"
+                className="flex min-h-16 items-center justify-between gap-3 rounded-xl bg-black/25 px-4 py-3"
               >
                 <div className="min-w-0">
                   <p className="truncate text-xs font-semibold text-slate-500">
@@ -2311,7 +2301,7 @@ function SummaryStrip({ metrics }: { metrics: MetricItem[] }) {
             aria-expanded={isExpanded}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-300 hover:bg-white/10"
           >
-            {isExpanded ? "Ringkas Metrik" : "Metrik Lainnya"}
+            {isExpanded ? "Sembunyikan" : "Lihat Lebih Banyak"}
             <ChevronDown
               size={14}
               className={`transition-transform ${isExpanded ? "rotate-180" : ""}`}
@@ -2335,30 +2325,22 @@ function AdminViewSelector({
   return (
     <section className="mb-6 rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-5 shadow-xl">
       <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-sm font-bold text-white">Lihat sebagai</p>
-          <p className="mt-1 text-xs text-slate-400">
-            Gunakan filter role untuk melihat antrean berdasarkan tanggung jawab tertentu.
-          </p>
-        </div>
+        <p className="text-sm font-bold text-white">Tinjau Berdasarkan Bagian</p>
         <span className="inline-flex w-fit items-center gap-2 rounded-xl border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs font-bold text-teal-200">
           <ShieldCheck size={14} />
-          Mode Admin: Semua akses aktif
+          Anda masuk sebagai Admin
         </span>
       </div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {adminViewGroups.map((group) => (
           <div
             key={group.title}
-            className="rounded-xl border border-white/10 bg-black/25 p-4"
+            className="rounded-xl border border-white/10 bg-black/25 p-5"
           >
-            <div className="mb-4">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                {group.title}
-              </p>
-              <p className="mt-1.5 text-xs text-slate-400">{group.desc}</p>
-            </div>
-            <div className="flex flex-wrap gap-2.5">
+            <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-500">
+              {group.title}
+            </p>
+            <div className="flex flex-wrap gap-3">
               {group.tabs
                 .filter((key) => accessibleTabKeys.includes(key))
                 .map((key) => {
@@ -2435,7 +2417,7 @@ function AdminHealthPanel({
       : null,
     overdueBatches.length > 0
       ? {
-          title: "Pengajuan overdue",
+          title: "Melewati Batas Waktu",
           desc: "Deadline klaim sudah lewat.",
           count: String(overdueBatches.length),
           tone: "text-rose-300",
@@ -2444,7 +2426,7 @@ function AdminHealthPanel({
       : null,
     agingBatches.length > 0
       ? {
-          title: "Aging approval",
+          title: "Pengajuan Terlalu Lama Diproses",
           desc: "Aktif lebih dari 7 hari sejak update terakhir.",
           count: String(agingBatches.length),
           tone: "text-amber-300",
@@ -2462,7 +2444,7 @@ function AdminHealthPanel({
       : null,
     comparison.submittedCount > 0 && !comparison.isMatched
       ? {
-          title: "Mismatch pengajuan vs klaim",
+          title: "Ketidaksesuaian pengajuan & klaim",
           desc: `Selisih Rp ${Math.abs(comparison.difference).toLocaleString("id-ID")}.`,
           count: String(comparison.submittedCount),
           tone: "text-amber-300",
@@ -2535,7 +2517,7 @@ function AdminHealthPanel({
                 {overdueBatches.length}
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                {agingBatches.length} aging 7+ hari
+                {agingBatches.length} tertahan 7+ hari
               </p>
             </div>
           </div>
@@ -3488,7 +3470,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
             <CompactFilterToolbar
               searchValue={monitoringSearch}
               onSearchChange={setMonitoringSearch}
-              placeholder="Cari nomor pengajuan, principal, kode, status, atau nomor klaim"
+              placeholder="Ketik nama principal, nomor, atau status pengajuan"
               activeFilters={buildBatchFilterChips({
                 principalFilter: monitoringPrincipalFilter,
                 principalOptions: supervisorPrincipalOptions,
@@ -4444,7 +4426,7 @@ function SalesManagerDashboard({ offRole }: OffDashboardProps) {
         <CompactFilterToolbar
           searchValue={smSearch}
           onSearchChange={setSmSearch}
-          placeholder="Cari nomor pengajuan, principal, kode, status, atau nomor klaim"
+          placeholder="Ketik nama principal, nomor, atau status pengajuan"
           activeFilters={buildBatchFilterChips({
             principalFilter: smPrincipalFilter,
             principalOptions: smPrincipalOptions,
@@ -5465,7 +5447,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               <CompactFilterToolbar
                 searchValue={claimSearch}
                 onSearchChange={setClaimSearch}
-                placeholder="Cari nomor pengajuan, principal, kode, status, atau nomor klaim"
+                placeholder="Ketik nama principal, nomor, atau status pengajuan"
                 activeFilters={buildBatchFilterChips({
                   principalFilter: claimPrincipalFilter,
                   principalOptions: claimPrincipalOptions,
@@ -5759,7 +5741,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               <CompactFilterToolbar
                 searchValue={finalClaimSearch}
                 onSearchChange={setFinalClaimSearch}
-                placeholder="Cari nomor pengajuan, principal, kode, status, atau nomor klaim"
+                placeholder="Ketik nama principal, nomor, atau status pengajuan"
                 activeFilters={buildBatchFilterChips({
                   principalFilter: finalClaimPrincipalFilter,
                   principalOptions: claimPrincipalOptions,
@@ -6614,7 +6596,7 @@ function OperationalManagerDashboard({ offRole }: OffDashboardProps) {
             <CompactFilterToolbar
               searchValue={omSearch}
               onSearchChange={setOmSearch}
-              placeholder="Cari nomor pengajuan, principal, kode, status, atau nomor klaim"
+              placeholder="Ketik nama principal, nomor, atau status pengajuan"
               activeFilters={buildBatchFilterChips({
                 principalFilter: omPrincipalFilter,
                 principalOptions: omPrincipalOptions,
@@ -7598,7 +7580,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
             <CompactFilterToolbar
               searchValue={financeSearch}
               onSearchChange={setFinanceSearch}
-              placeholder="Cari nomor pengajuan, principal, kode, status, atau nomor klaim"
+              placeholder="Ketik nama principal, nomor, atau status pengajuan"
               activeFilters={buildBatchFilterChips({
                 principalFilter: financePrincipalFilter,
                 principalOptions: financePrincipalOptions,
@@ -8173,7 +8155,7 @@ type OffDiscountSubmissionRow = {
   createdAt?: number | string | null;
 };
 
-// Revisi I: Dashboard Diskon SPV — jejak digital, BELUM approval resmi.
+// Revisi I: Dashboard Diskon SPV â€” jejak digital, BELUM approval resmi.
 function DiscountDashboard({ offRole }: OffDashboardProps) {
   // Hanya Supervisor yang dapat membuat pengajuan (selaras backend). Admin
   // read-only + note, walau admin superuser di action lain.
@@ -8702,7 +8684,7 @@ function AuditTimeline({ offRole }: OffDashboardProps) {
         <CompactFilterToolbar
           searchValue={search}
           onSearchChange={setSearch}
-          placeholder="Cari nomor pengajuan, principal, pengguna, aksi, atau catatan"
+          placeholder="Ketik nama principal, nomor, atau catatan"
           activeFilters={
             isPeriodFilterActive(period)
               ? [{ label: "Periode", value: periodFilterLabel(period) }]
@@ -8802,7 +8784,7 @@ function AuditTimeline({ offRole }: OffDashboardProps) {
                           Alasan koreksi:
                         </span>{" "}
                         {log.correctionReason}
-                        {log.note ? ` — ${log.note}` : ""}
+                        {log.note ? ` â€” ${log.note}` : ""}
                       </span>
                     ) : (
                       log.note || "-"
@@ -9398,7 +9380,7 @@ function OverviewTab({ offRole }: OffDashboardProps) {
       <CompactFilterToolbar
         searchValue={overviewSearch}
         onSearchChange={setOverviewSearch}
-        placeholder="Cari nomor pengajuan, principal, kode, status, atau nomor klaim"
+        placeholder="Ketik nama principal, nomor, atau status pengajuan"
         activeFilters={buildBatchFilterChips({
           principalFilter: overviewPrincipalFilter,
           principalOptions,
@@ -9627,7 +9609,7 @@ export default function OffProgramControlPage() {
             <ClipboardCheck size={14} /> OFF Control
           </div>
           <h1 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
-            OFF Program Control
+            Program OFF — Pengelolaan Klaim
           </h1>
           <p className="text-slate-400 mt-2 text-sm sm:text-base">
             {isAdminMode

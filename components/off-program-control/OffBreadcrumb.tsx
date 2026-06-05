@@ -19,7 +19,7 @@ export default function OffBreadcrumb() {
                 <span className="hidden sm:inline">Dashboard</span>
             </Link>
             <ChevronRight size={12} className="text-[var(--luxury-subtle)] opacity-60" />
-            <span className="font-semibold text-[var(--luxury-text)]">OFF Program Control</span>
+            <span className="font-semibold text-[var(--luxury-text)]">Program OFF — Pengelolaan Klaim</span>
         </nav>
     );
 }

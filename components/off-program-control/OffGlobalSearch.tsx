@@ -23,7 +23,7 @@ interface OffGlobalSearchProps {
     placeholder?: string;
 }
 
-export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari batch..." }: OffGlobalSearchProps) {
+export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari pengajuan..." }: OffGlobalSearchProps) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const inputRef = useRef<HTMLInputElement>(null);
@@ -88,9 +88,6 @@ export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari b
                         <X size={14} />
                     </button>
                 )}
-                <kbd className="hidden sm:inline rounded border border-[var(--border-soft)] bg-black/5 px-1.5 py-0.5 text-[9px] font-mono text-[var(--luxury-subtle)]">
-                    Ctrl+F
-                </kbd>
             </div>
 
             {/* Dropdown results */}
