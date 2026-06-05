@@ -16,12 +16,14 @@ import {
   type ElementType,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowRight,
   Bell,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
   ClipboardCheck,
   Clock3,
   FileCheck2,
@@ -857,6 +859,9 @@ function PeriodFilter({
   value: OffPeriodFilterValue;
   onChange: (value: OffPeriodFilterValue) => void;
 }) {
+  // Filter periode tersembunyi secara default; muncul ke bawah saat header diklik.
+  const [open, setOpen] = useState(false);
+  const isActive = isPeriodFilterActive(value);
   const months = [
     { value: "", label: "Semua Bulan" },
     ...Array.from({ length: 12 }, (_, index) => ({
@@ -865,12 +870,28 @@ function PeriodFilter({
     })),
   ];
   return (
-    <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-slate-400">
+    <div className="rounded-xl border border-white/10 bg-black/30">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          aria-expanded={open}
+          className="flex items-center gap-2 text-xs font-semibold text-slate-300 hover:text-white"
+        >
+          <ChevronDown
+            size={16}
+            className={`text-slate-400 transition-transform duration-200 ${
+              open ? "rotate-180" : ""
+            }`}
+          />
           Filter Periode
-        </span>
-        {isPeriodFilterActive(value) && (
+          {isActive && (
+            <span className="rounded-full bg-teal-500/20 px-2 py-0.5 text-[10px] font-bold text-teal-300">
+              Aktif
+            </span>
+          )}
+        </button>
+        {isActive && (
           <button
             type="button"
             onClick={() => onChange(createEmptyPeriodFilter())}
@@ -880,7 +901,8 @@ function PeriodFilter({
           </button>
         )}
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {open && (
+      <div className="grid grid-cols-1 gap-2 border-t border-white/10 p-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="block">
           <span className="mb-1 block text-[11px] font-semibold text-slate-500">
             Jenis Tanggal
@@ -1003,6 +1025,7 @@ function PeriodFilter({
           </>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -3855,6 +3878,7 @@ function SalesManagerDashboard({ offRole }: OffDashboardProps) {
 }
 
 function ClaimDashboard({ offRole }: OffDashboardProps) {
+  const router = useRouter();
   const canReviewClaim = canPerformOffAction(offRole, "claim_review");
   const canFinalClaim = canPerformOffAction(offRole, "claim_final");
   const [claimView, setClaimView] = useState<
@@ -4374,6 +4398,39 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
     claimPeriod,
   );
 
+  const openOrCreateClaimWorkflow = async (offBatchId: string) => {
+    setIsActionLoading(true);
+    setClaimMessage("");
+    try {
+      const response = await fetch(
+        `/api/claim-workflow/from-off-batch/${offBatchId}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) },
+      );
+      const data = await parseJsonResponse(response);
+      if (response.ok && data.ok) {
+        // Workflow baru dibuat
+        const wf = data.workflow as { id: string } | undefined;
+        if (wf?.id) {
+          router.push(`/claim-workflow/${wf.id}?focus=no-claim`);
+          return;
+        }
+      }
+      if (response.status === 409 && data.code === "CLAIM_WORKFLOW_ALREADY_EXISTS" && data.workflow) {
+        // Workflow sudah ada, buka yang existing
+        const wf = data.workflow as { id: string };
+        router.push(`/claim-workflow/${wf.id}?focus=no-claim`);
+        return;
+      }
+      setClaimMessage(String(data.error || "Gagal membuka Claim Workflow."));
+    } catch (error) {
+      setClaimMessage(
+        error instanceof Error ? error.message : "Gagal membuka Claim Workflow.",
+      );
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   const isFinalClaimProcessable = (batch: OffApiBatch) =>
     batch.financeStatus === "Paid" &&
     ["Waiting Claim Final Verification", "Incomplete Documents"].includes(
@@ -4844,12 +4901,22 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                           {formatDateDisplay(batch.updatedAt)}
                         </td>
                         <td className="px-3 py-3">
-                          <button
-                            onClick={() => selectFinalBatch(batch)}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${canProcessFinal ? "border-teal-500 bg-teal-600 text-white hover:bg-teal-500" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
-                          >
-                            {canProcessFinal ? "Proses Final" : "Lihat"}
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => void openOrCreateClaimWorkflow(batch.id)}
+                              disabled={isActionLoading || batch.omStatus !== "Approved"}
+                              className="rounded-lg border border-indigo-500 bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-40"
+                              title="Buka atau buat Claim Workflow untuk batch ini"
+                            >
+                              Buka Claim Workflow
+                            </button>
+                            <button
+                              onClick={() => selectFinalBatch(batch)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
+                            >
+                              Lihat Detail
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -4871,7 +4938,14 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
 
           {selectedFinalBatch && (
             <div className="space-y-6">
-              <div className="flex justify-end">
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  onClick={() => void openOrCreateClaimWorkflow(selectedFinalBatch.id)}
+                  disabled={isActionLoading || selectedFinalBatch.omStatus !== "Approved"}
+                  className="rounded-xl border border-indigo-500 bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-40"
+                >
+                  Buka Claim Workflow
+                </button>
                 <button
                   onClick={() => {
                     setSelectedFinalBatch(null);
@@ -5119,17 +5193,14 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                               {item.noSurat || "-"}
                             </td>
                             <td className="px-3 py-3">
-                              <input
-                                value={finalClaimRefs[item.id] || ""}
-                                onChange={(event) =>
-                                  setFinalClaimRefs((current) => ({
-                                    ...current,
-                                    [item.id]: event.target.value,
-                                  }))
-                                }
-                                placeholder="Isi No Claim"
-                                className="w-full min-w-[160px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-mono text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
-                              />
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-sm text-slate-300">
+                                  {finalClaimRefs[item.id] || <span className="italic text-slate-500">Belum diisi</span>}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-[10px] text-slate-500">
+                                No Claim dikerjakan di Claim Workflow.
+                              </p>
                             </td>
                             <td className="px-3 py-3 min-w-[300px]">
                               <div className="grid grid-cols-4 gap-2 text-xs text-slate-300">
