@@ -2060,7 +2060,11 @@ function PeriodClosurePanel({
 }) {
   const principalOptions = getPrincipalOptions(batches);
   const firstBatch = batches[0];
-  const [principalCode, setPrincipalCode] = useState(firstBatch?.principleCode || "");
+  // BUG FIX: principalCode harus default ke "" agar "Semua Principal" selalu
+  // bisa dipilih. Inisialisasi ke firstBatch.principleCode menyebabkan opsi
+  // "Semua Principal" tidak pernah menjadi nilai default, dan useEffect lama
+  // meng-override pilihan user kembali ke principle pertama setiap kali deps berubah.
+  const [principalCode, setPrincipalCode] = useState("");
   const [month, setMonth] = useState(firstBatch?.bulan || "");
   const [year, setYear] = useState(firstBatch?.tahun || "");
   const [status, setStatus] = useState("");
@@ -2068,13 +2072,15 @@ function PeriodClosurePanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
 
-  // Hanya set default sekali saat pertama kali data tersedia dan user belum interaksi
+  // Hanya auto-set bulan dan tahun saat data pertama tersedia dan user belum interaksi.
+  // principalCode TIDAK di-auto-fill: default "Semua Principal" (value="") dipertahankan
+  // agar user selalu bisa memilihnya tanpa di-reset oleh effect ini.
   useEffect(() => {
     if (hasUserInteracted) return;
-    if (!principalCode && firstBatch?.principleCode) setPrincipalCode(firstBatch.principleCode);
     if (!month && firstBatch?.bulan) setMonth(firstBatch.bulan);
     if (!year && firstBatch?.tahun) setYear(firstBatch.tahun);
-  }, [firstBatch?.bulan, firstBatch?.principleCode, firstBatch?.tahun, hasUserInteracted, month, principalCode, year]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstBatch?.bulan, firstBatch?.tahun]);
 
   const handlePrincipalChange = (value: string) => {
     setHasUserInteracted(true);
@@ -9257,7 +9263,14 @@ function OverviewDetailDrawer({
   );
 }
 
-function OverviewTab({ offRole }: OffDashboardProps) {
+function OverviewTab({
+  offRole,
+  pendingBatchId,
+  onPendingBatchHandled,
+}: OffDashboardProps & {
+  pendingBatchId?: string;
+  onPendingBatchHandled?: () => void;
+}) {
   const [overviewBatches, setOverviewBatches] = useState<OffApiBatch[]>([]);
   const [overviewSearch, setOverviewSearch] = useState("");
   const [overviewPrincipalFilter, setOverviewPrincipalFilter] = useState("");
@@ -9299,6 +9312,17 @@ function OverviewTab({ offRole }: OffDashboardProps) {
   useEffect(() => {
     loadOverview();
   }, []);
+
+  // Buka drawer otomatis ketika parent mengirim pendingBatchId dari Global Search.
+  useEffect(() => {
+    if (!pendingBatchId || overviewBatches.length === 0) return;
+    const target = overviewBatches.find((b) => b.id === pendingBatchId);
+    if (target) {
+      openOverviewDetail(target);
+      onPendingBatchHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingBatchId, overviewBatches]);
 
   const openOverviewDetail = async (batch: OffApiBatch) => {
     setIsDetailLoading(true);
@@ -9531,6 +9555,8 @@ export default function OffProgramControlPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [paidIncompleteCount, setPaidIncompleteCount] = useState(0);
   const [showAccessDetail, setShowAccessDetail] = useState(false);
+  const [pendingBatchId, setPendingBatchId] = useState("");
+  const [globalSearchItems, setGlobalSearchItems] = useState<OffSearchableItem[]>([]);
   const { data: session } = authClient.useSession();
   const sessionUser = session?.user as
     | {
@@ -9648,7 +9674,18 @@ export default function OffProgramControlPage() {
         const allProblems = detectProblematicBatches(detectionBatches);
         const roleProblems = getProblemsForRole(allProblems, offRole);
 
-        if (isActive) setOffProblems(roleProblems);
+        if (isActive) {
+          setOffProblems(roleProblems);
+          setGlobalSearchItems(
+            rows.map((b) => ({
+              id: b.id,
+              noPengajuan: b.noPengajuan,
+              principleName: b.principleName,
+              status: b.status,
+              supervisorName: b.supervisorName,
+            })),
+          );
+        }
       } catch {
         if (isActive) setOffProblems([]);
       }
@@ -9764,17 +9801,12 @@ export default function OffProgramControlPage() {
           {/* Search bar */}
           <div className="mb-6 max-w-sm">
             <OffGlobalSearch
-              items={dummyBatches.map((b) => ({
-                id: b.id,
-                noPengajuan: b.noPengajuan,
-                principleName: b.principleName,
-                status: b.status,
-                supervisorName: b.supervisorName,
-              }))}
+              items={globalSearchItems}
               onSelect={(id) => {
-                console.log("Navigate to batch:", id);
+                setActiveTab("overview");
+                setPendingBatchId(id);
               }}
-              placeholder="Cari batch..."
+              placeholder="Cari pengajuan..."
             />
           </div>
 
@@ -9817,7 +9849,13 @@ export default function OffProgramControlPage() {
             </div>
           )}
 
-          {effectiveActiveTab === "overview" && <OverviewTab offRole={offRole} />}
+          {effectiveActiveTab === "overview" && (
+            <OverviewTab
+              offRole={offRole}
+              pendingBatchId={pendingBatchId}
+              onPendingBatchHandled={() => setPendingBatchId("")}
+            />
+          )}
           {effectiveActiveTab === "supervisor" && (
             <SupervisorDashboard offRole={offRole} />
           )}
