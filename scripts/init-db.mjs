@@ -199,6 +199,10 @@ const statements = [
     barang TEXT,
     nominal REAL DEFAULT 0,
     cara_bayar TEXT,
+    finance_payment_status TEXT NOT NULL DEFAULT 'unpaid',
+    finance_paid_at INTEGER,
+    finance_payment_id TEXT,
+    finance_paid_amount REAL,
     type TEXT,
     deadline TEXT,
     kwt INTEGER DEFAULT 0,
@@ -487,6 +491,10 @@ const migrations = [
   `ALTER TABLE off_batch ADD COLUMN receipt_pdf_generated_at INTEGER;`,
   `ALTER TABLE off_batch ADD COLUMN receipt_pdf_status TEXT DEFAULT 'pending';`,
   `ALTER TABLE off_batch_item ADD COLUMN no_claim TEXT;`,
+  `ALTER TABLE off_batch_item ADD COLUMN finance_payment_status TEXT NOT NULL DEFAULT 'unpaid';`,
+  `ALTER TABLE off_batch_item ADD COLUMN finance_paid_at INTEGER;`,
+  `ALTER TABLE off_batch_item ADD COLUMN finance_payment_id TEXT;`,
+  `ALTER TABLE off_batch_item ADD COLUMN finance_paid_amount REAL;`,
   `ALTER TABLE off_batch_item ADD COLUMN final_kwt INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE off_batch_item ADD COLUMN final_skp INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE off_batch_item ADD COLUMN final_fp INTEGER NOT NULL DEFAULT 0;`,
@@ -611,9 +619,12 @@ const claimIndexes = [
   `CREATE INDEX IF NOT EXISTS idx_claim_audit_log_submission_id ON claim_audit_log(claim_submission_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_submission_workflow_id ON claim_submission(claim_workflow_id);`,
   `CREATE INDEX IF NOT EXISTS idx_claim_submission_status ON claim_submission(status);`,
-  // Partial unique index: No Claim tidak boleh duplikat antar submission (non-NULL only)
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_submission_no_claim_unique ON claim_submission(no_claim) WHERE no_claim IS NOT NULL;`,
-  // Partial unique index: No Claim pada claim_workflow level
+  // No Claim lookup index (NOT unique — same No Claim allowed within one workflow).
+  // Cross-workflow uniqueness enforced at app layer.
+  `DROP INDEX IF EXISTS idx_claim_submission_no_claim_unique;`,
+  `CREATE INDEX IF NOT EXISTS idx_claim_submission_no_claim ON claim_submission(no_claim) WHERE no_claim IS NOT NULL AND no_claim <> '';`,
+  // Partial unique index: No Claim pada claim_workflow level (legacy cache).
+  // Kept for backward compat but workflow.noClaim is only used for single-submission legacy.
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_workflow_no_claim_unique ON claim_workflow(no_claim) WHERE no_claim IS NOT NULL;`,
 ];
 

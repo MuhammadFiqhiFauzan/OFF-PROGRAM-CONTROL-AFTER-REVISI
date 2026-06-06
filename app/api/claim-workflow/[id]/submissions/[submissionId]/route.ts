@@ -31,6 +31,8 @@ import {
     isSubmissionEditableWorkflowStatus,
     isPathInsideClaimDocumentRoot,
     NO_CLAIM_MAX_LENGTH,
+    recalcSubmissionTotals,
+    recalcWorkflowAggregateFromSubmissions,
     requireClaimSession,
     SCOPE_LABEL_MAX_LENGTH,
     writeClaimAudit,
@@ -247,24 +249,108 @@ export async function PATCH(request: Request, context: Context) {
                 }
             }
 
-            // Cek duplicate global bila noClaim baru non-null.
+            // Cek duplicate antar workflow: noClaim yang sama di workflow LAIN ditolak.
+            // Dalam workflow SAMA: izinkan (akan merge items ke submission target).
             if (noClaimChanged && nextNoClaim) {
-                const [duplicate] = await tx
+                const [crossWorkflowDuplicate] = await tx
                     .select({ id: claimSubmission.id, claimWorkflowId: claimSubmission.claimWorkflowId })
                     .from(claimSubmission)
                     .where(
                         and(
                             eq(claimSubmission.noClaim, nextNoClaim),
                             ne(claimSubmission.id, submissionId),
+                            ne(claimSubmission.claimWorkflowId, id),
                         ),
                     );
-                if (duplicate) {
+                if (crossWorkflowDuplicate) {
                     return {
                         error: {
                             status: 409,
-                            code: "CLAIM_SUBMISSION_NO_CLAIM_DUPLICATE",
-                            message: `noClaim "${nextNoClaim}" sudah dipakai submission lain (workflow ${duplicate.claimWorkflowId}).`,
+                            code: "NO_CLAIM_ALREADY_USED_IN_OTHER_WORKFLOW",
+                            message: `noClaim "${nextNoClaim}" sudah dipakai di workflow lain (${crossWorkflowDuplicate.claimWorkflowId}).`,
                         },
+                    } as const;
+                }
+
+                // Cek merge: submission lain dalam workflow SAMA punya noClaim yang sama?
+                const [sameWorkflowTarget] = await tx
+                    .select({ id: claimSubmission.id })
+                    .from(claimSubmission)
+                    .where(
+                        and(
+                            eq(claimSubmission.noClaim, nextNoClaim),
+                            eq(claimSubmission.claimWorkflowId, id),
+                            ne(claimSubmission.id, submissionId),
+                        ),
+                    );
+                if (sameWorkflowTarget) {
+                    // MERGE: pindahkan semua items dari submission ini ke target.
+                    const movedItems = await tx
+                        .update(claimWorkflowItem)
+                        .set({ claimSubmissionId: sameWorkflowTarget.id, updatedAt: new Date() })
+                        .where(eq(claimWorkflowItem.claimSubmissionId, submissionId))
+                        .returning({ id: claimWorkflowItem.id, offBatchItemId: claimWorkflowItem.offBatchItemId });
+
+                    // Sync noClaim ke off_batch_item yang dipindahkan.
+                    const offItemIds = movedItems
+                        .map((r) => r.offBatchItemId)
+                        .filter((v): v is string => typeof v === "string" && v.length > 0);
+                    if (offItemIds.length > 0) {
+                        await tx
+                            .update(offBatchItem)
+                            .set({ noClaim: nextNoClaim, updatedAt: new Date() })
+                            .where(inArray(offBatchItem.id, offItemIds));
+                    }
+
+                    // Recalc target submission totals.
+                    await recalcSubmissionTotals(tx, sameWorkflowTarget.id);
+
+                    // Old submission sekarang kosong — hapus submission lama.
+                    await tx
+                        .delete(claimSubmission)
+                        .where(eq(claimSubmission.id, submissionId));
+
+                    // Recalc workflow aggregate.
+                    await recalcWorkflowAggregateFromSubmissions(tx, id);
+
+                    // Invalidate workflow docs karena grouping berubah.
+                    await tx
+                        .update(claimWorkflow)
+                        .set({
+                            claimLetterPdfPath: null,
+                            claimLetterGeneratedAt: null,
+                            claimLetterGeneratedBy: null,
+                            summaryPdfPath: null,
+                            summaryGeneratedAt: null,
+                            summaryGeneratedBy: null,
+                            receiptPdfPath: null,
+                            receiptGeneratedAt: null,
+                            receiptGeneratedBy: null,
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(claimWorkflow.id, id));
+
+                    await writeClaimAudit({
+                        claimWorkflowId: id,
+                        claimSubmissionId: sameWorkflowTarget.id,
+                        auditScope: claimAuditScopes.submission,
+                        actor,
+                        action: "claim_submission_merged",
+                        fromStatus: submission.status,
+                        toStatus: submission.status,
+                        metadata: {
+                            mergedFromSubmissionId: submissionId,
+                            targetSubmissionId: sameWorkflowTarget.id,
+                            noClaim: nextNoClaim,
+                            movedItemCount: movedItems.length,
+                        },
+                    }, tx);
+
+                    return {
+                        merged: true,
+                        targetSubmissionId: sameWorkflowTarget.id,
+                        movedItemCount: movedItems.length,
+                        noClaim: nextNoClaim,
                     } as const;
                 }
             }
@@ -454,6 +540,17 @@ export async function PATCH(request: Request, context: Context) {
             } as const;
         });
 
+        if ("merged" in result && result.merged) {
+            return NextResponse.json({
+                ok: true,
+                success: true,
+                merged: true,
+                targetSubmissionId: result.targetSubmissionId,
+                movedItemCount: result.movedItemCount,
+                noClaim: result.noClaim,
+            });
+        }
+
         if (result.error) {
             return NextResponse.json(
                 { ok: false, code: result.error.code, error: result.error.message },
@@ -497,8 +594,8 @@ export async function PATCH(request: Request, context: Context) {
         if (message.includes("unique") && message.includes("no_claim")) {
             return NextResponse.json({
                 ok: false,
-                code: "CLAIM_SUBMISSION_NO_CLAIM_DUPLICATE",
-                error: "noClaim sudah dipakai submission lain.",
+                code: "NO_CLAIM_ALREADY_USED_IN_OTHER_WORKFLOW",
+                error: "noClaim sudah dipakai di workflow lain.",
             }, { status: 409 });
         }
         console.error("[CLAIM SUBMISSION UPDATE ERROR]", error);

@@ -208,6 +208,10 @@ type OffApiItem = {
   barang: string | null;
   nominal: number;
   caraBayar: string | null;
+  financePaymentStatus?: string | null;
+  financePaidAt?: string | number | null;
+  financePaymentId?: string | null;
+  financePaidAmount?: number | null;
   type: string | null;
   normalizedType?: string | null;
   originalType?: string | null;
@@ -6003,13 +6007,12 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     string | null
   >(null);
   const [selectedItems, setSelectedItems] = useState<OffApiItem[]>([]);
+  const [selectedFinanceItemIds, setSelectedFinanceItemIds] = useState<string[]>([]);
   const [selectedPayments, setSelectedPayments] = useState<OffApiPayment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [financeMessage, setFinanceMessage] = useState("");
   const [paymentDate, setPaymentDate] = useState("");
-  const [paidAmount, setPaidAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Transfer");
   const [senderBank, setSenderBank] = useState("");
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [financeNote, setFinanceNote] = useState("");
@@ -6061,6 +6064,30 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     paymentSummary?.remainingAmount ?? Math.max(0, totalNominal - totalPaid),
   );
   const hasMixedItemPayments = transfer > 0 && tunai > 0;
+  const selectedFinanceItems = selectedItems.filter((item) => selectedFinanceItemIds.includes(item.id));
+  const selectedFinanceTotal = selectedFinanceItems.reduce((total, item) => total + Number(item.nominal || 0), 0);
+  const selectedFinanceMethods = Array.from(new Set(selectedFinanceItems.map((item) => normalizeUiPaymentMethod(item.caraBayar || "")).filter(Boolean)));
+  const selectedFinanceMethod = selectedFinanceMethods.length === 1 ? selectedFinanceMethods[0] : "";
+  const hasMixedSelectedFinanceMethods = selectedFinanceMethods.length > 1;
+  const selectedFinanceNeedsProof = selectedFinanceMethod === "Transfer";
+
+  const isItemFinancePaid = (item: OffApiItem) =>
+    item.financePaymentStatus === "paid" || Boolean(item.financePaymentId);
+
+  const isFinanceItemSelectable = (item: OffApiItem) => {
+    if (isItemFinancePaid(item)) return false;
+    if (selectedFinanceItemIds.includes(item.id)) return true;
+    if (!selectedFinanceMethod) return true;
+    return normalizeUiPaymentMethod(item.caraBayar || "") === selectedFinanceMethod;
+  };
+
+  const toggleFinanceItem = (itemId: string) => {
+    setSelectedFinanceItemIds((current) =>
+      current.includes(itemId)
+        ? current.filter((id) => id !== itemId)
+        : [...current, itemId],
+    );
+  };
 
   const isFinanceQueueBatch = (batch: OffApiBatch) =>
     batch.smStatus === "Approved by SM" &&
@@ -6093,9 +6120,9 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     setSelectedItems(
       Array.isArray(data.items) ? (data.items as OffApiItem[]) : [],
     );
+    setSelectedFinanceItemIds([]);
     setSelectedPayments(payments);
     setPaymentDate("");
-    setPaidAmount("");
     setFinanceNote(detailBatch?.financeNote || "");
   };
 
@@ -6143,9 +6170,9 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
         setSelectedBatch(null);
         setSelectedFinanceBatchId(null);
         setSelectedItems([]);
+        setSelectedFinanceItemIds([]);
         setSelectedPayments([]);
         setPaymentDate("");
-        setPaidAmount("");
         setFinanceNote("");
       }
     } catch (error) {
@@ -6155,6 +6182,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
           : "Gagal mengambil antrean Keuangan.",
       );
       setSelectedItems([]);
+      setSelectedFinanceItemIds([]);
       setSelectedPayments([]);
     } finally {
       setIsLoading(false);
@@ -6171,6 +6199,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     setSelectedBatch(batch);
     setSelectedFinanceBatchId(batch.id);
     setSelectedItems([]);
+    setSelectedFinanceItemIds([]);
     setSelectedPayments([]);
     setFinanceMessage("");
     setPaymentResult(null);
@@ -6192,9 +6221,15 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     setIsActionLoading(true);
     setFinanceMessage("");
     try {
-      // Revisi B: bukti pembayaran tidak wajib untuk Tunai. Untuk Transfer tetap wajib.
-      const isTunai = normalizeUiPaymentMethod(paymentMethod) === "Tunai";
-      if (!isTunai && !paymentProofFile) {
+      if (selectedFinanceItemIds.length === 0) {
+        setFinanceMessage("Pilih item yang akan dibayar.");
+        return;
+      }
+      if (hasMixedSelectedFinanceMethods) {
+        setFinanceMessage("Pilih item dengan cara bayar yang sama.");
+        return;
+      }
+      if (selectedFinanceNeedsProof && !paymentProofFile) {
         setFinanceMessage("Bukti pembayaran wajib diupload untuk pembayaran Transfer.");
         return;
       }
@@ -6214,8 +6249,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
       }
       const formData = new FormData();
       formData.append("paymentDate", paymentDate);
-      formData.append("paidAmount", paidAmount);
-      formData.append("paymentMethod", paymentMethod);
+      formData.append("itemIds", JSON.stringify(selectedFinanceItemIds));
       formData.append("senderBank", senderBank);
       formData.append("note", financeNote);
       if (paymentProofFile) {
@@ -6246,15 +6280,15 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
       setPaymentResult({
         paymentNo: payment?.paymentNo,
         paymentDate,
-        paidAmount,
-        paymentMethod,
+        paidAmount: `Rp ${Number(payment?.paidAmount || selectedFinanceTotal).toLocaleString("id-ID")}`,
+        paymentMethod: payment?.paymentMethod || selectedFinanceMethod,
         senderBank,
         paymentProofName: paymentProofFile?.name || "",
         remainingAmount: nextPaymentSummary?.remainingAmount,
         isFullyPaid: nextPaymentSummary?.isFullyPaid,
       });
       setPaymentDate("");
-      setPaidAmount("");
+      setSelectedFinanceItemIds([]);
       setPaymentProofFile(null);
       await loadFinanceBatches({
         preserveSelectedId: selectedBatch.id,
@@ -6455,6 +6489,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                 <thead className="bg-black/50 text-xs uppercase tracking-wider text-slate-500 border-b border-white/10">
                   <tr>
                     {[
+                      "Pilih",
                       "No",
                       "No Surat",
                       "Nama Program",
@@ -6464,6 +6499,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                       "Barang",
                       "Nominal",
                       "Cara Bayar",
+                      "Status Bayar",
                       "Tipe",
                       "Deadline",
                     ].map((header) => (
@@ -6476,11 +6512,24 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                 <tbody className="divide-y divide-white/5">
                   {selectedItems.map((item, index) => {
                     const period = splitPeriodDates(item.periode);
+                    const isPaid = isItemFinancePaid(item);
+                    const isSelectable = isFinanceItemSelectable(item);
+                    const isSelected = selectedFinanceItemIds.includes(item.id);
                     return (
                       <tr
                         key={item.id || `${item.noSurat}-${index}`}
-                        className="hover:bg-white/[0.03]"
+                        className={isPaid ? "bg-emerald-500/[0.04] text-slate-500" : "hover:bg-white/[0.03]"}
                       >
+                        <td className="px-3 py-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={!canPayFinance || !isSelectable}
+                            onChange={() => toggleFinanceItem(item.id)}
+                            aria-label={`Pilih item ${item.itemNo || index + 1} untuk dibayar`}
+                            className="h-4 w-4 rounded border-white/20 bg-black/40 text-teal-500 focus:ring-teal-500 disabled:opacity-40"
+                          />
+                        </td>
                         <td className="px-3 py-3 font-mono text-slate-300">
                           {item.itemNo || index + 1}
                         </td>
@@ -6508,6 +6557,11 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                         <td className="px-3 py-3 text-slate-300">
                           {item.caraBayar || "-"}
                         </td>
+                        <td className="px-3 py-3">
+                          <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${isPaid ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>
+                            {isPaid ? "Paid" : "Unpaid"}
+                          </span>
+                        </td>
                         <td className="px-3 py-3 text-slate-300">
                           {item.type || "-"}
                         </td>
@@ -6520,9 +6574,9 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                   {!isLoading && selectedItems.length === 0 && (
                     <tr>
                       <td
-                        colSpan={11}
-                        className="px-3 py-6 text-center text-sm text-slate-500"
-                      >
+                         colSpan={13}
+                         className="px-3 py-6 text-center text-sm text-slate-500"
+                       >
                         Pilih batch untuk melihat item.
                       </td>
                     </tr>
@@ -6618,81 +6672,22 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                 value={paymentDate}
                 onChange={setPaymentDate}
               />
-              <div className="space-y-2">
-                <EditableField
-                  label="Jumlah Dibayar oleh Keuangan"
-                  value={paidAmount}
-                  onChange={setPaidAmount}
-                />
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPaidAmount(
-                        `Rp ${remainingAmount.toLocaleString("id-ID")}`,
-                      )
-                    }
-                    className="rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-1.5 text-xs font-bold text-teal-200 hover:bg-teal-500/20"
-                  >
-                    Bayar Sisa
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPaidAmount(
-                        `Rp ${Math.min(transfer, remainingAmount).toLocaleString("id-ID")}`,
-                      )
-                    }
-                    disabled={transfer <= 0}
-                    className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-bold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Bayar Transfer
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPaidAmount(
-                        `Rp ${Math.min(tunai, remainingAmount).toLocaleString("id-ID")}`,
-                      )
-                    }
-                    disabled={tunai <= 0}
-                    className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-200 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Bayar Tunai
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPaidAmount("")}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-white/10"
-                  >
-                    Kosongkan
-                  </button>
-                </div>
-              </div>
-              <label className="block">
-                <span className="text-xs text-slate-500 font-semibold">
-                  Metode Pembayaran
-                </span>
-                <select
-                  value={paymentMethod}
-                  onChange={(event) => setPaymentMethod(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-teal-500/50"
-                >
-                  {offPaymentMethods.map((method) => (
-                    <option
-                      key={method}
-                      className="bg-[#1a1c23]"
-                      value={method}
-                    >
-                      {method}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Field
+                label="Item Dipilih"
+                value={`${selectedFinanceItemIds.length} item`}
+              />
+              <Field
+                label="Total Nominal Dipilih"
+                value={`Rp ${selectedFinanceTotal.toLocaleString("id-ID")}`}
+              />
+              <Field
+                label="Cara Bayar Dipilih"
+                value={
+                  hasMixedSelectedFinanceMethods
+                    ? "Campur"
+                    : selectedFinanceMethod || "Pilih item"
+                }
+              />
               <EditableField
                 label="Bank Pengirim"
                 value={senderBank}
@@ -6701,7 +6696,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
               <label className="block">
                 <span className="text-xs text-slate-500 font-semibold">
                   Bukti Pembayaran
-                  {normalizeUiPaymentMethod(paymentMethod) === "Tunai" ? (
+                  {selectedFinanceMethod === "Tunai" ? (
                     <span className="ml-1 font-normal text-emerald-300">
                       (opsional untuk Tunai)
                     </span>
@@ -6721,12 +6716,17 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-teal-600 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white outline-none focus:border-teal-500/50"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
-                  {normalizeUiPaymentMethod(paymentMethod) === "Tunai"
+                  {selectedFinanceMethod === "Tunai"
                     ? "Pembayaran Tunai boleh tanpa bukti. Bukti tetap boleh diupload bila ada. PDF/PNG/JPG/JPEG, maks 5MB."
                     : "PDF, PNG, JPG, atau JPEG. Maksimal 5MB."}
                 </p>
               </label>
             </div>
+            {hasMixedSelectedFinanceMethods && (
+              <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                Pilihan campur Transfer/Tunai tidak diizinkan. Satu aksi pembayaran hanya untuk satu cara bayar.
+              </div>
+            )}
             <div className="mt-4">
               <label className="block">
                 <span className="text-xs text-slate-500 font-semibold">
@@ -6812,7 +6812,11 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                   disabled={
                     !selectedBatch ||
                     !isFinanceActionableBatch(selectedBatch) ||
-                    isActionLoading
+                    isActionLoading ||
+                    selectedFinanceItemIds.length === 0 ||
+                    selectedFinanceTotal <= 0 ||
+                    hasMixedSelectedFinanceMethods ||
+                    (selectedFinanceNeedsProof && !paymentProofFile)
                   }
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500 bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
