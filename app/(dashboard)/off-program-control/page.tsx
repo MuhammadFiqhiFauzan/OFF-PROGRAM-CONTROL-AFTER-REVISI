@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock3,
+  Download,
   FileCheck2,
   FileText,
   ListChecks,
@@ -2199,6 +2200,19 @@ function PeriodClosurePanel({
         >
           Tutup Periode
         </button>
+        {targetBatches.length > 0 && principalCode && month && year && (
+          <button
+            type="button"
+            onClick={() => {
+              const params = new URLSearchParams({ principleCode: principalCode, bulan: month, tahun: year });
+              window.open(`/api/off-program-control/periods/reconciliation?${params.toString()}`, "_blank");
+            }}
+            className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/25 px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-black/40 hover:text-white transition-colors"
+          >
+            <Download size={15} />
+            Download Rekonsiliasi
+          </button>
+        )}
         {canUnlock && isPeriodClosed && (
           <button
             type="button"
@@ -2219,6 +2233,48 @@ function PeriodClosurePanel({
         <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
           Periode belum dapat ditutup karena total pengajuan dan total klaim belum sesuai.
         </div>
+      )}
+      {targetBatches.length > 0 && (
+        <details className="mt-4 rounded-xl border border-white/10 bg-black/20 overflow-hidden">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-300 hover:text-white select-none">
+            Lihat Detail Rekonsiliasi ({targetBatches.length} pengajuan)
+          </summary>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left border-t border-white/10">
+              <thead className="text-[10px] uppercase text-slate-500 bg-black/30">
+                <tr>
+                  <th className="px-3 py-2">No</th>
+                  <th className="px-3 py-2">No. Pengajuan</th>
+                  <th className="px-3 py-2">Nama Toko</th>
+                  <th className="px-3 py-2 text-right">Nilai Pengajuan</th>
+                  <th className="px-3 py-2">No. Claim</th>
+                  <th className="px-3 py-2 text-right">Nilai Claim</th>
+                  <th className="px-3 py-2 text-right">Selisih</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {targetBatches.map((batch, idx) => {
+                  const nilaiPengajuan = Number(batch.summary?.totalNominal || 0);
+                  const nilaiClaim = Number(batch.paymentSummary?.totalPaid || batch.verifiedAmount || batch.paidAmount || 0);
+                  const selisih = nilaiPengajuan - nilaiClaim;
+                  return (
+                    <tr key={batch.id} className="hover:bg-white/5">
+                      <td className="px-3 py-2 text-slate-400">{idx + 1}</td>
+                      <td className="px-3 py-2 text-slate-200 font-mono">{batch.noPengajuan}</td>
+                      <td className="px-3 py-2 text-slate-300">{batch.principleName}</td>
+                      <td className="px-3 py-2 text-right text-slate-200">Rp {nilaiPengajuan.toLocaleString("id-ID")}</td>
+                      <td className="px-3 py-2 text-slate-300">{batch.noClaim || "-"}</td>
+                      <td className="px-3 py-2 text-right text-slate-200">Rp {nilaiClaim.toLocaleString("id-ID")}</td>
+                      <td className={`px-3 py-2 text-right font-bold ${selisih !== 0 ? "text-red-400" : "text-emerald-400"}`}>
+                        Rp {Math.abs(selisih).toLocaleString("id-ID")}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </details>
       )}
     </section>
   );

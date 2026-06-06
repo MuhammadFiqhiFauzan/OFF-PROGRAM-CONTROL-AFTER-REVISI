@@ -43,7 +43,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY scripts/init-db.mjs ./scripts/init-db.mjs
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/runtime
 
 EXPOSE 3000
 CMD ["sh", "-c", "node scripts/init-db.mjs && npm run start"]

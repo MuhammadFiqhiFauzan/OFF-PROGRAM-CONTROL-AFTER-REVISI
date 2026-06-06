@@ -4,6 +4,7 @@ export * from "./helpers";
 export * from "./payments";
 export * from "./workflow";
 export * from "./pdf";
+export * from "./reconciliation-pdf";
 export * from "./data";
 export * from "./access";
 export * from "./program-type";
