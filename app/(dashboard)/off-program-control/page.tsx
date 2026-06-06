@@ -871,7 +871,7 @@ function computeClaimComparison(batches: OffApiBatch[]) {
     submittedCount,
     claimedCount,
     isMatched,
-    status: isMatched ? "Data sudah sesuai" : "Data belum sesuai",
+    status: submittedCount === 0 ? "Belum ada pengajuan" : isMatched ? "Data sudah sesuai" : "Data belum sesuai",
   };
 }
 
@@ -2066,12 +2066,20 @@ function PeriodClosurePanel({
   const [status, setStatus] = useState("");
   const [periodStatus, setPeriodStatus] = useState("Terbuka");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
 
+  // Hanya set default sekali saat pertama kali data tersedia dan user belum interaksi
   useEffect(() => {
+    if (hasUserInteracted) return;
     if (!principalCode && firstBatch?.principleCode) setPrincipalCode(firstBatch.principleCode);
     if (!month && firstBatch?.bulan) setMonth(firstBatch.bulan);
     if (!year && firstBatch?.tahun) setYear(firstBatch.tahun);
-  }, [firstBatch?.bulan, firstBatch?.principleCode, firstBatch?.tahun, month, principalCode, year]);
+  }, [firstBatch?.bulan, firstBatch?.principleCode, firstBatch?.tahun, hasUserInteracted, month, principalCode, year]);
+
+  const handlePrincipalChange = (value: string) => {
+    setHasUserInteracted(true);
+    setPrincipalCode(value);
+  };
 
   const targetBatches = batches.filter(
     (batch) =>
@@ -2087,8 +2095,8 @@ function PeriodClosurePanel({
     comparison.isMatched;
   const isPeriodClosed = periodStatus === "Ditutup" || periodStatus === "Dikunci";
   const selectedPeriodLabel =
-    principalCode && month && year
-      ? `${principalOptions.find((option) => option.value === principalCode)?.label || principalCode} - ${indonesianMonthLabel(month)} ${year}`
+    month && year
+      ? `${principalCode ? (principalOptions.find((option) => option.value === principalCode)?.label || principalCode) : "Semua Principal"} - ${indonesianMonthLabel(month)} ${year}`
       : "Pilih principal dan periode";
 
   const submitPeriodAction = async (action: "close" | "unlock") => {
@@ -2147,7 +2155,7 @@ function PeriodClosurePanel({
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(260px,1fr)_180px_180px]">
         <PrincipalFilterSelect
           value={principalCode}
-          onChange={setPrincipalCode}
+          onChange={handlePrincipalChange}
           options={principalOptions}
         />
         <label className="block">

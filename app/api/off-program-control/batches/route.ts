@@ -318,23 +318,31 @@ export async function GET(request: Request) {
         return NextResponse.json({
             ok: true,
             searchBackend,
-            batches: filteredRows.map((row) => ({
-                ...publicBatch(row),
-                payments: (paymentsByBatch.get(row.id) || []).map(publicPayment),
-                summary: summaries.get(row.id),
-                paymentSummary: paymentSummaries.get(row.id),
-                // Revisi D: searchText precomputed (termasuk item/toko) agar pencarian
-                // client bisa membaca isi pengajuan tanpa fetch tambahan.
-                searchText: buildBatchSearchText(row, itemsByBatch.get(row.id) || []),
-                // Revisi C: periodDates precomputed agar filter periode konsisten di
-                // semua monitor tanpa fetch tambahan per jenis tanggal.
-                periodDates: {
-                    program: collectPeriodDates(row, itemsByBatch.get(row.id) || [], paymentsByBatch.get(row.id) || [], "program"),
-                    pengajuan: collectPeriodDates(row, itemsByBatch.get(row.id) || [], paymentsByBatch.get(row.id) || [], "pengajuan"),
-                    claim: collectPeriodDates(row, itemsByBatch.get(row.id) || [], paymentsByBatch.get(row.id) || [], "claim"),
-                    bayar: collectPeriodDates(row, itemsByBatch.get(row.id) || [], paymentsByBatch.get(row.id) || [], "bayar"),
-                },
-            })),
+            batches: filteredRows.map((row) => {
+                const batchItems = itemsByBatch.get(row.id) || [];
+                // Fallback noClaim: batch-level → item-level (ambil pertama yang terisi)
+                const resolvedNoClaim = String(row.noClaim || "").trim()
+                    || batchItems.map((item) => String(item.noClaim || "").trim()).find((v) => v.length > 0)
+                    || "";
+                return {
+                    ...publicBatch(row),
+                    noClaim: resolvedNoClaim || null,
+                    payments: (paymentsByBatch.get(row.id) || []).map(publicPayment),
+                    summary: summaries.get(row.id),
+                    paymentSummary: paymentSummaries.get(row.id),
+                    // Revisi D: searchText precomputed (termasuk item/toko) agar pencarian
+                    // client bisa membaca isi pengajuan tanpa fetch tambahan.
+                    searchText: buildBatchSearchText(row, batchItems),
+                    // Revisi C: periodDates precomputed agar filter periode konsisten di
+                    // semua monitor tanpa fetch tambahan per jenis tanggal.
+                    periodDates: {
+                        program: collectPeriodDates(row, batchItems, paymentsByBatch.get(row.id) || [], "program"),
+                        pengajuan: collectPeriodDates(row, batchItems, paymentsByBatch.get(row.id) || [], "pengajuan"),
+                        claim: collectPeriodDates(row, batchItems, paymentsByBatch.get(row.id) || [], "claim"),
+                        bayar: collectPeriodDates(row, batchItems, paymentsByBatch.get(row.id) || [], "bayar"),
+                    },
+                };
+            }),
         });
     } catch (error) {
         console.error("[OFF BATCH LIST ERROR]", error);
