@@ -57,12 +57,17 @@ export default function DatePickerField({
         const rect = anchorRef.current?.getBoundingClientRect();
         if (!rect) return;
         const width = 308;
+        const gap = 8;
+        // Estimated calendar height: header + weekday row + 6 day-rows + footer ≈ 340px.
+        // Flip upward when there is not enough space below the anchor.
+        const estimatedCalendarHeight = 340;
+        const spaceBelow = window.innerHeight - rect.bottom - gap;
+        const top =
+            spaceBelow >= estimatedCalendarHeight
+                ? rect.bottom + gap
+                : Math.max(gap, rect.top - estimatedCalendarHeight - gap);
         const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12));
-        setPanelPosition({
-            top: rect.bottom + 8,
-            left,
-            width,
-        });
+        setPanelPosition({ top, left, width });
     }, []);
 
     const openPicker = () => {

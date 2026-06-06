@@ -2095,10 +2095,14 @@ function PeriodClosurePanel({
   );
   const comparison = computeClaimComparison(targetBatches);
   const canUnlock = offRole === "admin";
+  // isBulkMode = true saat "Semua Principal" dipilih (principalCode === "").
+  // Tombol aktif di mode bulk asalkan bulan+tahun terisi, ada batch, dan selisih = 0.
+  const isBulkMode = !principalCode;
   const canClosePeriod =
-    Boolean(principalCode && month && year) &&
+    Boolean(month && year) &&
     targetBatches.length > 0 &&
-    comparison.isMatched;
+    comparison.isMatched &&
+    (isBulkMode || Boolean(principalCode));
   const isPeriodClosed = periodStatus === "Ditutup" || periodStatus === "Dikunci";
   const selectedPeriodLabel =
     month && year
@@ -2106,10 +2110,67 @@ function PeriodClosurePanel({
       : "Pilih principal dan periode";
 
   const submitPeriodAction = async (action: "close" | "unlock") => {
-    if (!principalCode || !month || !year) {
-      setStatus("Principal dan periode wajib dipilih.");
+    if (!month || !year) {
+      setStatus("Bulan dan tahun wajib dipilih.");
       return;
     }
+
+    // ── MODE BULK: Semua Principal ──────────────────────────────────────────
+    if (isBulkMode) {
+      const uniquePrincipals = [
+        ...new Set(
+          targetBatches.map((b) => b.principleCode).filter(Boolean),
+        ),
+      ] as string[];
+      if (uniquePrincipals.length === 0) {
+        setStatus("Tidak ada principal yang ditemukan untuk periode ini.");
+        return;
+      }
+      if (
+        action === "close" &&
+        !window.confirm(
+          `Tutup semua ${uniquePrincipals.length} principal untuk ${indonesianMonthLabel(month)} ${year}? Data tidak bisa diubah lagi setelah dikunci.`,
+        )
+      ) {
+        return;
+      }
+      setIsSubmitting(true);
+      setStatus("");
+      try {
+        const results = await Promise.all(
+          uniquePrincipals.map(async (pc) => {
+            const res = await fetch("/api/off-program-control/periods", {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action, principleCode: pc, bulan: month, tahun: year }),
+            });
+            const data = await parseJsonResponse(res);
+            return { ok: res.ok && Boolean(data.ok), pc };
+          }),
+        );
+        const failed = results.filter((r) => !r.ok);
+        if (failed.length > 0) {
+          throw new Error(
+            `${failed.length} principal gagal diproses: ${failed.map((r) => r.pc).join(", ")}`,
+          );
+        }
+        setPeriodStatus(action === "close" ? "Ditutup" : "Terbuka");
+        setStatus(
+          `Semua ${uniquePrincipals.length} principal berhasil ${action === "close" ? "ditutup" : "dibuka kunci"} untuk periode ${indonesianMonthLabel(month)} ${year}.`,
+        );
+        await onUpdated();
+      } catch (error) {
+        setStatus(
+          error instanceof Error ? error.message : "Periode belum berhasil diproses.",
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // ── MODE SINGLE: Satu Principal ─────────────────────────────────────────
     if (
       action === "close" &&
       !window.confirm(
@@ -2136,9 +2197,7 @@ function PeriodClosurePanel({
       await onUpdated();
     } catch (error) {
       setStatus(
-        error instanceof Error
-          ? error.message
-          : "Periode belum berhasil diproses.",
+        error instanceof Error ? error.message : "Periode belum berhasil diproses.",
       );
     } finally {
       setIsSubmitting(false);
