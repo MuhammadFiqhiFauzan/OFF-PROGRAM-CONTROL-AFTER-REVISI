@@ -771,9 +771,7 @@ export default function ClaimWorkflowDetailPage() {
   const [savingId, setSavingId] = useState("");
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [transitionLoading, setTransitionLoading] = useState<TransitionAction | "">("");
-  const [generatingLetter, setGeneratingLetter] = useState(false);
-  const [generatingSummary, setGeneratingSummary] = useState(false);
-  const [generatingReceipt, setGeneratingReceipt] = useState(false);
+  const [generatingAllDocs, setGeneratingAllDocs] = useState(false);
   const [noClaimDraft, setNoClaimDraft] = useState("");
   const [noClaimSaving, setNoClaimSaving] = useState(false);
   const [noClaimEditing, setNoClaimEditing] = useState(false);
@@ -787,7 +785,6 @@ export default function ClaimWorkflowDetailPage() {
   const [voidingId, setVoidingId] = useState("");
   const [closeNote, setCloseNote] = useState("");
   const [closeSaving, setCloseSaving] = useState(false);
-  // Phase R7b — Multi No Claim:
   // State minimal untuk section Submissions. Mark Ready / dokumen /
   // payment masih di workflow-level sampai R7c/R7d.
   const [submissions, setSubmissions] = useState<Submission[]>([]);
@@ -798,10 +795,6 @@ export default function ClaimWorkflowDetailPage() {
   const [createSubmissionNoClaim, setCreateSubmissionNoClaim] = useState("");
   const [creatingSubmission, setCreatingSubmission] = useState(false);
   const [movingItemId, setMovingItemId] = useState("");
-  // Phase R7c — Documents per submission: state generate per submission +
-  // type. Key = `${submissionId}:${type}` supaya tombol per kombinasi
-  // bisa disabled secara independen.
-  const [generatingDocKey, setGeneratingDocKey] = useState("");
   // R7j — Layout mode dihilangkan total. Halaman hanya punya satu
   // tampilan: Daftar Claim. Konstanta `submissionLayoutMode` tetap
   // disediakan dengan nilai "excel" supaya beberapa branching kondisional
@@ -861,7 +854,6 @@ export default function ClaimWorkflowDetailPage() {
   const [excelVariantKey, setExcelVariantKey] = useState<string>("");
   const [excelYear, setExcelYear] = useState("2026");
   const [excelDefaultMonth, setExcelDefaultMonth] = useState("01");
-  const [bulkStartSequence, setBulkStartSequence] = useState("1");
   const [excelSearch, setExcelSearch] = useState("");
   const [excelStatusFilter, setExcelStatusFilter] = useState<
     "all" | "needs_no_claim" | "needs_docs" | "outstanding" | "paid" | "closed"
@@ -1001,73 +993,19 @@ export default function ClaimWorkflowDetailPage() {
     : [];
   const excelHasVariants = excelVariants.length > 0;
 
-  // Bulk generate: fill all visible rows' noClaimDraft from sequence start.
-  const generateNoClaimDrafts = () => {
-    const startNum = parseInt(bulkStartSequence, 10);
-    if (!Number.isFinite(startNum) || startNum < 1) {
-      toast.error("Nomor awal harus angka >= 1.");
-      return;
-    }
-    const month = excelDefaultMonth.trim();
-    if (!/^\d{2}$/.test(month) || Number(month) < 1 || Number(month) > 12) {
-      toast.error("Bulan harus 2 digit (01-12).");
-      return;
-    }
-    const year = excelYear.trim();
-    if (!/^\d{4}$/.test(year)) {
-      toast.error("Tahun harus 4 digit.");
-      return;
-    }
-    const rule = excelCurrentRule;
-    const distributor = excelDistributorCode.trim() || "SUPER";
-    const principal = excelPrincipalCode.trim() || (workflow?.principleCode ?? "");
-
-    if (!principal) {
-      toast.error("Principal belum tersedia.");
-      return;
-    }
-
-    setExcelRowDrafts((prev) => {
-      const next = { ...prev };
-      let seq = startNum;
-      for (const item of items) {
-        const existing = next[item.id];
-        if (!existing) continue;
-        let generated = "";
-        if (rule) {
-          generated = buildNoClaimFromRule(rule, {
-            sequence: String(seq),
-            month,
-            year,
-            variantKey: excelVariantKey || undefined,
-          });
-        }
-        // Fallback: format legacy with workflow principal
-        if (!generated) {
-          const padWidth = rule?.padWidth ?? 2;
-          const seqStr = padWidth ? String(seq).padStart(padWidth, "0") : String(seq);
-          const mm = month.padStart(2, "0");
-          generated = `${seqStr}/${distributor}-${principal}/${mm}/${year}`;
-        }
-        next[item.id] = { ...existing, noClaimDraft: generated };
-        seq++;
-      }
-      return next;
-    });
-    toast.success(`No Claim draft terisi untuk ${items.length} baris (mulai dari ${startNum}).`);
-  };
-
   // R7h — sinkronkan principal default dari workflow.principleCode (via rule).
   useEffect(() => {
     if (!workflow) return;
     const key = resolveNoClaimKeyFromRule(workflow.principleCode);
-    setExcelPrincipalCode((prev) => (prev === "" || prev === "GCPI") ? key : prev);
+    setExcelPrincipalCode(key);
     // Set default variant jika rule punya variants.
     const variants = getNoClaimRuleVariants(workflow.principleCode);
-    if (variants.length > 0 && !excelVariantKey) {
-      setExcelVariantKey(variants[0].variantKey);
-    }
-  }, [workflow]);
+    setExcelVariantKey((prev) => {
+      if (variants.length === 0) return "";
+      if (variants.some((variant) => variant.variantKey === prev)) return prev;
+      return variants[0].variantKey;
+    });
+  }, [workflow?.id, workflow?.principleCode]);
 
   // R7h — initialize draft per item saat items berubah. Item baru / belum
   // pernah ter-init akan diisi dari current data + parsing No Claim.
@@ -1116,18 +1054,38 @@ export default function ClaimWorkflowDetailPage() {
       }
       // Bila server me-refresh data (mis. setelah save), sync initial
       // baseline tanpa overwrite draft text yang masih dirty.
+      // FIX: Jika row CLEAN (draft === old baseline), juga sync draft ke
+      // server value baru agar row tetap clean setelah save lain.
       for (const item of items) {
         const draft = next[item.id];
         if (!draft) continue;
         const sub = submissions.find((s) => s.id === item.claimSubmissionId) ||
           null;
         const noClaim = sub?.noClaim || "";
+        const serverDpp = String(item.dpp ?? 0);
+        const serverPpnRate = String(item.ppnRate ?? 0);
+        const serverPphRate = String(item.pphRate ?? 0);
+
+        // Detect if row was clean BEFORE this baseline update.
+        const wasNoClaimClean =
+          draft.noClaimDraft.trim() === String(draft.initialNoClaim || "");
+        const wasDppClean = String(draft.dpp) === String(draft.initialDpp);
+        const wasPpnClean = String(draft.ppnRate) === String(draft.initialPpnRate);
+        const wasPphClean = String(draft.pphRate) === String(draft.initialPphRate);
+
         next[item.id] = {
           ...draft,
+          // Always sync baseline to server.
           initialNoClaim: noClaim,
-          initialDpp: String(item.dpp ?? 0),
-          initialPpnRate: String(item.ppnRate ?? 0),
-          initialPphRate: String(item.pphRate ?? 0),
+          initialDpp: serverDpp,
+          initialPpnRate: serverPpnRate,
+          initialPphRate: serverPphRate,
+          // If row was clean, also sync draft to new server value
+          // so it stays clean after other rows' saves trigger refresh.
+          ...(wasNoClaimClean ? { noClaimDraft: noClaim } : {}),
+          ...(wasDppClean ? { dpp: serverDpp } : {}),
+          ...(wasPpnClean ? { ppnRate: serverPpnRate } : {}),
+          ...(wasPphClean ? { pphRate: serverPphRate } : {}),
         };
       }
       return next;
@@ -1261,18 +1219,27 @@ export default function ClaimWorkflowDetailPage() {
     [id, loadDetail, workflow],
   );
 
-  const generateClaimLetter = async () => {
-    setGeneratingLetter(true);
+  // Phase R7 final doc rule: generate Surat Claim, Summary, dan Kwitansi
+  // gabungan workflow-level dalam 1 klik.
+  const generateAllDocuments = async () => {
+    setGeneratingAllDocs(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/claim-workflow/${id}/claim-letter`, {
+      const response = await fetch(`/api/claim-workflow/${id}/documents/generate-all`, {
         method: "POST",
       });
-      const result = (await response.json()) as { ok?: boolean; error?: string };
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        activeSubmissionCount?: number;
+        claimLetterPdfPath?: string;
+        summaryPdfPath?: string;
+        receiptPdfPath?: string;
+      };
       if (!response.ok || !result.ok) {
-        throw new Error(result.error || "Gagal membuat Claim Letter PDF.");
+        throw new Error(result.error || "Gagal generate semua dokumen.");
       }
-      const successMessage = "Claim Letter PDF berhasil dibuat.";
+      const successMessage = `Dokumen gabungan dibuat untuk ${result.activeSubmissionCount ?? 0} No Claim.`;
       toast.success(successMessage);
       setMessage(successMessage);
       await loadDetail();
@@ -1280,65 +1247,11 @@ export default function ClaimWorkflowDetailPage() {
       const errorMessage =
         generateError instanceof Error
           ? generateError.message
-          : "Gagal membuat Claim Letter PDF.";
+          : "Gagal generate semua dokumen.";
       toast.error(errorMessage);
       setMessage(errorMessage);
     } finally {
-      setGeneratingLetter(false);
-    }
-  };
-
-  const generateClaimSummary = async () => {
-    setGeneratingSummary(true);
-    setMessage("");
-    try {
-      const response = await fetch(`/api/claim-workflow/${id}/summary`, {
-        method: "POST",
-      });
-      const result = (await response.json()) as { ok?: boolean; error?: string };
-      if (!response.ok || !result.ok) {
-        throw new Error(result.error || "Gagal membuat Claim Summary PDF.");
-      }
-      const successMessage = "Claim Summary PDF berhasil dibuat.";
-      toast.success(successMessage);
-      setMessage(successMessage);
-      await loadDetail();
-    } catch (generateError) {
-      const errorMessage =
-        generateError instanceof Error
-          ? generateError.message
-          : "Gagal membuat Claim Summary PDF.";
-      toast.error(errorMessage);
-      setMessage(errorMessage);
-    } finally {
-      setGeneratingSummary(false);
-    }
-  };
-
-  const generateClaimReceipt = async () => {
-    setGeneratingReceipt(true);
-    setMessage("");
-    try {
-      const response = await fetch(`/api/claim-workflow/${id}/receipt`, {
-        method: "POST",
-      });
-      const result = (await response.json()) as { ok?: boolean; error?: string };
-      if (!response.ok || !result.ok) {
-        throw new Error(result.error || "Gagal membuat Kwitansi Claim PDF.");
-      }
-      const successMessage = "Kwitansi Claim PDF berhasil dibuat.";
-      toast.success(successMessage);
-      setMessage(successMessage);
-      await loadDetail();
-    } catch (generateError) {
-      const errorMessage =
-        generateError instanceof Error
-          ? generateError.message
-          : "Gagal membuat Kwitansi Claim PDF.";
-      toast.error(errorMessage);
-      setMessage(errorMessage);
-    } finally {
-      setGeneratingReceipt(false);
+      setGeneratingAllDocs(false);
     }
   };
 
@@ -1697,6 +1610,13 @@ export default function ClaimWorkflowDetailPage() {
       return;
     }
 
+    if (!item.claimSubmissionId || !submission) {
+      toast.error(
+        "Baris ini belum punya Berkas Claim. Muat ulang atau buat ulang Claim Workflow.",
+      );
+      return;
+    }
+
     // Validasi tax (mirror backend route).
     if (taxDirty) {
       const dpp = Number(draft.dpp);
@@ -1719,12 +1639,6 @@ export default function ClaimWorkflowDetailPage() {
     if (noClaimDirty) {
       if (!noClaimTrimmed) {
         toast.error("No Claim wajib diisi.");
-        return;
-      }
-      if (!submission) {
-        toast.error(
-          "Baris ini belum memiliki assignment. Hubungi admin untuk menyiapkan data.",
-        );
         return;
       }
     }
@@ -1810,43 +1724,6 @@ export default function ClaimWorkflowDetailPage() {
       setMessage(errorMessage);
     } finally {
       setMovingItemId("");
-    }
-  };
-
-  // Phase R7c - Documents per submission: generate Claim Letter / Summary
-  // / Kwitansi PDF per submission via endpoint per-submission. Setelah
-  // sukses detail di-reload supaya pdfPath terbaru muncul.
-  const generateSubmissionDocument = async (
-    submissionId: string,
-    type: "claim-letter" | "summary" | "receipt",
-  ) => {
-    const key = `${submissionId}:${type}`;
-    setGeneratingDocKey(key);
-    setMessage("");
-    try {
-      const response = await fetch(
-        `/api/claim-workflow/${id}/submissions/${submissionId}/${type}`,
-        { method: "POST" },
-      );
-      const result = (await response.json()) as { ok?: boolean; error?: string };
-      if (!response.ok || !result.ok) {
-        throw new Error(result.error || "Gagal generate dokumen.");
-      }
-      const label = type === "claim-letter"
-        ? "Claim Letter"
-        : type === "summary"
-          ? "Summary"
-          : "Kwitansi";
-      const successMessage = `${label} PDF berhasil dibuat.`;
-      toast.success(successMessage);
-      setMessage(successMessage);
-      await loadDetail();
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Gagal generate dokumen.";
-      toast.error(errorMessage);
-      setMessage(errorMessage);
-    } finally {
-      setGeneratingDocKey("");
     }
   };
 
@@ -2295,75 +2172,174 @@ export default function ClaimWorkflowDetailPage() {
               return true;
             });
             const totalRows = items.length;
+            // Generate Semua Dokumen gate (UI-level). Tombol aktif hanya bila:
+            // - workflow Draft/Need Revision (noClaimEditable implies status ok)
+            // - ada minimal 1 submission aktif
+            // - semua submission aktif punya No Claim tersimpan di DB
+            // - tidak ada baris dengan perubahan No Claim/tax yang belum disimpan
+            // - setiap submission aktif punya totalClaim > 0
+            const activeSubmissionsUi = submissions.filter(
+              (s) => Number(s.totalClaim || 0) > 0 || (s.itemCount ?? 0) > 0,
+            );
+            const submissionsMissingNoClaim = activeSubmissionsUi.filter(
+              (s) => String(s.noClaim || "").trim() === "",
+            );
+            const submissionsZeroClaim = activeSubmissionsUi.filter(
+              (s) => !(Number(s.totalClaim || 0) > 0),
+            );
+            const hasInvalidClaimRows = items.some((it) => {
+              const d = excelRowDrafts[it.id];
+              const dppValue = Number(d?.dpp ?? it.dpp ?? 0);
+              const ppnValue = Number(d?.ppnRate ?? it.ppnRate ?? 0);
+              const pphValue = Number(d?.pphRate ?? it.pphRate ?? 0);
+              const nilaiValue = d
+                ? +(dppValue + (dppValue * ppnValue / 100) - (dppValue * pphValue / 100)).toFixed(2)
+                : Number(it.nilaiKlaim || 0);
+              return !(dppValue > 0) || !(nilaiValue > 0);
+            });
+            const hasUnsavedRows = items.some((it) => {
+              const d = excelRowDrafts[it.id];
+              if (!d) return false;
+              const taxDirty =
+                String(d.dpp) !== String(d.initialDpp) ||
+                String(d.ppnRate) !== String(d.initialPpnRate) ||
+                String(d.pphRate) !== String(d.initialPphRate);
+              const noClaimDirty =
+                d.noClaimDraft.trim() !== String(d.initialNoClaim || "");
+              return taxDirty || noClaimDirty;
+            });
+            const docsEditableStatus =
+              workflow?.status === claimWorkflowStatuses.draft ||
+              workflow?.status === claimWorkflowStatuses.needRevision;
+            let docsGenerationBlockReason = "";
+            if (!docsEditableStatus) {
+              docsGenerationBlockReason =
+                "Dokumen hanya dapat dibuat saat status Draft atau Need Revision.";
+            } else if (activeSubmissionsUi.length === 0) {
+              docsGenerationBlockReason =
+                "Belum ada Berkas Claim aktif untuk dibuatkan dokumen.";
+            } else if (submissionsMissingNoClaim.length > 0) {
+              docsGenerationBlockReason =
+                "Masih ada No Claim yang belum diisi/disimpan. Lengkapi dan Simpan semua No Claim dulu.";
+            } else if (hasUnsavedRows) {
+              docsGenerationBlockReason =
+                "Masih ada baris yang belum disimpan. Klik Simpan dulu sebelum generate dokumen.";
+            } else if (hasInvalidClaimRows) {
+              docsGenerationBlockReason =
+                "Ada baris dengan DPP/Nilai Klaim tidak valid. Lengkapi sebelum generate dokumen.";
+            } else if (submissionsZeroClaim.length > 0) {
+              docsGenerationBlockReason =
+                "Ada Berkas Claim dengan Nilai Klaim 0. Lengkapi DPP/Nilai Klaim.";
+            }
+            const docsGenerationReady =
+              docsEditableStatus &&
+              activeSubmissionsUi.length > 0 &&
+              submissionsMissingNoClaim.length === 0 &&
+              submissionsZeroClaim.length === 0 &&
+              !hasInvalidClaimRows &&
+              !hasUnsavedRows;
+            const workflowDocs = [
+              {
+                key: "claim-letter",
+                title: "Surat Claim",
+                path: workflow?.claimLetterPdfPath,
+                href: `/api/claim-workflow/${id}/claim-letter`,
+              },
+              {
+                key: "summary",
+                title: "Summary",
+                path: workflow?.summaryPdfPath,
+                href: `/api/claim-workflow/${id}/summary`,
+              },
+              {
+                key: "receipt",
+                title: "Kwitansi",
+                path: workflow?.receiptPdfPath,
+                href: `/api/claim-workflow/${id}/receipt`,
+              },
+            ];
             return (
               <div className="mt-5 space-y-4">
                 {/* Toolbar */}
                 <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-[11px] text-slate-400">
-                      {totalRows} baris ditampilkan. Ketik No Claim langsung di kolom, lalu klik Simpan.
+                      {totalRows} baris ditampilkan. Isi No. Urut dan Bulan Claim, klik Generate, lalu Simpan.
                       {noClaimLockedReason ? ` ${noClaimLockedReason}` : ""}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => void loadDetail()}
-                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
-                    >
-                      Refresh
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void loadDetail()}
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10"
+                      >
+                        Refresh
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Generate No Claim Panel */}
-                {noClaimEditable && (
-                  <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Nomor Awal</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={bulkStartSequence}
-                          onChange={(e) => setBulkStartSequence(e.target.value)}
-                          className="w-20 rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-sm tabular-nums text-white outline-none focus:border-indigo-500/60"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Bulan</label>
-                        <input
-                          type="text"
-                          maxLength={2}
-                          value={excelDefaultMonth}
-                          onChange={(e) => setExcelDefaultMonth(e.target.value)}
-                          placeholder="06"
-                          className="w-14 rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-sm tabular-nums text-white outline-none focus:border-indigo-500/60"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Tahun</label>
-                        <input
-                          type="text"
-                          maxLength={4}
-                          value={excelYear}
-                          onChange={(e) => setExcelYear(e.target.value)}
-                          placeholder="2026"
-                          className="w-20 rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-sm tabular-nums text-white outline-none focus:border-indigo-500/60"
-                        />
-                      </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-white">Dokumen Workflow</h3>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Dokumen gabungan workflow-level untuk semua No Claim aktif.
+                      </p>
+                    </div>
+                    {(canGenerateClaimLetter || canGenerateSummary || canGenerateReceipt) && (
                       <button
                         type="button"
-                        onClick={generateNoClaimDrafts}
-                        disabled={!noClaimEditable}
-                        className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-40"
+                        disabled={generatingAllDocs || !docsGenerationReady}
+                        onClick={generateAllDocuments}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
+                        title={
+                          docsGenerationReady
+                            ? "Generate semua dokumen gabungan workflow-level."
+                            : docsGenerationBlockReason
+                        }
                       >
-                        Generate No Claim
+                        {generatingAllDocs ? "Memproses..." : "Generate Semua Dokumen"}
                       </button>
-                    </div>
-                    <p className="mt-2 text-[10px] text-slate-500">
-                      Generate hanya mengisi draft No Claim di tabel. Klik <span className="font-bold text-slate-300">Simpan</span> per baris untuk menyimpan ke database.
-                    </p>
+                    )}
                   </div>
-                )}
+                  <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    {workflowDocs.map((doc) => {
+                      const generated = Boolean(doc.path);
+                      return (
+                        <div key={doc.key} className="rounded-lg border border-white/10 bg-black/30 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-white">{doc.title}</p>
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${generated ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>
+                              {generated ? "Sudah" : "Belum"}
+                            </span>
+                          </div>
+                          <div className="mt-2">
+                            {generated ? (
+                              <a
+                                href={doc.href}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-slate-200 hover:bg-white/10"
+                              >
+                                Buka PDF
+                              </a>
+                            ) : (
+                              <span className="text-[10px] italic text-slate-500">
+                                Belum dibuat.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(canGenerateClaimLetter || canGenerateSummary || canGenerateReceipt) && !docsGenerationReady && (
+                    <p className="mt-3 text-[11px] text-amber-300">
+                      {docsGenerationBlockReason}
+                    </p>
+                  )}
+                </div>
 
                 {/* Table */}
                 {totalRows === 0 ? (
@@ -2372,11 +2348,16 @@ export default function ClaimWorkflowDetailPage() {
                   </div>
                 ) : (
                   <div className="overflow-auto rounded-xl border border-white/10">
+                    <div className="sticky left-0 top-0 z-10 border-b border-white/10 bg-[#141820] px-3 py-2 text-[11px] text-slate-300">
+                      Alur cepat: isi <span className="font-bold text-indigo-200">No. Urut</span> dan <span className="font-bold text-indigo-200">Bulan Claim</span> di sebelah <span className="font-bold text-indigo-200">No Claim</span>, klik <span className="font-bold text-indigo-200">Generate</span>, lalu <span className="font-bold text-indigo-200">Simpan</span>.
+                    </div>
                     <table className="min-w-[1700px] text-left text-sm">
                       <thead className="bg-black/40 text-[11px] uppercase tracking-wider text-slate-500">
                         <tr>
                           <th className="px-3 py-2 font-semibold">No.</th>
                           <th className="px-3 py-2 font-semibold">No Claim</th>
+                          <th className="px-3 py-2 font-semibold text-indigo-200">No. Urut</th>
+                          <th className="px-3 py-2 font-semibold text-indigo-200">Bulan Claim</th>
                           <th className="px-3 py-2 font-semibold">Perihal</th>
                           <th className="px-3 py-2 font-semibold">Periode</th>
                           <th className="px-3 py-2 font-semibold">Surat Program</th>
@@ -2435,7 +2416,7 @@ export default function ClaimWorkflowDetailPage() {
                             : 0;
                           const paid = sub ? Number(sub.totalPaid || 0) : 0;
                           const saveBlockedByMissingSubmission =
-                            noClaimDirty && !sub;
+                            dirty && !sub;
                           const updateDraft = (
                             patch:
                               | Partial<ExcelRowDraft>
@@ -2450,6 +2431,53 @@ export default function ClaimWorkflowDetailPage() {
                                   : patch),
                               },
                             }));
+                          };
+                          const generateNoClaim = () => {
+                            const currentDraft = excelRowDrafts[item.id] ?? draft;
+                            const seq = currentDraft.sequence.trim();
+                            const month = (currentDraft.month.trim() || excelDefaultMonth);
+                            const year = excelYear;
+
+                            if (!seq) {
+                              toast.error("Nomor urut wajib diisi.");
+                              return;
+                            }
+                            if (!month) {
+                              toast.error("Bulan wajib diisi.");
+                              return;
+                            }
+                            if (!year) {
+                              toast.error("Tahun wajib diisi.");
+                              return;
+                            }
+
+                            let generated = "";
+                            if (excelCurrentRule) {
+                              generated = buildNoClaimFromRule(excelCurrentRule, {
+                                sequence: seq,
+                                month,
+                                year,
+                                variantKey: excelVariantKey || undefined,
+                              });
+                            }
+                            // Fallback: jika rule tidak tersedia atau pattern
+                            // tidak menghasilkan output, pakai format legacy.
+                            if (!generated) {
+                              const principal = excelPrincipalCode.trim();
+                              const distributor = excelDistributorCode.trim();
+                              if (!principal || !distributor) {
+                                toast.error("Principal dan Distributor wajib diisi.");
+                                return;
+                              }
+                              const mm = month.padStart(2, "0");
+                              generated = `${formatNoClaimSequence(seq)}/${distributor}-${principal}/${mm}/${year}`;
+                            }
+
+                            updateDraft({
+                              sequence: formatNoClaimSequence(seq),
+                              month: month.trim(),
+                              noClaimDraft: generated,
+                            });
                           };
                           const inputClass =
                             "w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white outline-none focus:border-indigo-500/60";
@@ -2468,17 +2496,23 @@ export default function ClaimWorkflowDetailPage() {
                               <td className="px-3 py-2">
                                 {sub ? (
                                   noClaimEditable ? (
-                                    <input
-                                      type="text"
-                                      value={draft.noClaimDraft}
-                                      onChange={(event) =>
-                                        updateDraft({
-                                          noClaimDraft: event.target.value,
-                                        })
-                                      }
-                                      placeholder="01/SUPER-GCPI/02/2026"
-                                      className="w-44 rounded-md border-2 border-indigo-500/40 bg-indigo-500/10 px-2 py-1 font-mono text-xs text-emerald-200 outline-none transition focus:border-indigo-400 focus:bg-indigo-500/20"
-                                    />
+                                    draft.noClaimDraft.trim() !== "" ? (
+                                      <input
+                                        type="text"
+                                        value={draft.noClaimDraft}
+                                        onChange={(event) =>
+                                          updateDraft({
+                                            noClaimDraft: event.target.value,
+                                          })
+                                        }
+                                        placeholder="01/SUPER-GCPI/02/2026"
+                                        className="w-44 rounded-md border-2 border-indigo-500/40 bg-indigo-500/10 px-2 py-1 font-mono text-xs text-emerald-200 outline-none transition focus:border-indigo-400 focus:bg-indigo-500/20"
+                                      />
+                                    ) : (
+                                      <span className="text-[11px] italic text-slate-500">
+                                        Klik Generate
+                                      </span>
+                                    )
                                   ) : (
                                     <span className="font-mono text-xs text-emerald-200">
                                       {draft.noClaimDraft || "—"}
@@ -2487,6 +2521,43 @@ export default function ClaimWorkflowDetailPage() {
                                 ) : (
                                   <span className="text-[11px] italic text-amber-300">
                                     Belum siap
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                {noClaimEditable ? (
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={draft.sequence}
+                                    onChange={(event) =>
+                                      updateDraft({ sequence: event.target.value })
+                                    }
+                                    placeholder="01"
+                                    className={`${inputClass} w-16 border-indigo-500/40 bg-indigo-500/10 font-mono`}
+                                  />
+                                ) : (
+                                  <span className="font-mono text-xs text-slate-400">
+                                    {draft.sequence || "-"}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                {noClaimEditable ? (
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    maxLength={2}
+                                    value={draft.month}
+                                    onChange={(event) =>
+                                      updateDraft({ month: event.target.value })
+                                    }
+                                    placeholder={excelDefaultMonth}
+                                    className={`${inputClass} w-14 border-indigo-500/40 bg-indigo-500/10 font-mono`}
+                                  />
+                                ) : (
+                                  <span className="font-mono text-xs text-slate-400">
+                                    {draft.month || "-"}
                                   </span>
                                 )}
                               </td>
@@ -2608,11 +2679,24 @@ export default function ClaimWorkflowDetailPage() {
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex flex-wrap gap-1.5">
-                                  {editable && (
+                                  {noClaimEditable && (
+                                    <button
+                                      type="button"
+                                      onClick={generateNoClaim}
+                                      className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-bold text-indigo-200 hover:bg-indigo-500/20"
+                                      title={
+                                        sub
+                                          ? "Generate No Claim dari No. Urut, Bulan Claim, Distributor, Principal, dan Tahun"
+                                          : "Generate preview No Claim."
+                                      }
+                                    >
+                                      Generate
+                                    </button>
+                                  )}
+                                  {editable && dirty && (
                                     <button
                                       type="button"
                                       disabled={
-                                        !dirty ||
                                         saveBlockedByMissingSubmission ||
                                         excelRowSavingId === item.id ||
                                         excelRowSavingId !== ""
@@ -2735,13 +2819,7 @@ export default function ClaimWorkflowDetailPage() {
                   { key: "summary" as const, title: "Summary", path: selectedDetailSubmission.summaryPdfPath },
                   { key: "receipt" as const, title: "Kwitansi", path: selectedDetailSubmission.receiptPdfPath },
                 ]).map((doc) => {
-                  const generating = generatingDocKey === `${selectedDetailSubmission.id}:${doc.key}`;
                   const generated = Boolean(doc.path);
-                  const canGen =
-                    canEditItems &&
-                    !isSubmissionClosed(selectedDetailSubmission) &&
-                    (selectedDetailSubmission.itemCount ?? 0) > 0 &&
-                    Number(selectedDetailSubmission.totalClaim || 0) > 0;
                   return (
                     <div key={doc.key} className="rounded-lg border border-white/10 bg-black/30 p-3">
                       <div className="flex items-center justify-between gap-2">
@@ -2751,7 +2829,7 @@ export default function ClaimWorkflowDetailPage() {
                         </span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        {generated && (
+                        {generated ? (
                           <a
                             href={`/api/claim-workflow/${id}/submissions/${selectedDetailSubmission.id}/${doc.key}`}
                             target="_blank"
@@ -2760,20 +2838,9 @@ export default function ClaimWorkflowDetailPage() {
                           >
                             Buka PDF
                           </a>
-                        )}
-                        {canGen && (
-                          <button
-                            type="button"
-                            disabled={generating || generatingDocKey !== ""}
-                            onClick={() => void generateSubmissionDocument(selectedDetailSubmission.id, doc.key)}
-                            className="rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
-                          >
-                            {generating ? "..." : generated ? "Regenerate" : "Generate"}
-                          </button>
-                        )}
-                        {!generated && !canGen && (
+                        ) : (
                           <span className="text-[10px] italic text-slate-500">
-                            Lengkapi No Claim dan nilai klaim sebelum generate.
+                            Belum dibuat. Pakai &quot;Generate Semua Dokumen&quot;.
                           </span>
                         )}
                       </div>
@@ -2839,7 +2906,7 @@ export default function ClaimWorkflowDetailPage() {
         {showPanduan && (
           <div className="space-y-3 border-t border-white/10 p-5 text-xs text-slate-300">
             <p>
-              Setiap baris di Daftar Claim: ketik No Claim final langsung di kolom, cek DPP/PPN/PPH, lalu klik Simpan.
+              Setiap baris di Daftar Claim mengikuti pola kerja sheet BASE: isi No. Urut dan Bulan Claim, generate No Claim, cek DPP/PPN/PPH, lalu Simpan.
             </p>
             <div className="rounded-lg border border-white/10 bg-black/30 p-3">
               <p className="font-bold text-white">Apa itu Berkas Claim?</p>
@@ -2854,7 +2921,8 @@ export default function ClaimWorkflowDetailPage() {
               <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                 <p className="font-bold text-white">Urutan Kerja</p>
                 <ol className="mt-2 list-decimal space-y-1 pl-5">
-                  <li>Ketik No Claim final di kolom No Claim.</li>
+                  <li>Isi No Claim secara manual di kolom No Claim.</li>
+                  <li>Opsional: isi No. Urut dan Bulan Claim, lalu klik Generate untuk preview format.</li>
                   <li>Cek/edit DPP, PPN %, dan PPH %, lalu klik Simpan.</li>
                   <li>Klik Detail untuk dokumen, payment summary, outstanding, dan status close.</li>
                 </ol>

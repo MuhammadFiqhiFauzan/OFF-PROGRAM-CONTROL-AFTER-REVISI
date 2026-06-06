@@ -178,6 +178,10 @@ export const offBatchItem = sqliteTable("off_batch_item", {
     barang: text("barang"),
     nominal: real("nominal").notNull().default(0),
     caraBayar: text("cara_bayar"),
+    financePaymentStatus: text("finance_payment_status").notNull().default("unpaid"),
+    financePaidAt: integer("finance_paid_at", { mode: "timestamp" }),
+    financePaymentId: text("finance_payment_id"),
+    financePaidAmount: real("finance_paid_amount"),
     type: text("type"),
     // --- Tipe Program (revisi dropdown + legacy) ---
     // originalType menyimpan nilai tipe asli sebelum normalisasi (audit legacy).

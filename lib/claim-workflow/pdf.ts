@@ -303,3 +303,56 @@ export async function generateClaimLetterPdf(
     await writeFile(filePath, pdf);
     return { filePath, pdf };
 }
+
+// =============================================================================
+// Combined Claim Letter — 1 PDF gabungan workflow-level, banyak surat di dalamnya
+// =============================================================================
+
+type CombinedLetterEntry = {
+    submission: ClaimSubmissionRow;
+    items: ClaimWorkflowItemRow[];
+};
+
+/**
+ * Generate 1 PDF Surat Claim gabungan untuk seluruh workflow. Setiap
+ * submission aktif mendapat section surat sendiri (halaman baru) di
+ * dalam PDF yang sama. Disimpan ke workflow.claimLetterPdfPath.
+ */
+export async function generateCombinedClaimLetterPdf(
+    workflow: ClaimWorkflowRow,
+    entries: CombinedLetterEntry[],
+    generatedAt: Date,
+) {
+    const { PDFDocument: PDFDoc } = await import("pdf-lib");
+    // Build individual letter PDFs in memory, then merge pages.
+    const mergedDoc = await PDFDoc.create();
+    mergedDoc.setTitle(`Surat Claim Gabungan ${workflow.claimWorkflowNo}`);
+    mergedDoc.setSubject(`Claim Letter Gabungan - ${recipientName(workflow)}`);
+    mergedDoc.setCreator("AccAPI Claim Workflow");
+
+    for (const entry of entries) {
+        const effectiveWorkflow = applySubmissionOverrides(workflow, entry.submission);
+        const singlePdf = await buildClaimLetterPdf(effectiveWorkflow, entry.items, generatedAt);
+        const singleDoc = await PDFDoc.load(singlePdf);
+        const pageIndices = singleDoc.getPageIndices();
+        const copiedPages = await mergedDoc.copyPages(singleDoc, pageIndices);
+        for (const page of copiedPages) {
+            mergedDoc.addPage(page);
+        }
+    }
+
+    // Jika tidak ada entry, tetap buat 1 halaman kosong agar PDF valid.
+    if (entries.length === 0) {
+        mergedDoc.addPage([595.28, 841.89]);
+    }
+
+    const pdf = Buffer.from(await mergedDoc.save());
+    if (pdf.byteLength === 0) throw new Error("Combined Claim Letter PDF output is empty.");
+
+    const directory = path.join(process.cwd(), "runtime", "claim-workflow", "letters");
+    await mkdir(directory, { recursive: true });
+    const timestamp = formatDocumentTimestamp(generatedAt);
+    const filePath = path.join(directory, `${safeFileName(workflow.claimWorkflowNo)}-claim-letter-combined-${timestamp}.pdf`);
+    await writeFile(filePath, pdf);
+    return { filePath, pdf };
+}

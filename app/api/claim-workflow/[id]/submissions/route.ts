@@ -22,7 +22,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimSubmission, claimWorkflow, claimWorkflowItem } from "@/db/schema";
 import {
@@ -207,7 +207,8 @@ export async function POST(request: Request, context: Context) {
                 } as const;
             }
 
-            // Cek duplicate noClaim global bila di-supply.
+            // Cek duplicate noClaim antar workflow lain (bukan global).
+            // Dalam workflow ini sendiri, No Claim boleh sama (merge).
             if (noClaim) {
                 const [duplicate] = await tx
                     .select({
@@ -215,13 +216,18 @@ export async function POST(request: Request, context: Context) {
                         claimWorkflowId: claimSubmission.claimWorkflowId,
                     })
                     .from(claimSubmission)
-                    .where(eq(claimSubmission.noClaim, noClaim));
+                    .where(
+                        and(
+                            eq(claimSubmission.noClaim, noClaim),
+                            ne(claimSubmission.claimWorkflowId, id),
+                        ),
+                    );
                 if (duplicate) {
                     return {
                         error: {
                             status: 409,
-                            code: "CLAIM_SUBMISSION_NO_CLAIM_DUPLICATE",
-                            message: `noClaim "${noClaim}" sudah dipakai submission lain (workflow ${duplicate.claimWorkflowId}).`,
+                            code: "NO_CLAIM_ALREADY_USED_IN_OTHER_WORKFLOW",
+                            message: `noClaim "${noClaim}" sudah dipakai di workflow lain (${duplicate.claimWorkflowId}).`,
                         },
                     } as const;
                 }
@@ -304,8 +310,8 @@ export async function POST(request: Request, context: Context) {
         if (message.includes("unique") && message.includes("no_claim")) {
             return NextResponse.json({
                 ok: false,
-                code: "CLAIM_SUBMISSION_NO_CLAIM_DUPLICATE",
-                error: "noClaim sudah dipakai submission lain.",
+                code: "NO_CLAIM_ALREADY_USED_IN_OTHER_WORKFLOW",
+                error: "noClaim sudah dipakai di workflow lain.",
             }, { status: 409 });
         }
         console.error("[CLAIM SUBMISSIONS CREATE ERROR]", error);

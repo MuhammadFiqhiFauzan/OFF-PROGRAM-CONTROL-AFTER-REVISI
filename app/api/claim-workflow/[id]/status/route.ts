@@ -220,55 +220,47 @@ export async function POST(request: Request, context: Context) {
                 }, { status: 422 });
             }
 
-            // Validasi setiap submission aktif harus lengkap:
-            // - noClaim non-empty
-            // - Summary PDF per submission wajib
-            // - Kwitansi PDF per submission wajib
-            // - Claim Letter: gabungan workflow-level ATAU per submission
-            //   (hybrid mode — combined letter di workflow.claimLetterPdfPath
-            //   menggantikan requirement per submission)
-            const hasWorkflowCombinedLetter = Boolean(workflow.claimLetterPdfPath);
-
+            // Rule dokumen R7 (Generate Semua Dokumen):
+            // Semua dokumen sekarang gabungan workflow-level:
+            // - Surat Claim gabungan → workflow.claimLetterPdfPath
+            // - Summary gabungan → workflow.summaryPdfPath
+            // - Kwitansi gabungan → workflow.receiptPdfPath
+            // Setiap submission aktif hanya perlu No Claim; path dokumen
+            // dimirror dari workflow sehingga tidak perlu dicek per submission.
             for (const submission of activeSubmissions) {
                 const subNoClaim = String(submission.noClaim || "").trim();
-                const subLabel = submission.scopeLabel || submission.scope || "submission";
 
                 if (!subNoClaim) {
                     return NextResponse.json({
                         ok: false,
                         code: "CLAIM_SUBMISSION_NO_CLAIM_REQUIRED",
-                        error: `Berkas Claim "${subLabel}" belum memiliki No Claim. Assign No Claim terlebih dahulu.`,
+                        error: "No Claim belum lengkap.",
                         submissionId: submission.id,
                     }, { status: 422 });
                 }
+            }
 
-                // Claim Letter: cek combined workflow-level ATAU per submission
-                if (!hasWorkflowCombinedLetter && !submission.claimLetterPdfPath) {
-                    return NextResponse.json({
-                        ok: false,
-                        code: "CLAIM_LETTER_COMBINED_REQUIRED",
-                        error: `Claim Letter PDF belum dibuat. Generate Claim Letter gabungan terlebih dahulu.`,
-                        submissionId: submission.id,
-                    }, { status: 422 });
-                }
-
-                if (!submission.summaryPdfPath) {
-                    return NextResponse.json({
-                        ok: false,
-                        code: "CLAIM_SUBMISSION_SUMMARY_REQUIRED",
-                        error: `Berkas Claim "${subLabel}" belum memiliki Summary PDF. Generate dokumen terlebih dahulu.`,
-                        submissionId: submission.id,
-                    }, { status: 422 });
-                }
-
-                if (!submission.receiptPdfPath) {
-                    return NextResponse.json({
-                        ok: false,
-                        code: "CLAIM_SUBMISSION_RECEIPT_REQUIRED",
-                        error: `Berkas Claim "${subLabel}" belum memiliki Kwitansi Claim PDF. Generate dokumen terlebih dahulu.`,
-                        submissionId: submission.id,
-                    }, { status: 422 });
-                }
+            // Dokumen gabungan workflow-level wajib ada.
+            if (!workflow.claimLetterPdfPath) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_COMBINED_LETTER_REQUIRED",
+                    error: "Surat Claim gabungan belum dibuat.",
+                }, { status: 422 });
+            }
+            if (!workflow.summaryPdfPath) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_COMBINED_SUMMARY_REQUIRED",
+                    error: "Summary gabungan belum dibuat.",
+                }, { status: 422 });
+            }
+            if (!workflow.receiptPdfPath) {
+                return NextResponse.json({
+                    ok: false,
+                    code: "CLAIM_COMBINED_RECEIPT_REQUIRED",
+                    error: "Kwitansi gabungan belum dibuat.",
+                }, { status: 422 });
             }
 
             // Semua submission aktif valid. Mark Ready bisa proceed.

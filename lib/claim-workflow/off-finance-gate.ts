@@ -14,7 +14,7 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { offBatch, offPayment } from "@/db/schema";
+import { offBatch, offBatchItem, offPayment } from "@/db/schema";
 import { offFinanceStatuses } from "@/lib/off-program-control/constants";
 
 type DbExecutor = Pick<typeof db, "select">;
@@ -26,6 +26,7 @@ export type OffFinanceGateResult = {
     totalNominal: number;
     totalPaid: number;
     isFullyPaid: boolean;
+    nominalSource: "items" | "header" | "none";
     reason: string | null;
 };
 
@@ -60,11 +61,19 @@ export async function getOffFinanceGateForNoClaim(
             totalNominal: 0,
             totalPaid: 0,
             isFullyPaid: false,
+            nominalSource: "none",
             reason: "OFF Batch tidak ditemukan.",
         };
     }
 
-    // 2. Baca semua off_payment untuk batch ini
+    // 2. Baca item nominal sebagai source-of-truth total pengajuan.
+    //    Header `off_batch.total_nominal` bisa stale pada data lama.
+    const items = await executor
+        .select({ nominal: offBatchItem.nominal })
+        .from(offBatchItem)
+        .where(eq(offBatchItem.batchId, offBatchId));
+
+    // 3. Baca semua off_payment untuk batch ini.
     const payments = await executor
         .select({
             id: offPayment.id,
@@ -73,15 +82,25 @@ export async function getOffFinanceGateForNoClaim(
         .from(offPayment)
         .where(eq(offPayment.batchId, offBatchId));
 
-    // 3. Hitung summary — computeOffFinancePaymentSummary hanya membaca
-    //    `paidAmount` dari setiap item, jadi kita compute inline supaya
-    //    tidak perlu fetch kolom penuh.
-    const totalNominal = Number(batch.totalNominal || 0);
+    // 4. Hitung summary: nominal dari item, fallback ke header hanya
+    //    bila batch belum punya item tetapi header valid positif.
+    const itemNominalTotal = items.reduce((sum, item) => sum + Number(item.nominal || 0), 0);
+    const headerNominalTotal = Number(batch.totalNominal || 0);
+    const nominalSource = itemNominalTotal > 0
+        ? "items"
+        : headerNominalTotal > 0
+            ? "header"
+            : "none";
+    const totalNominal = nominalSource === "items"
+        ? itemNominalTotal
+        : nominalSource === "header"
+            ? headerNominalTotal
+            : 0;
     const totalPaid = payments.reduce((sum, p) => sum + Number(p.paidAmount || 0), 0);
     const remainingAmount = Math.max(0, totalNominal - totalPaid);
-    const isFullyPaid = totalPaid === totalNominal && totalNominal > 0;
+    const isFullyPaid = totalPaid >= totalNominal && totalNominal > 0;
 
-    // 4. Gate logic: financeStatus === "Paid" DAN aggregate fully paid
+    // 5. Gate logic: financeStatus === "Paid" DAN aggregate fully paid.
     const financeStatusIsPaid = batch.financeStatus === offFinanceStatuses.paid;
     const isPaid = financeStatusIsPaid && isFullyPaid;
 
@@ -89,6 +108,8 @@ export async function getOffFinanceGateForNoClaim(
     if (!isPaid) {
         if (!financeStatusIsPaid) {
             reason = `Menunggu validasi keuangan OFF Program. No Claim baru bisa dibuat setelah Finance OFF Paid. Status saat ini: ${batch.financeStatus}.`;
+        } else if (totalNominal <= 0) {
+            reason = "Finance status Paid tetapi total nominal OFF belum valid (0). No Claim baru bisa dibuat setelah total nominal item tersedia.";
         } else if (!isFullyPaid) {
             reason = `Finance status Paid tetapi total pembayaran belum sesuai total nominal (${totalPaid.toLocaleString("id-ID")} / ${totalNominal.toLocaleString("id-ID")}). No Claim baru bisa dibuat setelah seluruh nominal terbayar.`;
         }
@@ -101,6 +122,7 @@ export async function getOffFinanceGateForNoClaim(
         totalNominal,
         totalPaid,
         isFullyPaid,
+        nominalSource,
         reason,
     };
 }
