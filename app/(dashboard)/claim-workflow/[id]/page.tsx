@@ -67,6 +67,9 @@ type WorkflowItem = {
   noSurat?: string | null;
   jenisPromosi?: string | null;
   periode?: string | null;
+  // Jenis Pembayaran (Finance) — diturunkan backend dari off_payment /
+  // off_batch_item.caraBayar. "-" bila tidak ada data.
+  financePaymentMethodLabel?: string | null;
   outlet?: string | null;
   dpp: number;
   ppnRate: number;
@@ -1239,9 +1242,6 @@ export default function ClaimWorkflowDetailPage() {
       if (!response.ok || !result.ok) {
         throw new Error(result.error || "Gagal generate semua dokumen.");
       }
-      const successMessage = `Dokumen gabungan dibuat untuk ${result.activeSubmissionCount ?? 0} No Claim.`;
-      toast.success(successMessage);
-      setMessage(successMessage);
       await loadDetail();
     } catch (generateError) {
       const errorMessage =
@@ -1928,9 +1928,9 @@ export default function ClaimWorkflowDetailPage() {
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
-            <div className="rounded-xl border border-white/10 bg-black/20 p-1">
+            <div className="rounded-xl border border-[#e7c98f] bg-[#fffaf0] p-1">
               <div className="flex items-center gap-1">
-                <span className="px-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                <span className="px-2 text-[10px] font-bold uppercase tracking-wider text-[#7a5a2a]">
                   Tampilan
                 </span>
                 {(["simple", "berkas"] as const).map((mode) => (
@@ -1938,10 +1938,10 @@ export default function ClaimWorkflowDetailPage() {
                     key={mode}
                     type="button"
                     onClick={() => setStaffViewMode(mode)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition ${
                       staffViewMode === mode
-                        ? "bg-indigo-600 text-white shadow-sm shadow-indigo-950/60"
-                        : "text-slate-300 hover:bg-white/10 hover:text-white"
+                        ? "border-[#b9821f] bg-[#c6922e] text-white shadow-sm"
+                        : "border-[#e7c98f] bg-[#fffaf0] text-[#3a240c] hover:bg-[#f7ead1]"
                     }`}
                   >
                     {mode === "simple" ? "Simple" : "Dengan Berkas Claim"}
@@ -1954,8 +1954,8 @@ export default function ClaimWorkflowDetailPage() {
                 {transitions.map((action) => {
                   const isPrimary = action === "submit_to_principal" || action === "mark_ready";
                   const className = isPrimary
-                    ? "rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
-                    : "rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10 disabled:opacity-50";
+                    ? "rounded-lg border border-[#b9821f] bg-[#c6922e] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#a87518] disabled:opacity-50"
+                    : "rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-1.5 text-xs font-bold text-[#3a240c] hover:bg-[#f7ead1] disabled:opacity-50";
                   return (
                     <button
                       key={action}
@@ -2347,19 +2347,19 @@ export default function ClaimWorkflowDetailPage() {
                     Belum ada item klaim untuk workflow ini.
                   </div>
                 ) : (
-                  <div className="overflow-auto rounded-xl border border-white/10">
-                    <div className="sticky left-0 top-0 z-10 border-b border-white/10 bg-[#141820] px-3 py-2 text-[11px] text-slate-300">
-                      Alur cepat: isi <span className="font-bold text-indigo-200">No. Urut</span> dan <span className="font-bold text-indigo-200">Bulan Claim</span> di sebelah <span className="font-bold text-indigo-200">No Claim</span>, klik <span className="font-bold text-indigo-200">Generate</span>, lalu <span className="font-bold text-indigo-200">Simpan</span>.
+                  <div className="overflow-auto rounded-xl border border-[#e7c98f]">
+                    <div className="sticky left-0 top-0 z-10 border-b border-[#e7c98f] bg-[#fff7e6] px-3 py-2 text-[11px] text-[#3a240c]">
+                      Alur cepat: isi <span className="font-bold text-[#7a5a2a]">No. Urut</span> dan <span className="font-bold text-[#7a5a2a]">Bulan Claim</span> di sebelah <span className="font-bold text-[#7a5a2a]">No Claim</span>, klik <span className="font-bold text-[#7a5a2a]">Generate</span>, lalu <span className="font-bold text-[#7a5a2a]">Simpan</span>.
                     </div>
                     <table className="min-w-[1700px] text-left text-sm">
-                      <thead className="bg-black/40 text-[11px] uppercase tracking-wider text-slate-500">
+                      <thead className="bg-[#f1dfbd] text-[11px] uppercase tracking-wider text-[#3a240c]">
                         <tr>
                           <th className="px-3 py-2 font-semibold">No.</th>
                           <th className="px-3 py-2 font-semibold">No Claim</th>
-                          <th className="px-3 py-2 font-semibold text-indigo-200">No. Urut</th>
-                          <th className="px-3 py-2 font-semibold text-indigo-200">Bulan Claim</th>
+                          <th className="px-3 py-2 font-semibold">No. Urut</th>
+                          <th className="px-3 py-2 font-semibold">Bulan Claim</th>
                           <th className="px-3 py-2 font-semibold">Perihal</th>
-                          <th className="px-3 py-2 font-semibold">Periode</th>
+                          <th className="px-3 py-2 font-semibold">Jenis Pembayaran</th>
                           <th className="px-3 py-2 font-semibold">Surat Program</th>
                           <th className="px-3 py-2 font-semibold">Outlet</th>
                           <th className="px-3 py-2 text-right font-semibold">DPP</th>
@@ -2565,7 +2565,7 @@ export default function ClaimWorkflowDetailPage() {
                                 {item.jenisPromosi || "-"}
                               </td>
                               <td className="px-3 py-2 text-xs">
-                                {item.periode || "-"}
+                                {item.financePaymentMethodLabel || "-"}
                               </td>
                               <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
                                 {item.noSurat || "-"}
@@ -2683,7 +2683,7 @@ export default function ClaimWorkflowDetailPage() {
                                     <button
                                       type="button"
                                       onClick={generateNoClaim}
-                                      className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-bold text-indigo-200 hover:bg-indigo-500/20"
+                                      className="rounded-md border border-[#e7c98f] bg-[#fffaf0] px-2 py-1 text-[10px] font-bold text-[#1f1408] hover:bg-[#f7ead1]"
                                       title={
                                         sub
                                           ? "Generate No Claim dari No. Urut, Bulan Claim, Distributor, Principal, dan Tahun"

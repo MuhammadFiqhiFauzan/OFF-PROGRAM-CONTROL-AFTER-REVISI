@@ -24,7 +24,7 @@ export default function SidebarLayout({ children, role, permissions }: { childre
         await authClient.signOut({
             fetchOptions: {
                 onSuccess: () => {
-                    router.push("/login");
+                    window.location.href = "/login";
                 },
             },
         });

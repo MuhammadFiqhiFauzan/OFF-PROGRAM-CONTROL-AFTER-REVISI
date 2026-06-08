@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { asc, count, eq } from "drizzle-orm";
+import { asc, count, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
     claimPayment,
@@ -7,6 +7,8 @@ import {
     claimWorkflow,
     claimWorkflowItem,
     offBatch,
+    offBatchItem,
+    offPayment,
     user,
 } from "@/db/schema";
 import {
@@ -27,6 +29,18 @@ function isPaymentDerivedStatus(status: string): boolean {
         status === claimWorkflowStatuses.partiallyPaid ||
         status === claimWorkflowStatuses.paid
     );
+}
+
+// Normalisasi label metode pembayaran Finance ke bentuk tampilan yang
+// konsisten ("Transfer" / "Tunai"). Nilai lain dipertahankan apa adanya
+// (mis. "Giro"); null/empty → "-".
+function normalizeFinancePaymentMethod(value: string | null | undefined): string {
+    const trimmed = String(value ?? "").trim();
+    if (!trimmed) return "-";
+    const lower = trimmed.toLowerCase();
+    if (lower === "transfer") return "Transfer";
+    if (lower === "tunai" || lower === "cash") return "Tunai";
+    return trimmed;
 }
 
 export async function GET(_request: Request, context: Context) {
@@ -57,6 +71,45 @@ export async function GET(_request: Request, context: Context) {
             .select()
             .from(claimWorkflowItem)
             .where(eq(claimWorkflowItem.claimWorkflowId, id));
+
+        // Jenis Pembayaran (Finance) per item. Sumber prioritas:
+        //   1. off_payment.payment_method via off_batch_item.financePaymentId
+        //   2. fallback off_batch_item.caraBayar
+        //   3. "-" bila tidak ada keduanya
+        // Tidak ada perubahan schema; hanya enrich response detail.
+        const offBatchItemIds = Array.from(
+            new Set(
+                items
+                    .map((it) => it.offBatchItemId)
+                    .filter((v): v is string => typeof v === "string" && v.length > 0),
+            ),
+        );
+        const offBatchItemMethodMap = new Map<string, string | null>();
+        if (offBatchItemIds.length > 0) {
+            const offItems = await db
+                .select({
+                    id: offBatchItem.id,
+                    caraBayar: offBatchItem.caraBayar,
+                    financePaymentId: offBatchItem.financePaymentId,
+                    paymentMethod: offPayment.paymentMethod,
+                })
+                .from(offBatchItem)
+                .leftJoin(offPayment, eq(offBatchItem.financePaymentId, offPayment.id))
+                .where(inArray(offBatchItem.id, offBatchItemIds));
+            for (const oi of offItems) {
+                const raw =
+                    (oi.paymentMethod && String(oi.paymentMethod).trim()) ||
+                    (oi.caraBayar && String(oi.caraBayar).trim()) ||
+                    null;
+                offBatchItemMethodMap.set(oi.id, normalizeFinancePaymentMethod(raw));
+            }
+        }
+        const itemsWithFinanceMethod = items.map((it) => ({
+            ...it,
+            financePaymentMethodLabel: it.offBatchItemId
+                ? offBatchItemMethodMap.get(it.offBatchItemId) ?? "-"
+                : "-",
+        }));
         const payments = await db
             .select()
             .from(claimPayment)
@@ -236,7 +289,7 @@ export async function GET(_request: Request, context: Context) {
                 id: row.workflow.offBatchId,
                 noPengajuan: row.offNoPengajuan,
             },
-            items,
+            items: itemsWithFinanceMethod,
             payments,
             activePayments,
             voidedPayments,

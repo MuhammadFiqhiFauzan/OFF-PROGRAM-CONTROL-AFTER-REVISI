@@ -797,7 +797,7 @@ function MonitoringSearch({
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       placeholder={placeholder}
-      className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2.5 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+      className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
     />
   );
 }
@@ -927,7 +927,7 @@ function PeriodFilter({
                   .value as OffPeriodFilterValue["periodType"],
               })
             }
-            className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+            className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
           >
             {(
               Object.keys(periodTypeLabels) as Array<
@@ -952,7 +952,7 @@ function PeriodFilter({
                 mode: event.target.value as OffPeriodFilterValue["mode"],
               })
             }
-            className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+            className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
           >
             <option value="month" className="bg-[#1a1c23]">
               Bulan-Tahun
@@ -974,7 +974,7 @@ function PeriodFilter({
                 onChange={(event) =>
                   onChange({ ...value, month: event.target.value })
                 }
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
               >
                 {months.map((month) => (
                   <option
@@ -1001,7 +1001,7 @@ function PeriodFilter({
                 }
                 placeholder="cth: 2026"
                 inputMode="numeric"
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
               />
             </label>
           </>
@@ -1017,7 +1017,7 @@ function PeriodFilter({
                 onChange={(event) =>
                   onChange({ ...value, dateFrom: event.target.value })
                 }
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
               />
             </label>
             <label className="block">
@@ -1030,7 +1030,7 @@ function PeriodFilter({
                 onChange={(event) =>
                   onChange({ ...value, dateTo: event.target.value })
                 }
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
               />
             </label>
           </>
@@ -1060,7 +1060,7 @@ function StatusFilterSelect({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2.5 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+        className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm text-slate-200 outline-none focus:border-teal-500/50"
       >
         <option value="" className="bg-[#1a1c23]">
           Semua Status
@@ -1404,7 +1404,7 @@ function Field({ label, value = "" }: { label: string; value?: string }) {
         readOnly
         value={value}
         placeholder={label}
-        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-300 outline-none placeholder:text-slate-600"
+        className="mt-1 w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-300 outline-none placeholder:text-slate-600"
       />
     </label>
   );
@@ -1414,10 +1414,12 @@ function EditableField({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
 }) {
   return (
     <label className="block">
@@ -1425,7 +1427,8 @@ function EditableField({
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+        placeholder={placeholder}
+        className="mt-1 w-full rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none placeholder:text-[#8a6a3d] focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
       />
     </label>
   );
@@ -1447,7 +1450,7 @@ function DateField({
         value={value}
         onChange={onChange}
         ariaLabel={label}
-        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
+        className="mt-1 w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
       />
     </label>
   );
@@ -1472,7 +1475,7 @@ function PrincipleSelect({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={`${label ? "mt-1" : ""} w-full rounded-lg border border-white/10 bg-black/40 px-3 ${compact ? "py-2 min-w-[250px]" : "py-2.5"} text-sm text-slate-200 outline-none focus:border-teal-500/50`}
+        className={`${label ? "mt-1" : ""} w-full rounded-lg border border-white/10 bg-white/10 px-3 ${compact ? "py-2 min-w-[250px]" : "py-2.5"} text-sm text-slate-200 outline-none focus:border-teal-500/50`}
       >
         {PRINCIPLE_OPTIONS.map((item) => (
           <option key={item.code} value={item.name} className="bg-[#1a1c23]">
@@ -1493,7 +1496,7 @@ function TextArea({ label, value = "" }: { label: string; value?: string }) {
         value={value}
         placeholder={label}
         rows={4}
-        className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-300 outline-none placeholder:text-slate-600"
+        className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-300 outline-none placeholder:text-slate-600"
       />
     </label>
   );
@@ -1554,7 +1557,7 @@ function MetricsGrid({ metrics }: { metrics: MetricItem[] }) {
                   {metric.value}
                 </p>
               </div>
-              <div className="w-11 h-11 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center">
+              <div className="w-11 h-11 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center">
                 <Icon className={metric.tone} size={22} />
               </div>
             </div>
@@ -2083,7 +2086,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
   const [supervisorMenu, setSupervisorMenu] = useState<
     "pengajuan" | "monitoring" | "diskon"
   >("pengajuan");
-  const [supervisorName, setSupervisorName] = useState("Supervisor Area 1");
+  const [supervisorName, setSupervisorName] = useState("");
   const [batchPrinciple, setBatchPrinciple] = useState("RECKITT BENCKISER, PT");
   const [gelombangInput, setGelombangInput] = useState("001");
   const [bulanInput, setBulanInput] = useState("05");
@@ -2215,7 +2218,11 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
       setEditingBatchId(detailBatch.id);
       setEditingLocked(!isSupervisorEditableBatch(detailBatch));
       setReturnNote(detailBatch.claimNote || detailBatch.smNote || "");
-      setSupervisorName(detailBatch.supervisorName || "Supervisor Area 1");
+      setSupervisorName(
+        detailBatch.supervisorName === "Supervisor Area 1"
+          ? ""
+          : detailBatch.supervisorName || "",
+      );
       setGelombangInput(detailBatch.gelombang || "001");
       setBatchPrinciple(detailBatch.principleName || "RECKITT BENCKISER, PT");
       setBulanInput(detailBatch.bulan || "05");
@@ -2699,9 +2706,24 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           {summary.totalNominal.toLocaleString("id-ID")}
                         </p>
                         <p className="mt-2 text-sm text-rose-200">
-                          {batch.claimNote ||
-                            batch.smNote ||
-                            "Tidak ada catatan pengembalian."}
+                          {(() => {
+                            const status = batch.status || "";
+                            let source = "";
+                            if (status.includes("Returned by SM") || status.includes("Returned by Claim")) {
+                              source = status.includes("SM") ? "Sales Manager" : "Claim";
+                            } else if (status.includes("Returned")) {
+                              source = "Tim terkait";
+                            } else if (status.includes("Cancelled")) {
+                              source = "Operational Manager";
+                            }
+                            const note = batch.claimNote || batch.smNote || "";
+                            return (
+                              <>
+                                {source && <span className="block text-xs font-bold text-rose-300 mb-1">Dikembalikan oleh: {source}</span>}
+                                {note ? note : "Tidak ada catatan pengembalian."}
+                              </>
+                            );
+                          })()}
                         </p>
                         <span
                           className={`mt-3 inline-flex rounded-md border px-2 py-1 text-xs font-bold ${statusClass(batch.status)}`}
@@ -2759,6 +2781,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                 label="Nama Supervisor"
                 value={supervisorName}
                 onChange={(value) => !editingLocked && setSupervisorName(value)}
+                placeholder="Isi nama Anda"
               />
               <EditableField
                 label="Gelombang Input"
@@ -2836,28 +2859,22 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                   {rows.map((row) => (
                     <tr
                       key={row.id}
-                      className="hover:bg-white/[0.03] align-top"
+                      className="hover:bg-[#fffaf0]/30 align-top"
                     >
                       <td className="px-3 py-3">
-                        <input
-                          readOnly
-                          value={generatedNo}
-                          className="w-full min-w-[170px] rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm font-mono font-bold text-white outline-none"
-                        />
+                        <div className="w-full min-w-[170px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm font-mono font-bold text-[#1f1408] shadow-sm">
+                          {generatedNo}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
-                        <input
-                          readOnly
-                          value={batchPrinciple}
-                          className="w-full min-w-[250px] rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-200 outline-none"
-                        />
+                        <div className="w-full min-w-[250px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm">
+                          {batchPrinciple}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
-                        <input
-                          readOnly
-                          value={batchCode}
-                          className="w-full min-w-[100px] rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm font-mono font-bold text-teal-300 outline-none"
-                        />
+                        <div className="w-full min-w-[100px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm font-mono font-bold text-[#1f1408] shadow-sm">
+                          {batchCode}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
                         <input
@@ -2866,7 +2883,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           onChange={(event) =>
                             updateRow(row.id, "noSurat", event.target.value)
                           }
-                          className="w-full min-w-[130px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                          className="w-full min-w-[130px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none placeholder:text-[#8a6a3d] focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -2876,7 +2893,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           onChange={(event) =>
                             updateRow(row.id, "namaProgram", event.target.value)
                           }
-                          className="w-full min-w-[150px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                          className="w-full min-w-[150px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none placeholder:text-[#8a6a3d] focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -2885,7 +2902,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           value={row.periodeAwal}
                           onChange={(value) => updateRow(row.id, "periodeAwal", value)}
                           ariaLabel="Periode awal"
-                          className="w-full min-w-[150px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
+                          className="w-full min-w-[150px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none disabled:opacity-100 disabled:cursor-default focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -2894,7 +2911,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           value={row.periodeAkhir}
                           onChange={(value) => updateRow(row.id, "periodeAkhir", value)}
                           ariaLabel="Periode akhir"
-                          className="w-full min-w-[150px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
+                          className="w-full min-w-[150px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none disabled:opacity-100 disabled:cursor-default focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -2904,7 +2921,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           onChange={(event) =>
                             updateRow(row.id, "toko", event.target.value)
                           }
-                          className="w-full min-w-[130px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                          className="w-full min-w-[130px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none placeholder:text-[#8a6a3d] focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -2914,7 +2931,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           onChange={(event) =>
                             updateRow(row.id, "barang", event.target.value)
                           }
-                          className="w-full min-w-[130px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                          className="w-full min-w-[130px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none placeholder:text-[#8a6a3d] focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -2925,7 +2942,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                             updateRow(row.id, "nominal", event.target.value)
                           }
                           placeholder="Rp 0"
-                          className="w-full min-w-[130px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                          className="w-full min-w-[130px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none placeholder:text-[#8a6a3d] focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -2935,12 +2952,12 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           onChange={(event) =>
                             updateRow(row.id, "caraBayar", event.target.value)
                           }
-                          className="w-full min-w-[150px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50 disabled:opacity-70"
+                          className="w-full min-w-[150px] rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-2 text-sm text-[#1f1408] shadow-sm outline-none disabled:opacity-100 disabled:cursor-default focus:border-[#c6922e] focus:ring-2 focus:ring-[#f2d49b]/40"
                         >
                           {offPaymentMethods.map((method) => (
                             <option
                               key={method}
-                              className="bg-[#1a1c23]"
+                              className="bg-[#fffaf0] text-[#1f1408]"
                               value={method}
                             >
                               {method}
@@ -2956,7 +2973,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                             onChange={(event) =>
                               updateRowType(row.id, event.target.value)
                             }
-                            className={`w-full rounded-lg border bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50 disabled:opacity-70 ${
+                            className={`w-full rounded-lg border bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500 disabled:opacity-100 disabled:cursor-default ${
                               row.type
                                 ? "border-white/10"
                                 : "border-amber-500/60"
@@ -2995,7 +3012,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                         {/* NOTE: PPh disiapkan nullable di level item/toko, tetapi
                             perhitungan final ditahan karena masih terkait format
                             kwitansi setelah pembayaran. */}
-                        <label className="flex min-w-[150px] items-center gap-2 rounded-lg border border-white/10 bg-black/40 px-2 py-2 text-xs text-slate-300">
+                        <label className="flex min-w-[150px] items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-2 py-2 text-xs text-slate-300">
                           <input
                             type="checkbox"
                             checked={row.pphExempt}
@@ -3018,7 +3035,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                           value={row.deadline}
                           onChange={(value) => updateRow(row.id, "deadline", value)}
                           ariaLabel="Deadline"
-                          className="w-full min-w-[150px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
+                          className="w-full min-w-[150px] rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none disabled:opacity-100 disabled:cursor-default [color-scheme:dark] focus:border-teal-500/50"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -3028,7 +3045,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                             .map((item) => (
                               <label
                                 key={item}
-                                className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-slate-300"
+                                className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-2 py-1.5 text-xs text-slate-300"
                               >
                                 <input
                                   type="checkbox"
@@ -3054,7 +3071,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                       </td>
                       <td className="px-3 py-3">
                         <div className="min-w-[220px] space-y-2">
-                          <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-slate-300">
+                          <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-2 py-1.5 text-xs text-slate-300">
                             <input
                               type="checkbox"
                               checked={row.others}
@@ -3081,7 +3098,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                               )
                             }
                             placeholder="Sebutkan dokumen lainnya"
-                            className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                            className="w-full rounded-lg border border-white/10 bg-white/10 px-2 py-1.5 text-xs text-slate-200 outline-none disabled:opacity-100 disabled:cursor-default placeholder:text-slate-600 focus:border-teal-500/50"
                           />
                         </div>
                       </td>
@@ -3203,27 +3220,6 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
             </p>
           </Panel>
 
-          <Panel title="Status Kunci" icon={ShieldCheck}>
-            <div className="space-y-3">
-              {[
-                "Draft",
-                "Submitted to SM",
-                "Returned by SM",
-                "Approved by SM - Locked",
-              ].map((item) => (
-                <span
-                  key={item}
-                  className={`inline-flex mr-2 rounded-md border px-2.5 py-1 text-xs font-bold ${statusClass(item)}`}
-                >
-                  {displayStatusLabel(item)}
-                </span>
-              ))}
-            </div>
-            <p className="mt-4 text-sm text-slate-400">
-              Supervisor masih bisa edit saat Draf atau Dikembalikan. Batch yang
-              sudah dikirim ke SM atau disetujui/terkunci bersifat baca-saja.
-            </p>
-          </Panel>
         </>
       )}
 
@@ -3716,7 +3712,7 @@ function SalesManagerDashboard({ offRole }: OffDashboardProps) {
                   onChange={(event) => setSmNote(event.target.value)}
                   placeholder="Isi catatan jika dikembalikan. Catatan persetujuan boleh dikosongkan."
                   rows={4}
-                  className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                  className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none disabled:opacity-100 disabled:cursor-default placeholder:text-slate-600 focus:border-teal-500/50"
                 />
               </label>
             </div>
@@ -4777,7 +4773,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       onChange={(event) =>
                         setCompletenessStatus(event.target.value)
                       }
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-teal-500/50"
                     >
                       <option className="bg-[#1a1c23]" value="Aman">
                         Aman
@@ -4800,7 +4796,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       value={claimNote}
                       onChange={(event) => setClaimNote(event.target.value)}
                       rows={4}
-                      className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                      className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
                     />
                   </label>
                 </div>
@@ -5240,7 +5236,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                                           [key]: event.target.checked,
                                         } as Partial<typeof checklist>)
                                       }
-                                      className="h-4 w-4 rounded border-white/20 bg-black/40 accent-teal-500"
+                                      className="h-4 w-4 rounded border-white/20 bg-white/10 accent-teal-500"
                                     />
                                     {label}
                                   </label>
@@ -5257,7 +5253,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                                 }
                                 disabled={!checklist.finalOthers}
                                 placeholder="Jika Others dicentang"
-                                className="w-full min-w-[180px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50 disabled:opacity-50"
+                                className="w-full min-w-[180px] rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50 disabled:opacity-50"
                               />
                             </td>
                             <td className="px-3 py-3">
@@ -5270,7 +5266,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                                 }
                                 rows={2}
                                 placeholder="Catatan per item"
-                                className="w-full min-w-[220px] resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                                className="w-full min-w-[220px] resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
                               />
                             </td>
                             <td className="px-3 py-3 min-w-[180px] text-slate-200">
@@ -5354,7 +5350,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                         setFinalClaimNote(event.target.value)
                       }
                       rows={4}
-                      className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                      className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
                     />
                   </label>
                 </div>
@@ -5955,7 +5951,7 @@ function OperationalManagerDashboard({ offRole }: OffDashboardProps) {
                 onChange={(event) => setOmNote(event.target.value)}
                 placeholder="Catatan wajib diisi untuk pembatalan. Catatan persetujuan boleh dikosongkan."
                 rows={4}
-                className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
               />
             </label>
             {omMessage && (
@@ -6534,7 +6530,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                             disabled={!canPayFinance || !isSelectable}
                             onChange={() => toggleFinanceItem(item.id)}
                             aria-label={`Pilih item ${item.itemNo || index + 1} untuk dibayar`}
-                            className="h-4 w-4 rounded border-white/20 bg-black/40 text-teal-500 focus:ring-teal-500 disabled:opacity-40"
+                            className="h-4 w-4 rounded border-white/20 bg-white/10 text-teal-500 focus:ring-teal-500 disabled:opacity-40"
                           />
                         </td>
                         <td className="px-3 py-3 font-mono text-slate-300">
@@ -6720,7 +6716,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                     const file = event.target.files?.[0] || null;
                     setPaymentProofFile(file);
                   }}
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-teal-600 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white outline-none focus:border-teal-500/50"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2.5 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-teal-600 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white outline-none focus:border-teal-500/50"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
                   {selectedFinanceMethod === "Tunai"
@@ -6743,7 +6739,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                   value={financeNote}
                   onChange={(event) => setFinanceNote(event.target.value)}
                   rows={4}
-                  className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
+                  className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
                 />
               </label>
             </div>
@@ -7005,7 +7001,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
               <input
                 value={toko}
                 onChange={(event) => setToko(event.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
               />
             </label>
             <label className="block">
@@ -7015,7 +7011,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
               <select
                 value={principleName}
                 onChange={(event) => setPrincipleName(event.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
               >
                 <option value="" className="bg-[#1a1c23]">
                   Pilih principle...
@@ -7038,7 +7034,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
               <input
                 value={program}
                 onChange={(event) => setProgram(event.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
               />
             </label>
             <label className="block">
@@ -7049,7 +7045,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
                 value={nominal}
                 onChange={(event) => setNominal(event.target.value)}
                 placeholder="Rp 0"
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
               />
             </label>
             <label className="block">
@@ -7060,7 +7056,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
                 value={tanggal}
                 onChange={setTanggal}
                 ariaLabel="Tanggal pengajuan diskon"
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none [color-scheme:dark] focus:border-teal-500/50"
               />
             </label>
             <label className="block">
@@ -7071,7 +7067,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
                 type="file"
                 accept="application/pdf,image/png,image/jpeg"
                 onChange={(event) => setDocFile(event.target.files?.[0] || null)}
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-teal-600 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white outline-none focus:border-teal-500/50"
+                className="w-full rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-teal-600 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white outline-none focus:border-teal-500/50"
               />
             </label>
           </div>
@@ -7083,7 +7079,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
               value={alasan}
               onChange={(event) => setAlasan(event.target.value)}
               rows={2}
-              className="w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+              className="w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
             />
           </label>
           <label className="mt-3 block">
@@ -7094,7 +7090,7 @@ function DiscountDashboard({ offRole }: OffDashboardProps) {
               value={catatan}
               onChange={(event) => setCatatan(event.target.value)}
               rows={2}
-              className="w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+              className="w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
             />
           </label>
           {message && (
@@ -7536,7 +7532,7 @@ function AuditTimeline({ offRole }: OffDashboardProps) {
                   value={correctionReason}
                   onChange={(event) => setCorrectionReason(event.target.value)}
                   rows={3}
-                  className="w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-amber-500/50"
+                  className="w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-200 outline-none focus:border-amber-500/50"
                   placeholder="Jelaskan kesalahan pencatatan yang diperbaiki..."
                 />
               </label>
@@ -7548,7 +7544,7 @@ function AuditTimeline({ offRole }: OffDashboardProps) {
                   value={correctionNote}
                   onChange={(event) => setCorrectionNote(event.target.value)}
                   rows={2}
-                  className="w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-teal-500/50"
+                  className="w-full resize-none rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-slate-100 outline-none focus:border-teal-500/50 placeholder:text-slate-500"
                 />
               </label>
             </div>

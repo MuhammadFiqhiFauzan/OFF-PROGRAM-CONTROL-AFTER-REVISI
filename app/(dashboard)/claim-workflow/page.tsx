@@ -90,30 +90,30 @@ function statusTone(status: string) {
     status === claimWorkflowStatuses.closed ||
     status === claimWorkflowStatuses.paid
   ) {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+    return "border-emerald-700/30 bg-emerald-700/10 text-emerald-800";
   }
   if (
     status === claimWorkflowStatuses.needRevision ||
     status === claimWorkflowStatuses.cancelled
   ) {
-    return "border-rose-500/30 bg-rose-500/10 text-rose-300";
+    return "border-rose-700/30 bg-rose-700/10 text-rose-800";
   }
   if (
     status === claimWorkflowStatuses.submittedToPrincipal ||
     isLegacyPekaStatus(status)
   ) {
-    return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+    return "border-[#d7b56d] bg-[#fff7e6] text-[#7a4b00]";
   }
   if (status === claimWorkflowStatuses.partiallyPaid) {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+    return "border-emerald-700/30 bg-emerald-700/10 text-emerald-800";
   }
   if (status === claimWorkflowStatuses.outstanding) {
-    return "border-orange-500/30 bg-orange-500/10 text-orange-300";
+    return "border-[#d7b56d] bg-[#f7ead1] text-[#8a4703]";
   }
   if (status === claimWorkflowStatuses.readyToSubmit) {
-    return "border-indigo-500/30 bg-indigo-500/10 text-indigo-200";
+    return "border-[#b9821f] bg-[#f1dfbd] text-[#7a4b00]";
   }
-  return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+  return "border-[#e7c98f] bg-[#fffaf0] text-[#7a5a2a]";
 }
 
 export default function ClaimWorkflowPage() {
@@ -258,14 +258,14 @@ export default function ClaimWorkflowPage() {
         label: "Total Claim Workflow",
         value: rows.length,
         icon: FileText,
-        tone: "text-indigo-300",
+        tone: "text-[#b9821f]",
       },
       {
         label: "Draft",
         value: rows.filter((row) => row.status === claimWorkflowStatuses.draft)
           .length,
         icon: Clock3,
-        tone: "text-amber-300",
+        tone: "text-[#a87518]",
       },
       {
         label: "Submitted to Principal",
@@ -274,7 +274,7 @@ export default function ClaimWorkflowPage() {
             row.status === claimWorkflowStatuses.submittedToPrincipal,
         ).length,
         icon: Send,
-        tone: "text-sky-300",
+        tone: "text-[#7a4b00]",
       },
       {
         label: "Paid / Partially Paid",
@@ -284,20 +284,20 @@ export default function ClaimWorkflowPage() {
             row.status === claimWorkflowStatuses.partiallyPaid,
         ).length,
         icon: Wallet,
-        tone: "text-emerald-300",
+        tone: "text-emerald-700",
       },
       {
         label: "Outstanding",
         value: outstandingSummary?.workflowCount ?? 0,
         icon: CircleDollarSign,
-        tone: "text-orange-300",
+        tone: "text-[#8a4703]",
       },
       {
         label: "Closed",
         value: rows.filter((row) => row.status === claimWorkflowStatuses.closed)
           .length,
         icon: CheckCircle2,
-        tone: "text-emerald-300",
+        tone: "text-emerald-700",
       },
     ],
     [rows, outstandingSummary],
@@ -305,16 +305,16 @@ export default function ClaimWorkflowPage() {
 
   return (
     <div className="w-full space-y-6 pb-12 pt-2">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#1a1c23] to-[#0f1115] p-7 shadow-2xl">
+      <div className="rounded-3xl border border-[#e7c98f] bg-gradient-to-br from-[#fff7e6] to-[#f1dfbd] p-7 shadow-lg">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-indigo-300">
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#b9821f]">
               After OFF Program Control
             </p>
-            <h1 className="mt-3 text-3xl font-black tracking-tight text-white">
+            <h1 className="mt-3 text-3xl font-black tracking-tight text-[#1f1408]">
               Claim Workflow
             </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[#7a5a2a]">
               Pengajuan klaim ke principal: BASE → Summary → Paid → Monitor
               Outstanding. Setiap workflow dibuat dari OFF batch yang sudah OM
               Approved.
@@ -322,7 +322,7 @@ export default function ClaimWorkflowPage() {
           </div>
           <Link
             href="/claim-workflow/reports"
-            className="inline-flex items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-200 transition hover:bg-indigo-500/20"
+            className="inline-flex items-center gap-2 rounded-lg border border-[#b9821f] bg-[#c6922e] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#a87518]"
           >
             Reports / Export →
           </Link>
@@ -335,13 +335,13 @@ export default function ClaimWorkflowPage() {
           return (
             <div
               key={metric.label}
-              className="rounded-2xl border border-white/10 bg-[#1a1c23] p-4"
+              className="rounded-2xl border border-[#e7c98f] bg-[#fffaf0] p-4"
             >
               <Icon size={19} className={metric.tone} />
-              <p className="mt-4 text-2xl font-black text-white">
+              <p className="mt-4 text-2xl font-black text-[#1f1408]">
                 {metric.value}
               </p>
-              <p className="mt-1 text-xs font-medium text-slate-400">
+              <p className="mt-1 text-xs font-medium text-[#7a5a2a]">
                 {metric.label}
               </p>
             </div>
@@ -349,42 +349,42 @@ export default function ClaimWorkflowPage() {
         })}
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23] shadow-lg shadow-black/20">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
+      <section className="overflow-hidden rounded-2xl border border-[#e7c98f] bg-[#fffaf0] shadow-lg shadow-[#d7b56d]/10">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#e7c98f] px-5 py-4">
           <div>
-            <h2 className="text-base font-bold text-white">Monitor Outstanding</h2>
-            <p className="mt-1 text-xs text-slate-500">
+            <h2 className="text-base font-bold text-[#1f1408]">Monitor Outstanding</h2>
+            <p className="mt-1 text-xs text-[#7a5a2a]">
               Klaim yang sudah dikirim ke principal namun belum lunas. Sumber
               kebenaran sheet Excel `MONITOR OUTSTANDING`.
             </p>
           </div>
           {outstandingSummary && (
             <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-slate-300">
-                <strong className="text-white">{outstandingSummary.workflowCount}</strong> workflow
+              <span className="rounded-full border border-[#e7c98f] bg-[#fff7e6] px-3 py-1 text-[#7a5a2a]">
+                <strong className="text-[#1f1408]">{outstandingSummary.workflowCount}</strong> workflow
               </span>
-              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-amber-200">
+              <span className="rounded-full border border-[#d7b56d] bg-[#f7ead1] px-3 py-1 text-[#8a4703]">
                 Outstanding: <strong>{rupiah(outstandingSummary.totalOutstanding)}</strong>
               </span>
-              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-200">
+              <span className="rounded-full border border-emerald-700/30 bg-emerald-700/10 px-3 py-1 text-emerald-800">
                 Paid: <strong>{rupiah(outstandingSummary.totalPaid)}</strong>
               </span>
             </div>
           )}
         </div>
         {outstandingLoading ? (
-          <div className="px-5 py-10 text-center text-sm text-slate-400">Memuat outstanding...</div>
+          <div className="px-5 py-10 text-center text-sm text-[#7a5a2a]">Memuat outstanding...</div>
         ) : outstandingError ? (
-          <div className="mx-5 my-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{outstandingError}</div>
+          <div className="mx-5 my-4 rounded-xl border border-rose-700/30 bg-rose-700/10 px-4 py-3 text-sm text-rose-800">{outstandingError}</div>
         ) : outstanding.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-slate-500">
+          <div className="px-5 py-10 text-center text-sm text-[#7a5a2a]">
             Tidak ada klaim outstanding. Semua klaim yang sudah disubmit sudah lunas atau ditutup.
           </div>
         ) : (
           <div className="max-h-[420px] overflow-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-[#1a1c23]/95 text-xs uppercase tracking-wider text-slate-500 backdrop-blur">
-                <tr className="border-b border-white/10">
+              <thead className="sticky top-0 z-10 bg-[#f1dfbd] text-xs uppercase tracking-wider text-[#3a240c]">
+                <tr className="border-b border-[#d7b56d]">
                   <th scope="col" className="px-5 py-3 font-semibold">Claim No</th>
                   <th scope="col" className="px-5 py-3 font-semibold">No Claim</th>
                   <th scope="col" className="px-5 py-3 font-semibold">Principle</th>
@@ -395,25 +395,25 @@ export default function ClaimWorkflowPage() {
                   <th scope="col" className="px-5 py-3 text-right font-semibold">Days</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody className="divide-y divide-[#e7c98f]/60">
                 {outstanding.map((row) => (
-                  <tr key={row.id} className="text-slate-300 hover:bg-white/[0.04]">
+                  <tr key={row.id} className="text-[#3a240c] hover:bg-[#fff7e6]">
                     <td className="whitespace-nowrap px-5 py-3 font-semibold">
-                      <Link href={`/claim-workflow/${row.id}`} className="font-mono text-indigo-200 hover:underline">
+                      <Link href={`/claim-workflow/${row.id}`} className="font-mono text-[#8a4703] hover:text-[#a87518] hover:underline">
                         {row.claimWorkflowNo}
                       </Link>
                     </td>
-                    <td className="whitespace-nowrap px-5 py-3 font-mono text-xs text-slate-300">{row.noClaim || "-"}</td>
+                    <td className="whitespace-nowrap px-5 py-3 font-mono text-xs text-[#7a5a2a]">{row.noClaim || "-"}</td>
                     <td className="px-5 py-3">{row.principleName}</td>
-                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-white">{rupiah(row.totalClaim)}</td>
-                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-emerald-200">{rupiah(row.totalPaid)}</td>
-                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-amber-200">{rupiah(row.remainingAmount)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-[#1f1408]">{rupiah(row.totalClaim)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-emerald-800">{rupiah(row.totalPaid)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-[#8a4703]">{rupiah(row.remainingAmount)}</td>
                     <td className="whitespace-nowrap px-5 py-3">
                       <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(row.status)}`}>
                         {displayClaimStatusLabel(row.status)}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-slate-400">
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-[#7a5a2a]">
                       {row.daysOutstanding ?? "-"}
                     </td>
                   </tr>
@@ -424,12 +424,12 @@ export default function ClaimWorkflowPage() {
         )}
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1a1c23] shadow-lg shadow-black/20">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
+      <section className="overflow-hidden rounded-2xl border border-[#e7c98f] bg-[#fffaf0] shadow-lg shadow-[#d7b56d]/10">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#e7c98f] px-5 py-4">
           <div>
-            <h2 className="text-base font-bold text-white">Daftar Claim Workflow</h2>
+            <h2 className="text-base font-bold text-[#1f1408]">Daftar Claim Workflow</h2>
             {!loading && !error && (
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-[#7a5a2a]">
                 {filteredRows.length} workflow ditampilkan ({tab === "all" ? "semua" : tab.replace(/_/g, " ")})
               </p>
             )}
@@ -440,9 +440,9 @@ export default function ClaimWorkflowPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari: nomor, no claim, principal, nota, status..."
-              className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500/50 focus:outline-none"
+              className="w-64 rounded-lg border border-[#e7c98f] bg-[#fffaf0] px-3 py-1.5 text-xs text-[#1f1408] placeholder:text-[#a98a55] focus:border-[#b9821f] focus:outline-none"
             />
-            <div className="flex flex-wrap items-center gap-1 rounded-full border border-white/10 bg-black/30 p-1 text-xs">
+            <div className="flex flex-wrap items-center gap-1 rounded-full border border-[#e7c98f] bg-[#fff7e6] p-1 text-xs">
               {([
                 { key: "all", label: "Semua" },
                 { key: "ready_no_claim", label: "Siap Generate No Claim" },
@@ -459,8 +459,8 @@ export default function ClaimWorkflowPage() {
                   onClick={() => setTab(option.key)}
                   className={`rounded-full px-3 py-1.5 font-bold transition ${
                     tab === option.key
-                      ? "bg-indigo-600 text-white"
-                      : "text-slate-300 hover:bg-white/10"
+                      ? "bg-[#c6922e] text-white"
+                      : "text-[#3a240c] hover:bg-[#f1dfbd]"
                   }`}
                 >
                   {option.label}
@@ -470,20 +470,20 @@ export default function ClaimWorkflowPage() {
           </div>
         </div>
         {loading ? (
-          <div className="px-5 py-16 text-center text-sm text-slate-400">
+          <div className="px-5 py-16 text-center text-sm text-[#7a5a2a]">
             Memuat data Claim Workflow...
           </div>
         ) : error ? (
-          <div className="mx-5 my-6 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-4 text-center text-sm text-rose-200">
+          <div className="mx-5 my-6 rounded-xl border border-rose-700/30 bg-rose-700/10 px-4 py-4 text-center text-sm text-rose-800">
             {error}
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="px-5 py-16 text-center">
-            <FileText size={28} className="mx-auto text-slate-600" />
-            <p className="mt-3 text-sm font-medium text-slate-300">
+            <FileText size={28} className="mx-auto text-[#c9a96a]" />
+            <p className="mt-3 text-sm font-medium text-[#3a240c]">
               Tidak ada workflow di tab ini.
             </p>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-[#7a5a2a]">
               {tab === "all"
                 ? "Draft pertama dapat dibuat dari OFF batch yang sudah OM Approved."
                 : "Coba ganti tab atau buat klaim baru dari OFF Program Control."}
@@ -492,8 +492,8 @@ export default function ClaimWorkflowPage() {
         ) : (
           <div className="max-h-[640px] overflow-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-[#1a1c23]/95 text-xs uppercase tracking-wider text-slate-500 backdrop-blur supports-[backdrop-filter]:bg-[#1a1c23]/70">
-                <tr className="border-b border-white/10">
+              <thead className="sticky top-0 z-10 bg-[#f1dfbd] text-xs uppercase tracking-wider text-[#3a240c]">
+                <tr className="border-b border-[#d7b56d]">
                   <th scope="col" className="px-5 py-3 font-semibold">Claim Workflow No</th>
                   <th scope="col" className="px-5 py-3 font-semibold">Principle</th>
                   <th scope="col" className="px-5 py-3 font-semibold">OFF Batch / No Pengajuan</th>
@@ -506,36 +506,36 @@ export default function ClaimWorkflowPage() {
                   <th scope="col" className="px-5 py-3 font-semibold">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody className="divide-y divide-[#e7c98f]/60">
                 {filteredRows.map((row) => (
                   <tr
                     key={row.id}
-                    className="text-slate-300 transition-colors hover:bg-white/[0.04]"
+                    className="text-[#3a240c] transition-colors hover:bg-[#fff7e6]"
                   >
                     <td className="whitespace-nowrap px-5 py-4 font-semibold">
                       <Link
                         href={`/claim-workflow/${row.id}`}
-                        className="font-mono text-indigo-200 transition-colors hover:text-indigo-100 hover:underline"
+                        className="font-mono text-[#8a4703] transition-colors hover:text-[#a87518] hover:underline"
                       >
                         {row.claimWorkflowNo}
                       </Link>
                     </td>
-                    <td className="px-5 py-4 text-slate-200">{row.principleName}</td>
+                    <td className="px-5 py-4 text-[#3a240c]">{row.principleName}</td>
                     <td className="whitespace-nowrap px-5 py-4">
-                      <p className="text-slate-200">{row.offNoPengajuan || "-"}</p>
-                      <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                      <p className="text-[#3a240c]">{row.offNoPengajuan || "-"}</p>
+                      <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-[#a98a55]">
                         {row.offBatchId.slice(0, 8)}…
                       </p>
                     </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-right font-semibold tabular-nums text-white">
+                    <td className="whitespace-nowrap px-5 py-4 text-right font-semibold tabular-nums text-[#1f1408]">
                       {rupiah(row.totalClaim)}
                     </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-right tabular-nums text-slate-200">
+                    <td className="whitespace-nowrap px-5 py-4 text-right tabular-nums text-[#3a240c]">
                       {rupiah(row.totalPaid)}
                     </td>
                     <td
                       className={`whitespace-nowrap px-5 py-4 text-right tabular-nums ${
-                        row.remainingAmount > 0 ? "text-amber-200" : "text-slate-500"
+                        row.remainingAmount > 0 ? "text-[#8a4703]" : "text-[#a98a55]"
                       }`}
                     >
                       {rupiah(row.remainingAmount)}
@@ -552,26 +552,26 @@ export default function ClaimWorkflowPage() {
                       <span
                         className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
                           row.offFinanceStatus === "Paid"
-                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                            : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                            ? "border-emerald-700/30 bg-emerald-700/10 text-emerald-800"
+                            : "border-[#d7b56d] bg-[#f7ead1] text-[#8a4703]"
                         }`}
                       >
                         {row.offFinanceStatus || "-"}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-slate-400">
+                    <td className="whitespace-nowrap px-5 py-4 text-[#7a5a2a]">
                       {createdDate(row.createdAt)}
                     </td>
                     <td className="whitespace-nowrap px-5 py-4">
                       {row.canGenerateNoClaim ? (
                         <Link
                           href={`/claim-workflow/${row.id}?focus=no-claim`}
-                          className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-bold text-indigo-200 transition hover:bg-indigo-500/20"
+                          className="inline-flex items-center gap-1 rounded-lg border border-[#b9821f] bg-[#c6922e] px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-[#a87518]"
                         >
                           Buka Generate No Claim
                         </Link>
                       ) : row.noClaimGateReason ? (
-                        <span className="text-xs text-slate-500" title={row.noClaimGateReason}>
+                        <span className="text-xs text-[#a98a55]" title={row.noClaimGateReason}>
                           {row.offFinanceStatus !== "Paid" ? "Menunggu Finance" : "-"}
                         </span>
                       ) : null}
