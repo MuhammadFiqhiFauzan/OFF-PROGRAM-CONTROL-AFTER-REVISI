@@ -9796,17 +9796,7 @@ export default function OffProgramControlPage() {
               className={`transition-transform ${showAccessDetail ? "rotate-180" : ""}`}
             />
           </button>
-          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#1a1c23]/60 px-4 py-3">
-            <CalendarClock className="text-teal-300" size={20} />
-            <div>
-              <p className="text-xs uppercase tracking-wider text-slate-500 font-bold">
-                Siklus
-              </p>
-              <p className="text-sm text-slate-200 font-semibold">
-                Monitoring Mei 2026
-              </p>
-            </div>
-          </div>
+
         </div>
       </div>
 
