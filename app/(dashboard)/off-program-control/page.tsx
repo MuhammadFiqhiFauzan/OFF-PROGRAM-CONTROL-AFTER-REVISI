@@ -9621,8 +9621,7 @@ function OverviewTab({
           <PeriodFilter value={overviewPeriod} onChange={setOverviewPeriod} />
         </div>
       </CompactFilterToolbar>
-      {(!isAdminOverview ||
-        (comparison.submittedCount > 0 && !comparison.isMatched)) && (
+      {!isAdminOverview && (
         <ClaimComparisonSummary comparison={comparison} />
       )}
       {isAdminOverview ? (
