@@ -6,9 +6,7 @@
 
 services:
   accapi-backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
+    image: ghcr.io/muharirsp-sys/accapi-backend:latest
     container_name: accapi-backend
     restart: unless-stopped
     env_file:
@@ -33,17 +31,7 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
 
   accapi-frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-      args:
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-        NEXT_PUBLIC_FASTAPI_BASE_URL: ${NEXT_PUBLIC_FASTAPI_BASE_URL:-http://localhost:8000}
-        NEXT_PUBLIC_ACCURATE_CLIENT_ID: ${NEXT_PUBLIC_ACCURATE_CLIENT_ID:-}
-        NEXT_PUBLIC_ACCURATE_REDIRECT_URI: ${NEXT_PUBLIC_ACCURATE_REDIRECT_URI:-http://localhost:3000/api/auth/callback}
-        BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-this-better-auth-secret}
-        DATABASE_URL: ${DATABASE_URL:-file:/app/data/sqlite.db}
+    image: ghcr.io/muharirsp-sys/accapi-frontend:latest
     container_name: accapi-frontend
     restart: unless-stopped
     env_file:
