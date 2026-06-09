@@ -242,6 +242,9 @@ export async function GET(request: Request) {
     if (!canActorAccessOffData(actor)) {
         return NextResponse.json({ ok: false, error: "Role Anda tidak memiliki akses OFF Program Control." }, { status: 403 });
     }
+    // No Rekening (#8) hanya boleh dilihat divisi Keuangan/Pembayaran (dan admin).
+    // canActorPerformOffAction(..,"finance_payment") = true hanya untuk finance & admin.
+    const canSeeRekening = canActorPerformOffAction(actor, "finance_payment");
 
     // Revisi C/D: filter periode + pencarian dilakukan di backend bila parameter dikirim.
     // Default tanpa parameter mengembalikan data seperti sebelumnya (tidak kosong tiba-tiba).
@@ -410,6 +413,9 @@ export async function GET(request: Request) {
                         || "";
                 return {
                     ...publicBatch(row),
+                    // No Rekening (#8): hanya Keuangan/Pembayaran/admin, atau pembuat batch
+                    // sendiri (agar SPV bisa melihat/mengedit input miliknya). Divisi lain di-mask.
+                    noRekening: (canSeeRekening || row.createdBy === actor.id) ? row.noRekening : null,
                     noClaim: resolvedNoClaim || null,
                     // Claim Workflow aggregate
                     claimWorkflowId: claimAgg?.claimWorkflowId ?? null,
@@ -497,7 +503,9 @@ export async function POST(request: Request) {
 
         const now = new Date();
         const batchId = randomUUID();
-        const noPengajuan = buildNoPengajuan(gelombang, principle.code, bulan, tahun);
+        // #1-3: pengajuan versi CLAIM mendapat prefix /CLM/ di No Pengajuan.
+        const clmCreatedByRole = actor.role === "claim" ? "claim" : "supervisor";
+        const noPengajuan = buildNoPengajuan(gelombang, principle.code, bulan, tahun, clmCreatedByRole);
         const [existingBatch] = await db.select().from(offBatch).where(eq(offBatch.noPengajuan, noPengajuan));
         if (existingBatch) {
             if (existingBatch.status !== "Draft" || existingBatch.pdfPath) return alreadySubmittedResponse(existingBatch);
@@ -520,6 +528,11 @@ export async function POST(request: Request) {
             bulan,
             tahun,
             supervisorName: String(body.supervisorName || actor.name || "Supervisor"),
+            // No Rekening (#8): hanya ditampilkan ke divisi Keuangan/Pembayaran saat GET.
+            noRekening: String(body.noRekening || "").trim() || null,
+            // Penanda asal pengajuan (#1-3): "claim" bila dibuat oleh divisi Claim,
+            // "supervisor" untuk pengajuan normal SPV.
+            createdByRole: clmCreatedByRole,
             status: "Draft",
             smStatus: "Not Started",
             claimStatus: "Not Started",

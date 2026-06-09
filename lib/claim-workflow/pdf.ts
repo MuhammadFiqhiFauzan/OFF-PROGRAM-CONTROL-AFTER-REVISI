@@ -2,6 +2,7 @@ import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { terbilangRupiah } from "@/lib/off-program-control/helpers";
+import { uppercasePageText } from "@/lib/pdf-text";
 import { claimDocumentTypes } from "./constants";
 import {
     buildSubmissionDocumentFilePath,
@@ -183,7 +184,7 @@ async function buildClaimLetterPdf(
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const rows = buildRows(workflow, items);
-    let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    let page = uppercasePageText(pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
     let pageNo = 1;
 
     drawRightText(page, `Makassar, ${generatedDateText(generatedAt)}`, PAGE_WIDTH - MARGIN, 776, 10, font);
@@ -212,7 +213,7 @@ async function buildClaimLetterPdf(
 
     rows.forEach((row) => {
         if (y < 185) {
-            page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+            page = uppercasePageText(pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
             pageNo += 1;
             drawContinuationHeading(page, workflow, pageNo, font, bold);
             y = PAGE_HEIGHT - 112;
@@ -238,7 +239,7 @@ async function buildClaimLetterPdf(
     });
 
     if (y < 250) {
-        page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+        page = uppercasePageText(pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
         pageNo += 1;
         drawContinuationHeading(page, workflow, pageNo, font, bold);
         y = PAGE_HEIGHT - 128;

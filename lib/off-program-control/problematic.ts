@@ -7,8 +7,9 @@
  */
 
 import type { OffRole } from "./access";
+import { isBusinessDay } from "./holidays";
 
-// --- SLA Configuration (hari kalender) ---
+// --- SLA Configuration (hari kerja: exclude weekend + tanggal merah) ---
 export const SLA_DAYS = {
     /** Maks waktu SM approve setelah SPV submit */
     smApproval: 2,
@@ -102,9 +103,28 @@ function toTimestamp(value: Date | string | number | null | undefined): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function daysSince(timestamp: number, now: number = Date.now()): number {
+/**
+ * Hitung jumlah HARI KERJA yang sudah berlalu sejak `timestamp` hingga `now`.
+ * Sabtu/Minggu DAN tanggal merah (hari libur nasional) TIDAK dihitung.
+ * Mengganti perhitungan hari kalender sebelumnya agar SLA benar-benar
+ * berbasis hari kerja (lihat ./holidays.ts).
+ */
+function businessDaysSince(timestamp: number, now: number = Date.now()): number {
     if (!timestamp) return 0;
-    return Math.floor((now - timestamp) / 86_400_000);
+    if (now <= timestamp) return 0;
+
+    const cursor = new Date(timestamp);
+    cursor.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setHours(0, 0, 0, 0);
+
+    let count = 0;
+    // Hitung hari kerja pada rentang (hari setelah tanggal mulai) s/d tanggal `now`.
+    while (cursor < end) {
+        cursor.setDate(cursor.getDate() + 1);
+        if (isBusinessDay(cursor)) count += 1;
+    }
+    return count;
 }
 
 function parseDateString(value: string | null | undefined): number {
@@ -163,7 +183,7 @@ export function detectProblematicBatches(
             !berkasLengkap &&
             !["Paid", "Completed"].includes(batch.status)
         ) {
-            const days = daysSince(claimDeadline, now);
+            const days = businessDaysSince(claimDeadline, now);
             problems.push({
                 batchId: batch.id,
                 noPengajuan: batch.noPengajuan,
@@ -182,9 +202,9 @@ export function detectProblematicBatches(
             claimDeadline &&
             batch.omStatus === "Approved" &&
             ["Waiting Payment", "Not Started"].includes(batch.financeStatus) &&
-            daysSince(claimDeadline, now) > SLA_DAYS.paymentAfterDeadline
+            businessDaysSince(claimDeadline, now) > SLA_DAYS.paymentAfterDeadline
         ) {
-            const days = daysSince(claimDeadline, now);
+            const days = businessDaysSince(claimDeadline, now);
             problems.push({
                 batchId: batch.id,
                 noPengajuan: batch.noPengajuan,
@@ -203,9 +223,9 @@ export function detectProblematicBatches(
             submittedAt &&
             batch.status === "Submitted to SM" &&
             batch.smStatus === "Waiting Review" &&
-            daysSince(submittedAt, now) > SLA_DAYS.smApproval
+            businessDaysSince(submittedAt, now) > SLA_DAYS.smApproval
         ) {
-            const days = daysSince(submittedAt, now);
+            const days = businessDaysSince(submittedAt, now);
             problems.push({
                 batchId: batch.id,
                 noPengajuan: batch.noPengajuan,
@@ -225,9 +245,9 @@ export function detectProblematicBatches(
             batch.smStatus === "Approved by SM" &&
             !["Approved", "Returned"].includes(batch.claimStatus) &&
             !["Cancelled", "Claim Approved", "Returned by Claim"].includes(batch.status) &&
-            daysSince(smApprovedAt, now) > SLA_DAYS.claimApproval
+            businessDaysSince(smApprovedAt, now) > SLA_DAYS.claimApproval
         ) {
-            const days = daysSince(smApprovedAt, now);
+            const days = businessDaysSince(smApprovedAt, now);
             if (berkasLengkap) {
                 problems.push({
                     batchId: batch.id,
@@ -262,9 +282,9 @@ export function detectProblematicBatches(
             batch.claimStatus === "Approved" &&
             batch.omStatus !== "Approved" &&
             batch.omStatus !== "Cancelled" &&
-            daysSince(claimReviewedAt, now) > SLA_DAYS.omDecision
+            businessDaysSince(claimReviewedAt, now) > SLA_DAYS.omDecision
         ) {
-            const days = daysSince(claimReviewedAt, now);
+            const days = businessDaysSince(claimReviewedAt, now);
             problems.push({
                 batchId: batch.id,
                 noPengajuan: batch.noPengajuan,
@@ -285,9 +305,9 @@ export function detectProblematicBatches(
                 batch.status === "Returned by Claim" ||
                 batch.smStatus === "Returned" ||
                 batch.claimStatus === "Returned") &&
-            daysSince(returnedAt, now) > SLA_DAYS.revisionAfterReturn
+            businessDaysSince(returnedAt, now) > SLA_DAYS.revisionAfterReturn
         ) {
-            const days = daysSince(returnedAt, now);
+            const days = businessDaysSince(returnedAt, now);
             problems.push({
                 batchId: batch.id,
                 noPengajuan: batch.noPengajuan,
@@ -308,9 +328,9 @@ export function detectProblematicBatches(
             batch.financeStatus === "Paid" &&
             batch.finalStatus !== "Completed" &&
             batch.finalStatus !== "Fully Refunded" &&
-            daysSince(paidAt, now) > SLA_DAYS.finalVerificationAfterPayment
+            businessDaysSince(paidAt, now) > SLA_DAYS.finalVerificationAfterPayment
         ) {
-            const days = daysSince(paidAt, now);
+            const days = businessDaysSince(paidAt, now);
             if (berkasLengkap) {
                 problems.push({
                     batchId: batch.id,
@@ -345,8 +365,8 @@ export function detectProblematicBatches(
         ) {
             // Gunakan updatedAt sebagai proxy untuk waktu verifikasi final selesai
             const verifiedAt = toTimestamp(batch.updatedAt);
-            if (verifiedAt && daysSince(verifiedAt, now) > SLA_DAYS.refundCompletion) {
-                const days = daysSince(verifiedAt, now);
+            if (verifiedAt && businessDaysSince(verifiedAt, now) > SLA_DAYS.refundCompletion) {
+                const days = businessDaysSince(verifiedAt, now);
                 problems.push({
                     batchId: batch.id,
                     noPengajuan: batch.noPengajuan,
@@ -365,9 +385,9 @@ export function detectProblematicBatches(
         if (
             batch.status === "Draft" &&
             createdAt &&
-            daysSince(createdAt, now) > SLA_DAYS.draftIdle
+            businessDaysSince(createdAt, now) > SLA_DAYS.draftIdle
         ) {
-            const days = daysSince(createdAt, now);
+            const days = businessDaysSince(createdAt, now);
             problems.push({
                 batchId: batch.id,
                 noPengajuan: batch.noPengajuan,
@@ -393,8 +413,8 @@ export function detectProblematicBatches(
                 const payTime = parseDateString(payment.paymentDate);
                 if (payTime > lastPaymentTime) lastPaymentTime = payTime;
             }
-            if (lastPaymentTime && daysSince(lastPaymentTime, now) > SLA_DAYS.partialPaymentStall) {
-                const days = daysSince(lastPaymentTime, now);
+            if (lastPaymentTime && businessDaysSince(lastPaymentTime, now) > SLA_DAYS.partialPaymentStall) {
+                const days = businessDaysSince(lastPaymentTime, now);
                 problems.push({
                     batchId: batch.id,
                     noPengajuan: batch.noPengajuan,

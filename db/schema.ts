@@ -164,6 +164,10 @@ export const offBatch = sqliteTable("off_batch", {
     refundStatus: text("refund_status").notNull().default("Not Applicable"),
     refundAmount: real("refund_amount"),
     totalRefunded: real("total_refunded"),
+    // No Rekening diinput SPV; hanya ditampilkan ke divisi Keuangan/Pembayaran (#8).
+    noRekening: text("no_rekening"),
+    // Penanda asal pengajuan: "supervisor" (default) | "claim" (#1-3).
+    createdByRole: text("created_by_role"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull()
 });

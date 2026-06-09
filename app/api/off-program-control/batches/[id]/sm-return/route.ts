@@ -24,12 +24,15 @@ export async function POST(request: Request, context: Context) {
         const body = await request.json().catch(() => ({}));
         const note = String(body.note || "").trim();
         if (!note) return NextResponse.json({ ok: false, error: "Catatan Sales Manager wajib diisi untuk return." }, { status: 400 });
+        const now = new Date();
         await db.update(offBatch).set({
             status: "Returned by SM",
             smStatus: "Returned",
             smNote: note,
             locked: false,
-            updatedAt: new Date(),
+            // Timestamp tahap return untuk deteksi SLA "Bermasalah" (#16).
+            returnedAt: now,
+            updatedAt: now,
         }).where(eq(offBatch.id, id));
         await writeOffAudit({ batchId: id, actor, action: "sm_return", fromStatus: data.batch.status, toStatus: "Returned by SM", note });
         const updated = await getBatchWithItems(id);

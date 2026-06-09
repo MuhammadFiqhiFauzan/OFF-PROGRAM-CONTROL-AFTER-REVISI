@@ -41,6 +41,8 @@ export async function POST(request: Request, context: Context) {
             smNote: note,
             locked: true,
             omStatus: "Notify OM",
+            // Timestamp tahap SM approve untuk deteksi SLA "Bermasalah" (#16).
+            smApprovedAt: now,
             updatedAt: now,
         }).where(eq(offBatch.id, id));
         await db.insert(offNotification).values(notification);

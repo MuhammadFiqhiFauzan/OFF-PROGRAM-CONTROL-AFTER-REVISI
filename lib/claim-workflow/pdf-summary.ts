@@ -12,6 +12,7 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { uppercasePageText } from "@/lib/pdf-text";
 import { claimDocumentTypes } from "./constants";
 import {
     buildSubmissionDocumentFilePath,
@@ -217,7 +218,7 @@ async function buildClaimSummaryPdf(
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    let page = uppercasePageText(pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
     page.drawText("CLAIM SUMMARY", { x: MARGIN, y: PAGE_HEIGHT - 60, size: 18, font: bold, color: rgb(0.08, 0.19, 0.3) });
     drawRightText(page, `Generated: ${generatedDateText(generatedAt)}`, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 60, 9, font);
 
@@ -244,7 +245,7 @@ async function buildClaimSummaryPdf(
     items.forEach((item, idx) => {
         if (y < MARGIN + 90) {
             // Page break: header tabel diulang di halaman berikut supaya mudah dibaca.
-            page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+            page = uppercasePageText(pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
             page.drawText("CLAIM SUMMARY (lanjutan)", {
                 x: MARGIN,
                 y: PAGE_HEIGHT - 60,
@@ -261,7 +262,7 @@ async function buildClaimSummaryPdf(
     });
 
     if (y < MARGIN + 80) {
-        page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+        page = uppercasePageText(pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
         y = PAGE_HEIGHT - 90;
     }
     drawTotalRow(page, y, workflow, font, bold);

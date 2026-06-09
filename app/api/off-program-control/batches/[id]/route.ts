@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { offBatch, offBatchItem } from "@/db/schema";
-import { buildNoPengajuan, canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findDuplicateNoSuratWithinPayload, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, getBatchWithItems, isOffPeriodClosedForBatch, parseCurrency, publicBatch, publicPayment, requireOffSession, resolveProgramTypeForSave, writeOffAudit } from "@/lib/off-program-control";
+import { buildNoPengajuan, canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, getBatchWithItems, isOffPeriodClosedForBatch, parseCurrency, publicBatch, publicPayment, requireOffSession, resolveProgramTypeForSave, writeOffAudit } from "@/lib/off-program-control";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -67,9 +67,12 @@ export async function GET(_request: Request, context: Context) {
         const data = await getBatchWithItems(id);
         if (!data) return NextResponse.json({ ok: false, error: "Batch not found" }, { status: 404 });
         const summary = batchSummary(data.items);
+        // No Rekening (#8): hanya Keuangan/Pembayaran/admin, atau pembuat batch sendiri.
+        const canSeeRekening =
+            canActorPerformOffAction(actor, "finance_payment") || data.batch.createdBy === actor.id;
         return NextResponse.json({
             ok: true,
-            batch: publicBatch(data.batch),
+            batch: { ...publicBatch(data.batch), noRekening: canSeeRekening ? data.batch.noRekening : null },
             items: data.items,
             payments: data.payments.map(publicPayment),
             summary,
@@ -111,7 +114,8 @@ export async function PATCH(request: Request, context: Context) {
         const gelombang = body.gelombang ? String(body.gelombang).padStart(3, "0") : data.batch.gelombang;
         const bulan = body.bulan ? String(body.bulan).padStart(2, "0") : data.batch.bulan;
         const tahun = body.tahun ? String(body.tahun) : data.batch.tahun;
-        const noPengajuan = buildNoPengajuan(gelombang, nextPrinciple.code, bulan, tahun);
+        // #1-3: pertahankan prefix /CLM/ untuk batch yang dibuat oleh Claim.
+        const noPengajuan = buildNoPengajuan(gelombang, nextPrinciple.code, bulan, tahun, data.batch.createdByRole);
         if (noPengajuan !== data.batch.noPengajuan) {
             const [duplicate] = await db.select().from(offBatch).where(eq(offBatch.noPengajuan, noPengajuan));
             if (duplicate && duplicate.id !== id) {
@@ -127,6 +131,11 @@ export async function PATCH(request: Request, context: Context) {
             bulan,
             tahun,
             supervisorName: body.supervisorName ? String(body.supervisorName) : data.batch.supervisorName,
+            // No Rekening (#8): perbarui bila dikirim, jika tidak pertahankan nilai lama.
+            noRekening:
+                body.noRekening !== undefined
+                    ? String(body.noRekening || "").trim() || null
+                    : data.batch.noRekening,
             updatedAt: now,
         };
         await db.update(offBatch).set(patch).where(eq(offBatch.id, id));
@@ -138,15 +147,9 @@ export async function PATCH(request: Request, context: Context) {
                 .map((item) => String(item.noSurat || "").trim())
                 .filter((value) => value.length > 0);
 
-            const intraDuplicates = findDuplicateNoSuratWithinPayload(candidateNoSurats);
-            if (intraDuplicates.length > 0) {
-                return NextResponse.json({
-                    ok: false,
-                    code: "DUPLICATE_NO_SURAT_IN_PAYLOAD",
-                    message: `No Surat tidak boleh sama dalam satu batch: ${intraDuplicates.join(", ")}`,
-                    duplicates: intraDuplicates,
-                }, { status: 409 });
-            }
+            // Catatan (#4): No Surat boleh sama DALAM satu pengajuan/batch.
+            // Validasi duplikat intra-payload sengaja dilonggarkan sesuai kebutuhan bisnis.
+            // Validasi lintas-batch (per principle) tetap dipertahankan dengan bypass `force`.
 
             if (!force && candidateNoSurats.length > 0) {
                 const conflictMap = await findOffNoSuratConflicts({

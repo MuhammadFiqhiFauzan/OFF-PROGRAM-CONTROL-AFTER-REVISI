@@ -77,6 +77,8 @@ export async function POST(request: Request, context: Context) {
           claimStatus: "Returned",
           claimNote: note,
           locked: false,
+          // Timestamp tahap return untuk deteksi SLA "Bermasalah" (#16).
+          returnedAt: now,
           updatedAt: now,
         })
         .where(eq(offBatch.id, id));
@@ -116,9 +118,11 @@ export async function POST(request: Request, context: Context) {
         { ok: false, error: "Deadline Claim wajib diisi." },
         { status: 400 },
       );
-    if (completenessStatus !== "Aman")
+    // #10: Status dokumen Lengkap/Kurang/Revisi. Hanya "Lengkap" yang boleh approve
+    // (terima "Aman" sebagai nilai legacy agar data lama tetap kompatibel).
+    if (completenessStatus !== "Lengkap" && completenessStatus !== "Aman")
       return NextResponse.json(
-        { ok: false, error: "Status Kelengkapan harus Aman untuk approve." },
+        { ok: false, error: "Status Kelengkapan harus Lengkap untuk approve." },
         { status: 400 },
       );
 
@@ -132,6 +136,8 @@ export async function POST(request: Request, context: Context) {
         claimNote: note,
         omStatus: "Waiting Approval",
         locked: true,
+        // Timestamp tahap Claim approve untuk deteksi SLA "Bermasalah" (#16).
+        claimReviewedAt: now,
         updatedAt: now,
       })
       .where(eq(offBatch.id, id));

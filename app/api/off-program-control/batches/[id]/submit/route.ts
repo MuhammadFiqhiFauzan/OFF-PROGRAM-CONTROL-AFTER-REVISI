@@ -47,6 +47,8 @@ export async function POST(_request: Request, context: Context) {
             financeStatus: "Not Started",
             finalStatus: "Not Started",
             locked: false,
+            // Timestamp tahap submit untuk deteksi SLA "Bermasalah" (#16).
+            submittedAt: now,
             updatedAt: now,
         }).where(eq(offBatch.id, id));
         await writeOffAudit({ batchId: id, actor, action: "submit_to_sm", fromStatus: data.batch.status, toStatus: "Submitted to SM" });

@@ -250,11 +250,18 @@ export async function PATCH(request: Request, context: Context) {
             .reduce((sum, r) => sum + r.refundAmount, 0);
         const newBatchRefundStatus = resolveRefundStatus(overpaidAmount, totalRefunded);
 
-        await db.update(offBatch).set({
+        // #17 Gap d: saat seluruh selisih terkonfirmasi (Fully Refunded),
+        // transisi status batch ke Completed agar alur ditutup secara penuh.
+        const batchStatusUpdate: Partial<typeof offBatch.$inferInsert> = {
             refundStatus: newBatchRefundStatus,
             totalRefunded,
             updatedAt: now,
-        }).where(eq(offBatch.id, id));
+        };
+        if (newBatchRefundStatus === "Fully Refunded") {
+            batchStatusUpdate.status = "Completed";
+            batchStatusUpdate.finalStatus = "Fully Refunded";
+        }
+        await db.update(offBatch).set(batchStatusUpdate).where(eq(offBatch.id, id));
 
         // If fully refunded and batch was waiting, allow completion
         if (newBatchRefundStatus === "Fully Refunded") {
@@ -262,7 +269,7 @@ export async function PATCH(request: Request, context: Context) {
                 batchId: id,
                 actor,
                 action: "refund_settled",
-                note: `Selisih dana telah dikembalikan seluruhnya (Rp ${totalRefunded.toLocaleString("id-ID")}).`,
+                note: `Selisih dana telah dikembalikan seluruhnya (Rp ${totalRefunded.toLocaleString("id-ID")}). Status batch menjadi Completed.`,
                 metadata: { totalRefunded, overpaidAmount },
             });
         }

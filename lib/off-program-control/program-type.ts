@@ -24,6 +24,20 @@ export const OFF_PROGRAM_TYPES = [
 
 export type OffProgramType = (typeof OFF_PROGRAM_TYPES)[number];
 
+/**
+ * Tipe program khusus untuk pengajuan versi CLAIM (#1-3).
+ * Data ini berasal dari direksi ke divisi Claim, bukan dari Supervisor.
+ * No Pengajuan CLM menggunakan format: gelombang/CLM/kode/bulan/tahun.
+ */
+export const OFF_CLM_PROGRAM_TYPES = [
+  "Insentif",
+  "Diskon Reguler",
+  "Insentif Distributor",
+  "Retur",
+] as const;
+
+export type OffClmProgramType = (typeof OFF_CLM_PROGRAM_TYPES)[number];
+
 /** Tipe default ketika data lama tidak bisa dipetakan ke dropdown baru. */
 export const OFF_PROGRAM_TYPE_FALLBACK: OffProgramType = "Sample";
 
@@ -54,6 +68,23 @@ function levenshtein(a: string, b: string): number {
     for (let j = 0; j <= n; j += 1) prev[j] = curr[j];
   }
   return prev[n];
+}
+
+// Pemetaan eksplisit alias/typo umum untuk tipe CLM — dikembalikan as-is karena
+// tersimpan langsung sebagai string (OFF_CLM_PROGRAM_TYPES bukan sub-tipe OffProgramType).
+// Normalisasi untuk tipe CLM dilakukan di fungsi terpisah (isOffClmProgramType, normalizeClmProgramType).
+export function isOffClmProgramType(value: unknown): value is OffClmProgramType {
+  const key = String(value ?? "").trim().toLowerCase();
+  return (OFF_CLM_PROGRAM_TYPES as readonly string[]).some(
+    (t) => t.toLowerCase() === key,
+  );
+}
+
+export function normalizeClmProgramType(value: unknown): OffClmProgramType | null {
+  const key = String(value ?? "").trim().toLowerCase();
+  if (!key) return null;
+  const exact = OFF_CLM_PROGRAM_TYPES.find((t) => t.toLowerCase() === key);
+  return exact ?? null;
 }
 
 // Pemetaan eksplisit alias/typo umum ke dropdown final.

@@ -11,6 +11,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { db } from "@/lib/db";
 import { offBatch, offBatchItem } from "@/db/schema";
 import { fitText, indonesianMonthName, money } from "./helpers";
+import { uppercasePageText } from "../pdf-text";
 
 export interface ReconciliationRow {
     noPengajuan: string;
@@ -21,12 +22,22 @@ export interface ReconciliationRow {
     selisih: number;
 }
 
+// #11: Rekonsiliasi dikelompokkan per No Claim, dengan subtotal per grup.
+export interface ReconciliationGroup {
+    noClaim: string;
+    rows: ReconciliationRow[];
+    subtotalPengajuan: number;
+    subtotalClaim: number;
+    subtotalSelisih: number;
+}
+
 export interface ReconciliationData {
     principleName: string;
     principleCode: string;
     bulan: string;
     tahun: string;
     rows: ReconciliationRow[];
+    groups: ReconciliationGroup[];
     totalPengajuan: number;
     totalClaim: number;
     totalSelisih: number;
@@ -90,12 +101,34 @@ export async function fetchReconciliationData(principleCode: string, bulan: stri
         totalClaim += nilaiClaim;
     }
 
+    // #11: Kelompokkan per No Claim (jaga urutan kemunculan pertama) + subtotal.
+    const groupMap = new Map<string, ReconciliationRow[]>();
+    for (const row of rows) {
+        const key = row.noClaim || "-";
+        if (!groupMap.has(key)) groupMap.set(key, []);
+        groupMap.get(key)!.push(row);
+    }
+    const groups: ReconciliationGroup[] = Array.from(groupMap.entries()).map(
+        ([noClaim, groupRows]) => {
+            const subtotalPengajuan = groupRows.reduce((s, r) => s + r.nilaiPengajuan, 0);
+            const subtotalClaim = groupRows.reduce((s, r) => s + r.nilaiClaim, 0);
+            return {
+                noClaim,
+                rows: groupRows,
+                subtotalPengajuan,
+                subtotalClaim,
+                subtotalSelisih: subtotalPengajuan - subtotalClaim,
+            };
+        },
+    );
+
     return {
         principleName: batches[0].principleName,
         principleCode,
         bulan,
         tahun,
         rows,
+        groups,
         totalPengajuan,
         totalClaim,
         totalSelisih: totalPengajuan - totalClaim,
@@ -131,11 +164,25 @@ export async function buildReconciliationPdf(data: ReconciliationData): Promise<
     const headers = ["No", "No. Pengajuan", "Nama Toko", "Nilai Pengajuan", "No. Claim", "Nilai Claim", "Selisih"];
     const rowHeight = 22;
     const rowsPerPage = 15;
-    const totalPages = Math.max(1, Math.ceil(data.rows.length / rowsPerPage));
+
+    // #11: Susun baris render = baris data per grup No Claim, diakhiri baris subtotal.
+    type RenderRow =
+        | { kind: "data"; index: number; row: ReconciliationRow }
+        | { kind: "subtotal"; group: ReconciliationGroup };
+    const renderRows: RenderRow[] = [];
+    let dataCounter = 0;
+    for (const group of data.groups) {
+        for (const row of group.rows) {
+            dataCounter += 1;
+            renderRows.push({ kind: "data", index: dataCounter, row });
+        }
+        renderRows.push({ kind: "subtotal", group });
+    }
+    const totalPages = Math.max(1, Math.ceil(renderRows.length / rowsPerPage));
 
     for (let page = 0; page < totalPages; page++) {
-        const pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
-        const pageRows = data.rows.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
+        const pdfPage = uppercasePageText(pdfDoc.addPage([pageWidth, pageHeight]));
+        const pageRows = renderRows.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
 
         // Background
         pdfPage.drawRectangle({ x: 0, y: 0, width: pageWidth, height: pageHeight, color: rgb(0.98, 0.96, 0.93) });
@@ -201,15 +248,45 @@ export async function buildReconciliationPdf(data: ReconciliationData): Promise<
 
         // Table rows
         let rowY = tableTopY - rowHeight;
-        pageRows.forEach((row, idx) => {
-            const globalIdx = page * rowsPerPage + idx;
-            const isEven = globalIdx % 2 === 0;
+        pageRows.forEach((renderRow) => {
+            if (renderRow.kind === "subtotal") {
+                // Baris subtotal per No Claim.
+                const g = renderRow.group;
+                pdfPage.drawRectangle({ x: margin, y: rowY, width: contentWidth, height: rowHeight, color: rgb(0.9, 0.84, 0.7) });
+                const subtotalCells = [
+                    "",
+                    "",
+                    `Subtotal Klaim ${g.noClaim}`,
+                    money(g.subtotalPengajuan),
+                    "",
+                    money(g.subtotalClaim),
+                    money(Math.abs(g.subtotalSelisih)),
+                ];
+                x = margin;
+                subtotalCells.forEach((cell, colIdx) => {
+                    pdfPage.drawRectangle({ x, y: rowY, width: widths[colIdx], height: rowHeight, borderWidth: 0.4, borderColor: rgb(0.6, 0.48, 0.25) });
+                    if (cell) {
+                        const isSelisih = colIdx === 6 && g.subtotalSelisih !== 0;
+                        const maxChars = Math.max(8, Math.floor(widths[colIdx] / 4.5));
+                        pdfPage.drawText(fitText(cell, maxChars), {
+                            x: x + 4, y: rowY + 7, size: 7, font: bold,
+                            color: isSelisih ? rgb(0.7, 0.15, 0.1) : rgb(0.1, 0.08, 0.05),
+                        });
+                    }
+                    x += widths[colIdx];
+                });
+                rowY -= rowHeight;
+                return;
+            }
+
+            const row = renderRow.row;
+            const isEven = renderRow.index % 2 === 0;
             const bgColor = isEven ? rgb(0.97, 0.94, 0.88) : rgb(0.99, 0.97, 0.93);
 
             pdfPage.drawRectangle({ x: margin, y: rowY, width: contentWidth, height: rowHeight, color: bgColor });
 
             const cells = [
-                String(globalIdx + 1),
+                String(renderRow.index),
                 row.noPengajuan,
                 row.toko,
                 money(row.nilaiPengajuan),

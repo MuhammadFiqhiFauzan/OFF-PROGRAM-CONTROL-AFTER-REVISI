@@ -51,6 +51,7 @@ import {
 } from "@/lib/off-program-control/constants";
 import {
   OFF_PROGRAM_TYPES,
+  OFF_CLM_PROGRAM_TYPES,
   resolveProgramType,
 } from "@/lib/off-program-control/program-type";
 import {
@@ -189,6 +190,12 @@ type OffApiBatch = {
   summary?: BatchQueueSummary;
   paymentSummary?: OffPaymentSummary;
   payments?: OffApiPayment[];
+  // #1-3: penanda asal pengajuan ("supervisor" | "claim").
+  createdByRole?: string | null;
+  // #17: status dan jumlah refund dari alur selisih.
+  refundStatus?: string | null;
+  refundAmount?: number | null;
+  totalRefunded?: number | null;
   // Revisi D: haystack pencarian precomputed (termasuk item/toko nested).
   searchText?: string | null;
   // Revisi C: tanggal per jenis untuk filter periode konsisten.
@@ -468,9 +475,10 @@ const initialBulkRows: SupervisorBulkRow[] = [
     barang: "Vanish",
     nominal: "Rp 4.350.000",
     caraBayar: "Tunai",
+    // #13: Perbaikan data sample — pakai tipe baku agar tidak memunculkan badge "Data Lama".
     type: "Sample",
-    originalType: "Sampling",
-    typeIsLegacy: true,
+    originalType: "Sample",
+    typeIsLegacy: false,
     pphExempt: false,
     deadline: "2026-06-05",
     kwt: true,
@@ -629,13 +637,18 @@ const statusLabelMap: Record<string, string> = {
   Cancelled: "Dibatalkan",
   Ready: "Siap",
   Aman: "Aman",
+  Lengkap: "Lengkap",
   Kurang: "Kurang",
   "Perlu Revisi": "Perlu Revisi",
+  Revisi: "Revisi",
   "Overpaid - Pending Refund": "Kelebihan Dana - Menunggu Pengembalian",
   "Pending Refund": "Menunggu Pengembalian",
   "Partially Refunded": "Sebagian Dikembalikan",
   "Fully Refunded": "Sudah Dikembalikan Penuh",
   "Not Applicable": "Tidak Ada Selisih",
+  // #12: "Notify OM" adalah status omStatus sementara saat SM approve sebelum Claim review.
+  // Tidak dimasukkan label sebelumnya sehingga muncul teks Inggris mentah di tabel Claim.
+  "Notify OM": "Menunggu Tinjauan OM",
 };
 
 function displayStatusLabel(status: string | null | undefined) {
@@ -747,6 +760,7 @@ function statusClass(status: string) {
     status.includes("Completed") ||
     status.includes("Approved") ||
     status.includes("Aman") ||
+    status.includes("Lengkap") ||
     status.includes("Fully Refunded")
   )
     return "bg-emerald-500/10 text-emerald-300 border-emerald-500/30";
@@ -3046,9 +3060,13 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
   const canSubmitSupervisor = canPerformOffAction(offRole, "submit_batch");
   const canEditSupervisor = canPerformOffAction(offRole, "edit_returned_batch");
   const [supervisorMenu, setSupervisorMenu] = useState<
-    "pengajuan" | "monitoring" | "diskon"
+    "pengajuan" | "monitoring" | "diskon" | "selisih"
   >("pengajuan");
+  // #17 Gap b: batch yang dipilih untuk dilihat refund-nya di view Selisih.
+  const [selisihBatchId, setSelisihBatchId] = useState("");
   const [supervisorName, setSupervisorName] = useState("Supervisor Area 1");
+  // No Rekening (#8): diinput SPV, hanya ditampilkan ke divisi Keuangan/Pembayaran.
+  const [noRekening, setNoRekening] = useState("");
   const [batchPrinciple, setBatchPrinciple] = useState("RECKITT BENCKISER, PT");
   const [gelombangInput, setGelombangInput] = useState("001");
   const [bulanInput, setBulanInput] = useState(() => String(new Date().getMonth() + 1).padStart(2, "0"));
@@ -3066,6 +3084,8 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
     tunai: number;
   } | null>(null);
   const [pdfUrl, setPdfUrl] = useState("");
+  // #6: SPV hanya bisa cetak PDF Surat setelah pengajuan di-approve CLAIM.
+  const [editingClaimStatus, setEditingClaimStatus] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [rows, setRows] = useState<SupervisorBulkRow[]>(initialBulkRows);
   const [allSupervisorBatches, setAllSupervisorBatches] = useState<
@@ -3158,6 +3178,46 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
 
   useEffect(() => {
     loadReturnedBatches();
+    // #7: Auto-refresh list-only (fokus tab + interval) tanpa menyentuh form input SPV.
+    let active = true;
+    const refreshList = async () => {
+      try {
+        const response = await fetch("/api/off-program-control/batches", {
+          credentials: "include",
+        });
+        const data = await parseJsonResponse(response);
+        if (!active || !response.ok || !data.ok) return;
+        const allBatches = Array.isArray(data.batches)
+          ? (data.batches as OffApiBatch[])
+          : [];
+        setAllSupervisorBatches(allBatches);
+        setReturnedBatches(
+          allBatches.filter(
+            (batch) =>
+              batch.status === "Draft" ||
+              batch.status === "Returned by SM" ||
+              batch.smStatus === "Returned" ||
+              batch.status === "Returned by Claim" ||
+              batch.claimStatus === "Returned",
+          ),
+        );
+      } catch {
+        /* abaikan error refresh latar */
+      }
+    };
+    const onFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshList();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const interval = window.setInterval(() => void refreshList(), 45000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.clearInterval(interval);
+    };
   }, []);
 
   const updateBatchPrinciple = (nextValue: string) => {
@@ -3168,6 +3228,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
     setReturnedStatus("Memuat batch revisi...");
     setSubmitStatus("");
     setPdfUrl(batch.pdfUrl || "");
+    setEditingClaimStatus(String(batch.claimStatus || ""));
     setSubmitResult(null);
     try {
       const response = await fetch(
@@ -3185,8 +3246,13 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
         : [];
       setEditingBatchId(detailBatch.id);
       setEditingLocked(!isSupervisorEditableBatch(detailBatch));
+      // #6: status claim dari detail menentukan apakah PDF boleh dicetak SPV.
+      setEditingClaimStatus(String(detailBatch.claimStatus || ""));
+      // Pindah ke panel input/Setup agar aksi (termasuk cetak PDF ter-gate) terlihat.
+      setSupervisorMenu("pengajuan");
       setReturnNote(detailBatch.claimNote || detailBatch.smNote || "");
       setSupervisorName(detailBatch.supervisorName || "Supervisor Area 1");
+      setNoRekening((detailBatch as { noRekening?: string | null }).noRekening || "");
       setGelombangInput(detailBatch.gelombang || "001");
       setBatchPrinciple(detailBatch.principleName || "RECKITT BENCKISER, PT");
       setBulanInput(detailBatch.bulan || "05");
@@ -3322,6 +3388,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             supervisorName,
+            noRekening,
             gelombang,
             principleCode: batchCode,
             principleName: batchPrinciple,
@@ -3409,6 +3476,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             supervisorName,
+            noRekening,
             gelombang,
             principleCode: batchCode,
             principleName: batchPrinciple,
@@ -3496,9 +3564,12 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
         `Batch ${submitData.noPengajuan} berhasil dikirim. PDF berhasil dibuat.`,
       );
       setEditingBatchId("");
+      // #14: reset lock state agar form tidak abu-abu setelah submit berhasil.
+      setEditingLocked(false);
       setReturnNote("");
+      // #6: Batch baru disubmit belum di-approve CLAIM → cetak PDF belum boleh.
+      setEditingClaimStatus("");
       await loadReturnedBatches();
-      if (submitData.pdfUrl) window.open(String(submitData.pdfUrl), "_blank");
     } catch (error) {
       setSubmitStatus(
         error instanceof Error ? error.message : "Gagal mengirim batch.",
@@ -3561,25 +3632,44 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2 rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-2">
-        {[
-          ["pengajuan", "Pengajuan"],
-          ["monitoring", "Monitoring Semua Status"],
-          ["diskon", "Dashboard Diskon SPV"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() =>
-              setSupervisorMenu(key as "pengajuan" | "monitoring" | "diskon")
-            }
-            className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
-              supervisorMenu === key
-                ? "border border-teal-500/30 bg-teal-500/20 text-teal-200"
-                : "border border-transparent text-slate-400 hover:bg-white/5 hover:text-white"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+        {/* #17 Gap b: tambah menu "Data Selisih" untuk SPV submit refund. */}
+        {(
+          [
+            ["pengajuan", "Pengajuan"],
+            ["monitoring", "Monitoring Semua Status"],
+            ["diskon", "Dashboard Diskon SPV"],
+            ["selisih", "Data Selisih"],
+          ] as [string, string][]
+        ).map(([key, label]) => {
+          const selisihCount =
+            key === "selisih"
+              ? allSupervisorBatches.filter(
+                  (b) =>
+                    b.refundStatus === "Pending Refund" ||
+                    b.refundStatus === "Partially Refunded",
+                ).length
+              : 0;
+          return (
+            <button
+              key={key}
+              onClick={() =>
+                setSupervisorMenu(key as "pengajuan" | "monitoring" | "diskon" | "selisih")
+              }
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+                supervisorMenu === key
+                  ? "border border-teal-500/30 bg-teal-500/20 text-teal-200"
+                  : "border border-transparent text-slate-400 hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              {label}
+              {key === "selisih" && selisihCount > 0 && (
+                <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-orange-500 px-1.5 text-[10px] font-bold text-white">
+                  {selisihCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       <IncompleteDocumentsReminderPanel batches={allSupervisorBatches} />
@@ -3663,6 +3753,79 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
           )}
         </Panel>
       )}
+
+      {/* #17 Gap b: Data Selisih SPV — batch dengan kelebihan dana perlu dikembalikan. */}
+      {supervisorMenu === "selisih" && (() => {
+        const selisihBatches = allSupervisorBatches.filter(
+          (b) =>
+            b.refundStatus === "Pending Refund" ||
+            b.refundStatus === "Partially Refunded",
+        );
+        const selectedSelisihBatch = selisihBatches.find((b) => b.id === selisihBatchId) || null;
+        return (
+          <div className="space-y-6">
+            <Panel title="Data Selisih — Perlu Pengembalian Dana" icon={Wallet}>
+              <InfoNote>
+                Batch di bawah ini memiliki selisih antara nilai pembayaran Keuangan dan realisasi
+                klaim. Supervisor wajib mengajukan pengembalian dana agar alur batch dapat ditutup.
+              </InfoNote>
+              {selisihBatches.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-black/30 px-4 py-6 text-center text-sm text-slate-400">
+                  Tidak ada batch dengan selisih yang perlu dikembalikan.
+                </div>
+              ) : (
+                <div className="mt-4 divide-y divide-white/5 rounded-xl border border-white/10 overflow-hidden">
+                  {selisihBatches.map((batch) => {
+                    const isSelected = batch.id === selisihBatchId;
+                    const overpaid = Number(batch.refundAmount || 0);
+                    return (
+                      <div
+                        key={batch.id}
+                        className={`flex flex-col gap-3 px-4 py-4 transition-colors cursor-pointer md:flex-row md:items-center md:justify-between ${isSelected ? "bg-orange-500/10" : "hover:bg-white/[0.03]"}`}
+                        onClick={() => setSelisihBatchId(isSelected ? "" : batch.id)}
+                      >
+                        <div className="space-y-1">
+                          <p className="font-mono text-sm font-bold text-white">
+                            {batch.noPengajuan}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {batch.principleName} ({batch.principleCode}) — {batch.bulan}/{batch.tahun}
+                          </p>
+                          <span className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-bold ${statusClass(batch.refundStatus || batch.status)}`}>
+                            {displayStatusLabel(batch.refundStatus || batch.status)}
+                          </span>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <p className="text-xs text-slate-400 font-semibold">Selisih Perlu Kembali</p>
+                          <p className="font-mono text-base font-bold text-orange-300">
+                            Rp {overpaid.toLocaleString("id-ID")}
+                          </p>
+                          <button
+                            type="button"
+                            className={`mt-1 rounded-lg border px-3 py-1 text-xs font-bold transition-colors ${isSelected ? "border-orange-500 bg-orange-600 text-white" : "border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20"}`}
+                          >
+                            {isSelected ? "Tutup" : "Ajukan Refund"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Panel>
+            {selectedSelisihBatch && (
+              <RefundPanel
+                batchId={selectedSelisihBatch.id}
+                batch={selectedSelisihBatch}
+                offRole={offRole}
+                onRefundUpdated={() => {
+                  void loadReturnedBatches();
+                }}
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {supervisorMenu === "pengajuan" && (
         <>
@@ -3785,6 +3948,11 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
               <Field label="Kode Principle" value={batchCode} />
               <Field label="Bulan" value={bulanInput} />
               <Field label="Tahun" value={tahunInput} />
+              <EditableField
+                label="No Rekening (Keuangan)"
+                value={noRekening}
+                onChange={(value) => !editingLocked && setNoRekening(value)}
+              />
             </div>
             <div className="mt-4 rounded-xl border border-teal-500/20 bg-teal-500/10 px-4 py-3">
               <p className="text-xs uppercase tracking-wider text-teal-300 font-bold">
@@ -4139,15 +4307,21 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                 {submitStatus}
               </div>
             )}
-            {pdfUrl && (
-              <a
-                href={pdfUrl}
-                target="_blank"
-                className="mt-3 inline-flex rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-sm font-bold text-teal-200 hover:bg-teal-500/20"
-              >
-                Unduh PDF Surat
-              </a>
-            )}
+            {pdfUrl &&
+              (editingClaimStatus === "Approved" ? (
+                <a
+                  href={pdfUrl}
+                  target="_blank"
+                  className="mt-3 inline-flex rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-sm font-bold text-teal-200 hover:bg-teal-500/20"
+                >
+                  Unduh PDF Surat
+                </a>
+              ) : (
+                // #6: Cetak diblokir sampai pengajuan di-approve CLAIM.
+                <span className="mt-3 inline-flex rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm font-semibold text-slate-400">
+                  PDF Surat dapat dicetak setelah pengajuan di-approve CLAIM.
+                </span>
+              ))}
             {submitResult && (
               <div className="mt-4 rounded-xl border border-white/10 bg-[#0f1115]/80 p-4 text-xs text-slate-400">
                 <p className="mb-2 font-bold uppercase tracking-wider text-slate-300">
@@ -4342,8 +4516,11 @@ function SalesManagerDashboard({ offRole }: OffDashboardProps) {
   useEffect(() => {
     let isActive = true;
 
-    async function loadInitialData() {
-      setIsLoading(true);
+    // #7: Auto-refresh data. `resetSelection` hanya true saat mount/awal agar
+    // refresh latar (fokus tab / interval) TIDAK mereset pilihan user atau
+    // memunculkan spinner. Status terbaru langsung tampil tanpa refresh manual.
+    async function loadInitialData(resetSelection = false) {
+      if (resetSelection) setIsLoading(true);
       setLoadError("");
       try {
         const listRes = await fetch("/api/off-program-control/batches", {
@@ -4359,25 +4536,40 @@ function SalesManagerDashboard({ offRole }: OffDashboardProps) {
           : [];
         if (!isActive) return;
         setBatches(rows);
-        setSelectedBatch(null);
-        setSelectedItems([]);
+        if (resetSelection) {
+          setSelectedBatch(null);
+          setSelectedItems([]);
+        }
       } catch (error) {
         if (!isActive) return;
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : "Gagal mengambil data Sales Manager.",
-        );
-        setSelectedItems([]);
+        if (resetSelection) {
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Gagal mengambil data Sales Manager.",
+          );
+          setSelectedItems([]);
+        }
       } finally {
-        if (isActive) setIsLoading(false);
+        if (isActive && resetSelection) setIsLoading(false);
       }
     }
 
-    loadInitialData();
+    loadInitialData(true);
+
+    const onFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void loadInitialData(false);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const interval = window.setInterval(() => void loadInitialData(false), 45000);
 
     return () => {
       isActive = false;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -4918,6 +5110,15 @@ function SalesManagerDashboard({ offRole }: OffDashboardProps) {
               />
             </div>
           </Panel>
+          {/* #17 Gap b: SM dapat mengajukan refund untuk batch yang memiliki selisih. */}
+          {selectedBatch && (
+            <RefundPanel
+              batchId={selectedBatch.id}
+              batch={selectedBatch}
+              offRole={offRole}
+              onRefundUpdated={() => void loadSalesBatches(selectedBatch?.id || undefined)}
+            />
+          )}
         </div>
       )}
     </div>
@@ -4928,8 +5129,17 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
   const canReviewClaim = canPerformOffAction(offRole, "claim_review");
   const canFinalClaim = canPerformOffAction(offRole, "claim_final");
   const [claimView, setClaimView] = useState<
-    "hub" | "after-sm" | "after-finance"
+    "hub" | "after-sm" | "after-finance" | "data-claim"
   >("hub");
+  // #1-3: state form input pengajuan versi CLAIM.
+  const [clmRows, setClmRows] = useState<SupervisorBulkRow[]>([createEmptyBulkRow(1)]);
+  const [clmPrinciple, setClmPrinciple] = useState("RECKITT BENCKISER, PT");
+  const [clmGelombang, setClmGelombang] = useState("001");
+  const [clmBulan, setClmBulan] = useState(() => String(new Date().getMonth() + 1).padStart(2, "0"));
+  const [clmTahun, setClmTahun] = useState(() => String(new Date().getFullYear()));
+  const [clmSubmitStatus, setClmSubmitStatus] = useState("");
+  const [clmIsSubmitting, setClmIsSubmitting] = useState(false);
+  const [clmBatches, setClmBatches] = useState<OffApiBatch[]>([]);
   const [allClaimBatches, setAllClaimBatches] = useState<OffApiBatch[]>([]);
   const [claimBatches, setClaimBatches] = useState<OffApiBatch[]>([]);
   const [claimSearch, setClaimSearch] = useState("");
@@ -4957,9 +5167,11 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
   const router = useRouter();
   const [claimSubmittedDate, setClaimSubmittedDate] = useState("");
   const [claimDeadline, setClaimDeadline] = useState("");
-  const [completenessStatus, setCompletenessStatus] = useState("Aman");
+  const [completenessStatus, setCompletenessStatus] = useState("Lengkap");
   const [claimNote, setClaimNote] = useState("");
   const [finalClaimNote, setFinalClaimNote] = useState("");
+  // #17 Gap a: nilai yang bisa di-claim (nilai fix) — default = paidAmount.
+  const [finalVerifiedAmount, setFinalVerifiedAmount] = useState("");
   const [finalClaimRefs, setFinalClaimRefs] = useState<Record<string, string>>(
     {},
   );
@@ -5068,6 +5280,9 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
     setClaimSubmittedDate(detailBatch?.claimSubmittedDate || "");
     setClaimDeadline(detailBatch?.claimDeadline || "");
     setClaimNote(detailBatch?.claimNote || "");
+    // #12: reset status kelengkapan ke default "Lengkap" saat batch baru dibuka,
+    // agar nilai lama dari batch sebelumnya tidak tertinggal di form.
+    setCompletenessStatus("Lengkap");
   };
 
   const loadFinalDetail = async (batch: OffApiBatch) => {
@@ -5116,6 +5331,10 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
     );
     setSelectedFinalPayments(payments);
     setFinalClaimNote(detailBatch?.finalClaimNote || "");
+    // #17 Gap a: isi nilai fix dengan verifiedAmount yang ada, atau kosong (default = paidAmount di payload).
+    setFinalVerifiedAmount(
+      detailBatch?.verifiedAmount != null ? String(detailBatch.verifiedAmount) : "",
+    );
   };
 
   const loadClaimBatches = async () => {
@@ -5162,6 +5381,38 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
 
   useEffect(() => {
     loadClaimBatches();
+    // #7: Auto-refresh list-only (fokus tab + interval) tanpa mereset selection/form.
+    let active = true;
+    const refreshList = async () => {
+      try {
+        const response = await fetch("/api/off-program-control/batches", {
+          credentials: "include",
+        });
+        const data = await parseJsonResponse(response);
+        if (!active || !response.ok || !data.ok) return;
+        const rows = Array.isArray(data.batches)
+          ? (data.batches as OffApiBatch[])
+          : [];
+        setAllClaimBatches(rows);
+        setClaimBatches(rows.filter(isClaimQueueBatch));
+        setFinalBatches(rows.filter(isFinalQueueBatch));
+      } catch {
+        /* abaikan error refresh latar */
+      }
+    };
+    const onFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshList();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const interval = window.setInterval(() => void refreshList(), 45000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.clearInterval(interval);
+    };
     // Claim queue should load once when this tab component mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -5456,6 +5707,10 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
             action: "complete",
             note: finalClaimNote,
             claimRefs,
+            // #17 Gap a: kirim nilai fix jika Claim mengubahnya dari default paidAmount.
+            ...(finalVerifiedAmount.trim()
+              ? { verifiedAmount: Number(finalVerifiedAmount.replace(/[^\d.]/g, "")) || undefined }
+              : {}),
           }),
         },
       );
@@ -5528,7 +5783,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
         <div className="rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-6 shadow-xl">
           <h2 className="text-2xl font-black text-white">Dashboard Klaim</h2>
         </div>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <section className="rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-6 shadow-xl">
             <div className="flex items-start justify-between gap-4">
               <div className="w-12 h-12 rounded-xl border border-sky-500/30 bg-sky-500/10 flex items-center justify-center">
@@ -5567,6 +5822,29 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               Buka Validasi Setelah Keuangan
             </button>
           </section>
+          {/* #1-3: View ketiga Claim — pengajuan versi CLM (data dari direksi). */}
+          <section className="rounded-2xl border border-indigo-500/20 bg-[#1a1c23]/60 p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="w-12 h-12 rounded-xl border border-indigo-500/30 bg-indigo-500/10 flex items-center justify-center">
+                <FileText className="text-indigo-300" size={24} />
+              </div>
+              <span className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1 text-xs font-bold text-indigo-300">
+                {allClaimBatches.filter((b) => b.createdByRole === "claim").length} pengajuan CLM
+              </span>
+            </div>
+            <h3 className="mt-5 text-xl font-black text-white">
+              Dashboard Data Claim
+            </h3>
+            <p className="mt-2 text-sm text-slate-400">
+              Input pengajuan versi CLAIM (Insentif, Diskon Reguler, Insentif Distributor, Retur) — data dari direksi.
+            </p>
+            <button
+              onClick={() => setClaimView("data-claim")}
+              className="mt-6 inline-flex rounded-xl border border-indigo-500/50 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-colors hover:bg-indigo-600/50"
+            >
+              Buka Dashboard Data Claim
+            </button>
+          </section>
         </div>
         {claimMessage && (
           <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-slate-300">
@@ -5584,7 +5862,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           onClick={() => setClaimView("hub")}
           className="inline-flex rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-bold text-slate-200 hover:bg-white/10"
         >
-          Kembali ke Dashboard Klaim
+          ← Dashboard Klaim
         </button>
         <button
           onClick={() => setClaimView("after-sm")}
@@ -5598,12 +5876,21 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
         >
           Validasi Setelah Keuangan
         </button>
+        {/* #1-3: tab Data Claim */}
+        <button
+          onClick={() => setClaimView("data-claim")}
+          className={`rounded-xl border px-4 py-2.5 text-sm font-bold ${claimView === "data-claim" ? "border-indigo-500 bg-indigo-600 text-white" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
+        >
+          Dashboard Data Claim
+        </button>
       </div>
       <div className="rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-5 shadow-xl">
         <h2 className="text-xl font-black text-white">
           {claimView === "after-sm"
             ? "Validasi Setelah SM"
-            : "Validasi Setelah Keuangan"}
+            : claimView === "data-claim"
+              ? "Dashboard Data Claim (Pengajuan Versi CLM)"
+              : "Validasi Setelah Keuangan"}
         </h2>
       </div>
       <InfoNote>
@@ -5776,6 +6063,17 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                     label="Total Nominal"
                     value={`Rp ${totalNominal.toLocaleString("id-ID")}`}
                   />
+                  {/* #12: tampilkan catatan Sales Manager agar Claim tahu keterangan SM. */}
+                  {selectedBatch.smNote && (
+                    <div className="md:col-span-2">
+                      <span className="block text-xs font-semibold text-slate-500">
+                        Catatan Sales Manager
+                      </span>
+                      <p className="mt-1 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-200">
+                        {selectedBatch.smNote}
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-5 overflow-x-auto rounded-xl border border-white/10">
                   <table className="w-full min-w-[900px] text-left text-sm">
@@ -5846,14 +6144,14 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       }
                       className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-teal-500/50"
                     >
-                      <option className="bg-[#1a1c23]" value="Aman">
-                        Aman
+                      <option className="bg-[#1a1c23]" value="Lengkap">
+                        Lengkap
                       </option>
                       <option className="bg-[#1a1c23]" value="Kurang">
                         Kurang
                       </option>
-                      <option className="bg-[#1a1c23]" value="Perlu Revisi">
-                        Perlu Revisi
+                      <option className="bg-[#1a1c23]" value="Revisi">
+                        Revisi
                       </option>
                     </select>
                   </label>
@@ -6429,6 +6727,59 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                   lengkap, gunakan pengingat web untuk SM & SPV. Jika sesuai,
                   selesaikan pengajuan.
                 </InfoNote>
+                {/* #17 Gap a: input nilai yang dapat di-claim (nilai fix).
+                    Default kosong = gunakan totalPaid. Jika diisi dan berbeda,
+                    selisih dihitung otomatis dan masuk alur refund. */}
+                <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                  <p className="mb-3 text-xs font-bold text-amber-300">
+                    Nilai yang Dapat Di-Claim (Nilai Fix)
+                  </p>
+                  <p className="mb-3 text-xs text-slate-400">
+                    Isi jika nilai realisasi klaim berbeda dari total yang sudah dibayar Keuangan.
+                    Kosongkan jika nilainya sama persis dengan pembayaran.
+                    Jika ada selisih, akan masuk ke Data Selisih dan perlu dikembalikan oleh SPV/SM.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block">
+                        <span className="text-xs text-slate-500 font-semibold">
+                          Total Dibayar Keuangan
+                        </span>
+                        <p className="mt-1 font-mono text-base font-bold text-emerald-300">
+                          Rp {paidAmount.toLocaleString("id-ID")}
+                        </p>
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block">
+                        <span className="text-xs text-slate-500 font-semibold">
+                          Nilai Fix (isi jika berbeda)
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={finalVerifiedAmount}
+                          onChange={(e) => setFinalVerifiedAmount(e.target.value)}
+                          placeholder={`Kosong = sama dengan Rp ${paidAmount.toLocaleString("id-ID")}`}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-amber-500/50"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  {finalVerifiedAmount.trim() &&
+                    !isNaN(Number(finalVerifiedAmount)) &&
+                    Number(finalVerifiedAmount) !== paidAmount && (
+                      <div className="mt-3 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2">
+                        <p className="text-xs font-bold text-orange-300">
+                          Selisih:{" "}
+                          Rp {Math.abs(paidAmount - Number(finalVerifiedAmount)).toLocaleString("id-ID")}
+                          {paidAmount > Number(finalVerifiedAmount)
+                            ? " — akan masuk Data Selisih (perlu refund)"
+                            : " — nilai fix lebih besar dari pembayaran"}
+                        </p>
+                      </div>
+                    )}
+                </div>
                 <div className="mt-4">
                   <label className="block">
                     <span className="text-xs text-slate-500 font-semibold">
@@ -6494,6 +6845,238 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           )}
         </>
       )}
+
+      {/* #1-3: Dashboard Data Claim — pengajuan versi CLM dari direksi ke divisi Claim. */}
+      {claimView === "data-claim" && (() => {
+        const canCreateClm = canPerformOffAction(offRole, "create_batch");
+        const canSubmitClm = canPerformOffAction(offRole, "submit_batch");
+        const clmPrincipleOptions = getPrincipalOptions(allClaimBatches);
+        const clmCode = getPrincipleCode(clmPrinciple);
+        const clmGelombangPad = clmGelombang.padStart(3, "0");
+        const clmBulanPad = clmBulan.padStart(2, "0");
+        const previewNoClm = `${clmGelombangPad}/CLM/${clmCode}/${clmBulanPad}/${clmTahun}`;
+        // Daftar CLM batches milik divisi Claim (bukan SPV)
+        const myCLMBatches = allClaimBatches.filter((b) => b.createdByRole === "claim");
+
+        const submitClmBatch = async () => {
+          if (!canCreateClm) return;
+          if (clmRows.length === 0) { setClmSubmitStatus("Minimal satu baris wajib diisi."); return; }
+          const invalidRow = clmRows.findIndex((r) => !(OFF_CLM_PROGRAM_TYPES as readonly string[]).includes(r.type));
+          if (invalidRow >= 0) { setClmSubmitStatus(`Tipe program baris ${invalidRow + 1} belum dipilih.`); return; }
+          setClmIsSubmitting(true);
+          setClmSubmitStatus("");
+          try {
+            const res = await fetch("/api/off-program-control/batches", {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                principleName: clmPrinciple,
+                principleCode: clmCode,
+                gelombang: clmGelombangPad,
+                bulan: clmBulanPad,
+                tahun: clmTahun,
+                supervisorName: "Divisi Claim",
+                items: clmRows.map((r) => ({
+                  noSurat: r.noSurat,
+                  namaProgram: r.namaProgram,
+                  periodeAwal: r.periodeAwal,
+                  periodeAkhir: r.periodeAkhir,
+                  toko: r.toko,
+                  barang: r.barang,
+                  nominal: r.nominal,
+                  caraBayar: r.caraBayar || "Transfer",
+                  type: r.type,
+                  originalType: r.type,
+                  deadline: r.deadline,
+                  kwt: r.kwt, skp: r.skp, fp: r.fp, pc: r.pc,
+                  foto: r.foto, rekap: r.rekap, others: r.others,
+                  othersText: r.othersText,
+                })),
+              }),
+            });
+            const data = await parseJsonResponse(res);
+            if (!res.ok || !data.ok) throw new Error(String(data.error || data.message || "Gagal membuat batch CLM."));
+            setClmSubmitStatus(`Pengajuan CLM berhasil dibuat: ${String(data.noPengajuan || previewNoClm)}`);
+            setClmRows([createEmptyBulkRow(1)]);
+            await loadClaimBatches();
+          } catch (err) {
+            setClmSubmitStatus(err instanceof Error ? err.message : "Gagal membuat batch CLM.");
+          } finally {
+            setClmIsSubmitting(false);
+          }
+        };
+
+        const submitClmToSM = async (batchId: string, noPengajuan: string) => {
+          if (!canSubmitClm) return;
+          try {
+            const res = await fetch(`/api/off-program-control/batches/${batchId}/submit`, {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            });
+            const data = await parseJsonResponse(res);
+            if (!res.ok || !data.ok) throw new Error(String(data.error || "Gagal submit ke SM."));
+            setClmSubmitStatus(`${noPengajuan} berhasil disubmit ke SM.`);
+            await loadClaimBatches();
+          } catch (err) {
+            setClmSubmitStatus(err instanceof Error ? err.message : "Gagal submit ke SM.");
+          }
+        };
+
+        return (
+          <div className="space-y-6">
+            {/* Daftar CLM Batches */}
+            <Panel title="Daftar Pengajuan CLM" icon={FileText}>
+              <InfoNote>
+                Pengajuan ini dibuat oleh divisi Claim berdasarkan data dari direksi.
+                No Pengajuan menggunakan format <span className="font-mono text-teal-300">xxx/CLM/KODE/MM/YYYY</span>.
+              </InfoNote>
+              {myCLMBatches.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-black/30 px-4 py-6 text-center text-sm text-slate-500">
+                  Belum ada pengajuan CLM. Buat pengajuan baru di form di bawah.
+                </div>
+              ) : (
+                <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[700px] text-left text-sm">
+                    <thead className="border-b border-white/10 bg-black/50 text-xs uppercase tracking-wider text-slate-500">
+                      <tr>
+                        {["No Pengajuan", "Principal", "Bulan/Tahun", "Status", "Aksi"].map((h) => (
+                          <th key={h} className="px-3 py-3 font-bold">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {myCLMBatches.map((b) => (
+                        <tr key={b.id} className="hover:bg-white/[0.03]">
+                          <td className="px-3 py-3 font-mono text-sm font-bold text-white">{b.noPengajuan}</td>
+                          <td className="px-3 py-3 text-slate-300">{b.principleName}</td>
+                          <td className="px-3 py-3 text-slate-300">{b.bulan}/{b.tahun}</td>
+                          <td className="px-3 py-3">
+                            <span className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-bold ${statusClass(b.status)}`}>
+                              {displayStatusLabel(b.status)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            {canSubmitClm && b.status === "Draft" && (
+                              <button
+                                type="button"
+                                onClick={() => void submitClmToSM(b.id, b.noPengajuan)}
+                                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20"
+                              >
+                                Submit ke SM
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+
+            {/* Form buat pengajuan CLM baru */}
+            {canCreateClm && (
+              <Panel title="Buat Pengajuan CLM Baru" icon={FileText}>
+                <InfoNote>
+                  Isi data pengajuan dari direksi. Tipe program: Insentif, Diskon Reguler, Insentif Distributor, Retur.
+                  No Pengajuan akan otomatis menggunakan format CLM.
+                </InfoNote>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500">Principal</label>
+                    <select
+                      value={clmPrinciple}
+                      onChange={(e) => setClmPrinciple(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500/50"
+                    >
+                      {getPrincipalOptions(allClaimBatches).concat(
+                        getPrincipalOptions(allClaimBatches).length === 0
+                          ? [{ value: clmPrinciple, label: clmPrinciple }]
+                          : []
+                      ).map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <EditableField label="Gelombang" value={clmGelombang} onChange={setClmGelombang} />
+                  <EditableField label="Bulan (MM)" value={clmBulan} onChange={setClmBulan} />
+                  <EditableField label="Tahun (YYYY)" value={clmTahun} onChange={setClmTahun} />
+                </div>
+                <div className="mt-3 rounded-lg border border-indigo-500/20 bg-indigo-500/5 px-3 py-2">
+                  <p className="text-xs text-slate-400">No Pengajuan CLM:
+                    <span className="ml-2 font-mono font-bold text-indigo-300">{previewNoClm}</span>
+                  </p>
+                </div>
+                {/* Tabel baris CLM */}
+                <div className="mt-5 overflow-x-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[1400px] text-left text-sm">
+                    <thead className="border-b border-white/10 bg-black/50 text-xs uppercase tracking-wider text-slate-500">
+                      <tr>
+                        {["No", "No Surat", "Nama Program", "Periode Awal", "Periode Akhir", "Toko", "Barang", "Nominal", "Cara Bayar", "Tipe Program (CLM)", "Deadline", ""].map((h) => (
+                          <th key={h} className="px-2 py-3 font-bold">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {clmRows.map((row, idx) => (
+                        <tr key={row.id} className="hover:bg-white/[0.02]">
+                          <td className="px-2 py-2 text-slate-500 font-mono text-xs">{idx + 1}</td>
+                          <td className="px-2 py-2"><input value={row.noSurat} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],noSurat:e.target.value}; setClmRows(r); }} className="w-28 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
+                          <td className="px-2 py-2"><input value={row.namaProgram} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],namaProgram:e.target.value}; setClmRows(r); }} className="w-36 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
+                          <td className="px-2 py-2"><input type="date" value={row.periodeAwal} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],periodeAwal:e.target.value}; setClmRows(r); }} className="w-32 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
+                          <td className="px-2 py-2"><input type="date" value={row.periodeAkhir} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],periodeAkhir:e.target.value}; setClmRows(r); }} className="w-32 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
+                          <td className="px-2 py-2"><input value={row.toko} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],toko:e.target.value}; setClmRows(r); }} className="w-28 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
+                          <td className="px-2 py-2"><input value={row.barang} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],barang:e.target.value}; setClmRows(r); }} className="w-28 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
+                          <td className="px-2 py-2"><input value={row.nominal} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],nominal:e.target.value}; setClmRows(r); }} className="w-28 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-right font-mono text-emerald-300 outline-none focus:border-indigo-500/50" placeholder="0" /></td>
+                          <td className="px-2 py-2">
+                            <select value={row.caraBayar} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],caraBayar:e.target.value}; setClmRows(r); }} className="w-24 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none">
+                              <option value="Transfer">Transfer</option>
+                              <option value="Tunai">Tunai</option>
+                            </select>
+                          </td>
+                          <td className="px-2 py-2">
+                            <select value={row.type} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],type:e.target.value,originalType:e.target.value}; setClmRows(r); }} className={`w-40 rounded border px-2 py-1 text-xs outline-none bg-black/30 ${row.type ? "border-white/10 text-slate-200" : "border-amber-500/40 text-amber-400"}`}>
+                              <option value="">Pilih tipe...</option>
+                              {OFF_CLM_PROGRAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-2 py-2"><input type="date" value={row.deadline} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],deadline:e.target.value}; setClmRows(r); }} className="w-32 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
+                          <td className="px-2 py-2">
+                            <button type="button" onClick={() => setClmRows((prev) => prev.filter((_, i) => i !== idx))} className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-bold text-rose-300 hover:bg-rose-500/20">✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setClmRows((prev) => [...prev, createEmptyBulkRow(prev.length + 1)])}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-300 hover:bg-white/10"
+                  >
+                    + Tambah Baris
+                  </button>
+                  <div className="flex-1" />
+                  {clmSubmitStatus && (
+                    <p className="text-xs text-slate-300">{clmSubmitStatus}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void submitClmBatch()}
+                    disabled={clmIsSubmitting || clmRows.length === 0}
+                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-500 bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {clmIsSubmitting ? "Menyimpan..." : "Simpan sebagai Draft"}
+                  </button>
+                </div>
+              </Panel>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6695,6 +7278,36 @@ function OperationalManagerDashboard({ offRole }: OffDashboardProps) {
 
   useEffect(() => {
     loadOmBatches();
+    // #7: Auto-refresh list-only (fokus tab + interval) tanpa mereset selection/form.
+    let active = true;
+    const refreshList = async () => {
+      try {
+        const response = await fetch("/api/off-program-control/batches", {
+          credentials: "include",
+        });
+        const data = await parseJsonResponse(response);
+        if (!active || !response.ok || !data.ok) return;
+        const rows = Array.isArray(data.batches)
+          ? (data.batches as OffApiBatch[])
+          : [];
+        setOmBatches(rows);
+      } catch {
+        /* abaikan error refresh latar */
+      }
+    };
+    const onFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshList();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const interval = window.setInterval(() => void refreshList(), 45000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.clearInterval(interval);
+    };
     // OM queue should load once when this tab component mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -6919,6 +7532,22 @@ function OperationalManagerDashboard({ offRole }: OffDashboardProps) {
             </div>
           </Panel>
 
+          {/* #9: Catatan dari submit Claim (setelah tahap SM) selalu tampil untuk OM. */}
+          <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+              Catatan dari Claim
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-indigo-50">
+              {selectedBatch?.claimNote?.trim() || "Tidak ada catatan dari Claim."}
+            </p>
+            {selectedBatch?.smNote?.trim() ? (
+              <p className="mt-3 text-xs text-indigo-200/80">
+                <span className="font-semibold">Catatan SM:</span>{" "}
+                {selectedBatch.smNote}
+              </p>
+            ) : null}
+          </div>
+
           <SupportTogglePanel
             title="Data Pendukung Approval"
             actionLabel="Tampilkan Data Pendukung"
@@ -6972,7 +7601,7 @@ function OperationalManagerDashboard({ offRole }: OffDashboardProps) {
                   label="Deadline Claim"
                   value={formatDateDisplay(selectedBatch?.claimDeadline)}
                 />
-                <Field label="Status Kelengkapan Claim" value="Aman" />
+                <Field label="Status Kelengkapan Claim" value="Lengkap" />
               </div>
               <div className="mt-3">
                 <TextArea
@@ -7616,6 +8245,36 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
 
   useEffect(() => {
     loadFinanceBatches({ autoSelectFirst: false });
+    // #7: Auto-refresh list-only (fokus tab + interval) tanpa mereset selection/form.
+    let active = true;
+    const refreshList = async () => {
+      try {
+        const response = await fetch("/api/off-program-control/batches", {
+          credentials: "include",
+        });
+        const data = await parseJsonResponse(response);
+        if (!active || !response.ok || !data.ok) return;
+        const rows = Array.isArray(data.batches)
+          ? (data.batches as OffApiBatch[])
+          : [];
+        setFinanceBatches(rows.filter(isFinanceMonitoringBatch));
+      } catch {
+        /* abaikan error refresh latar */
+      }
+    };
+    const onFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshList();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const interval = window.setInterval(() => void refreshList(), 45000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.clearInterval(interval);
+    };
     // Finance queue should load once when this tab component mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -7872,6 +8531,10 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
               <Field
                 label="Supervisor"
                 value={selectedBatch?.supervisorName || "-"}
+              />
+              <Field
+                label="No Rekening"
+                value={(selectedBatch as { noRekening?: string | null } | null)?.noRekening || "-"}
               />
               <Field label="No Claim" value={selectedBatch?.noClaim || "-"} />
               <Field
@@ -9435,6 +10098,36 @@ function OverviewTab({
 
   useEffect(() => {
     loadOverview();
+    // #7: Auto-refresh list-only (fokus tab + interval) tanpa memicu spinner.
+    let active = true;
+    const refreshList = async () => {
+      try {
+        const response = await fetch("/api/off-program-control/batches", {
+          credentials: "include",
+        });
+        const data = await parseJsonResponse(response);
+        if (!active || !response.ok || !data.ok) return;
+        const rows = Array.isArray(data.batches)
+          ? (data.batches as OffApiBatch[])
+          : [];
+        if (rows.length > 0) setOverviewBatches(rows);
+      } catch {
+        /* abaikan error refresh latar */
+      }
+    };
+    const onFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshList();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const interval = window.setInterval(() => void refreshList(), 45000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.clearInterval(interval);
+    };
   }, []);
 
   // Buka drawer otomatis ketika parent mengirim pendingBatchId dari Global Search.

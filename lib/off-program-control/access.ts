@@ -279,8 +279,9 @@ export function canPerformOffAction(
   const allowedActions: Record<OffRole, OffAction[]> = {
     admin: [],
     supervisor: ["create_batch", "edit_returned_batch", "submit_batch", "submit_refund", "discount_view", "discount_manage"],
-    sales_manager: ["sm_approve", "sm_return"],
-    claim: ["claim_review", "claim_final", "audit_read", "audit_export", "audit_correct", "period_close"],
+    sales_manager: ["sm_approve", "sm_return", "submit_refund"],
+    // #1-3: Claim role bisa membuat, mengedit, dan submit pengajuan versi CLM (dari direksi).
+    claim: ["claim_review", "claim_final", "audit_read", "audit_export", "audit_correct", "period_close", "create_batch", "submit_batch", "edit_returned_batch"],
     operational_manager: ["om_approve", "om_cancel"],
     finance: ["finance_payment", "submit_refund"],
     sales: [],

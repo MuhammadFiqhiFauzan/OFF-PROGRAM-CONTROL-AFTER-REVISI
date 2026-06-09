@@ -16,6 +16,7 @@ import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { terbilangRupiah } from "@/lib/off-program-control/helpers";
+import { uppercasePageText } from "@/lib/pdf-text";
 import { claimDocumentTypes } from "./constants";
 import {
     buildSubmissionDocumentFilePath,
@@ -114,7 +115,7 @@ async function buildClaimReceiptPdf(
     pdfDoc.setCreator("AccAPI Claim Workflow");
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    const page = uppercasePageText(pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
 
     // Frame utama.
     page.drawRectangle({
@@ -456,7 +457,7 @@ async function buildCombinedClaimReceiptPdf(
 
     const safeEntries = entries.length > 0 ? entries : [];
     for (let i = 0; i < safeEntries.length; i += 4) {
-        const page = pdfDoc.addPage([LS_PAGE_WIDTH, LS_PAGE_HEIGHT]);
+        const page = uppercasePageText(pdfDoc.addPage([LS_PAGE_WIDTH, LS_PAGE_HEIGHT]));
         const pageEntries = safeEntries.slice(i, i + 4);
         pageEntries.forEach((entry, idx) => {
             const pos = cellPositions[idx];

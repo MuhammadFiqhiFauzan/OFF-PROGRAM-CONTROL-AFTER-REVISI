@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
+import { uppercasePageText } from "../pdf-text";
 import type { OffBatchRow, OffItemRow } from "./types";
 import {
   docsLabel,
@@ -74,7 +75,7 @@ async function buildPdf(batch: OffBatchRow, items: OffItemRow[]) {
   const total = summary.total;
 
   for (let page = 0; page < totalPages; page += 1) {
-    const pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+    const pdfPage = uppercasePageText(pdfDoc.addPage([pageWidth, pageHeight]));
     const pageItems = items.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
     pdfPage.drawRectangle({
       x: 0,
@@ -403,7 +404,7 @@ async function buildReceiptPdf(batch: OffBatchRow, items: OffItemRow[]) {
 
   items.forEach((item, index) => {
     if (index % 4 === 0) {
-      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+      const page = uppercasePageText(pdfDoc.addPage([pageWidth, pageHeight]));
       page.drawRectangle({
         x: 0,
         y: 0,

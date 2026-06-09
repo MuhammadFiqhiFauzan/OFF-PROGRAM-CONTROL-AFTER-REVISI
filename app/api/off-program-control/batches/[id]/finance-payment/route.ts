@@ -153,6 +153,8 @@ export async function POST(request: Request, context: Context) {
             financeNote: note,
             paymentDate,
             paidAmount: totalPaidAfter,
+            // Timestamp lunas penuh untuk deteksi SLA verifikasi final "Bermasalah" (#16).
+            ...(isFullyPaid ? { paidAt: now } : {}),
             updatedAt: now,
             }).where(eq(offBatch.id, id));
             return [createdPayment];

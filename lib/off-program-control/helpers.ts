@@ -9,7 +9,21 @@ export function getPrincipleByCode(code: string) {
     return offPrinciples.find((item) => item.code === code);
 }
 
-export function buildNoPengajuan(gelombang: string, principleCode: string, bulan: string, tahun: string) {
+/**
+ * Build No Pengajuan.
+ * SPV:   001/{KODE}/{BULAN}/{TAHUN}       mis. 001/GDI/05/2026
+ * Claim: 001/CLM/{KODE}/{BULAN}/{TAHUN}   mis. 001/CLM/GDI/05/2026  (#1-3)
+ */
+export function buildNoPengajuan(
+    gelombang: string,
+    principleCode: string,
+    bulan: string,
+    tahun: string,
+    createdByRole?: string | null,
+) {
+    if (createdByRole === "claim") {
+        return `${gelombang}/CLM/${principleCode}/${bulan}/${tahun}`;
+    }
     return `${gelombang}/${principleCode}/${bulan}/${tahun}`;
 }
 
