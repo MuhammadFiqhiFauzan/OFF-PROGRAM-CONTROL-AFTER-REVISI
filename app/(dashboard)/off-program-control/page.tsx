@@ -10861,31 +10861,53 @@ export default function OffProgramControlPage() {
             </SupportTogglePanel>
           </div>
 
-          {isAdminMode ? (
-            <AdminViewSelector
-              activeTab={effectiveActiveTab}
-              accessibleTabKeys={accessibleTabKeys}
-              onSelect={setActiveTab}
-            />
-          ) : (
-            <div className="mb-6 overflow-x-auto rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-2 shadow-xl">
-              <div className="flex min-w-max gap-2">
-                {accessibleTabs.map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setActiveTab(tab.key)}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
-                      effectiveActiveTab === tab.key
-                        ? "bg-teal-500/20 text-teal-200 border border-teal-500/30"
-                        : "text-slate-400 hover:text-white hover:bg-white/5 border border-transparent"
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
+          {/* Mobile: capsule scroll untuk semua user, termasuk admin */}
+          <div className="lg:hidden mb-6 overflow-x-auto rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-2 shadow-xl">
+            <div className="flex min-w-max gap-2">
+              {accessibleTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+                    effectiveActiveTab === tab.key
+                      ? "bg-teal-500/20 text-teal-200 border border-teal-500/30"
+                      : "text-slate-400 hover:text-white hover:bg-white/5 border border-transparent"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
+
+          {/* Desktop: admin pakai grid selector, non-admin pakai capsule */}
+          <div className="hidden lg:block">
+            {isAdminMode ? (
+              <AdminViewSelector
+                activeTab={effectiveActiveTab}
+                accessibleTabKeys={accessibleTabKeys}
+                onSelect={setActiveTab}
+              />
+            ) : (
+              <div className="mb-6 overflow-x-auto rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-2 shadow-xl">
+                <div className="flex min-w-max gap-2">
+                  {accessibleTabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setActiveTab(tab.key)}
+                      className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+                        effectiveActiveTab === tab.key
+                          ? "bg-teal-500/20 text-teal-200 border border-teal-500/30"
+                          : "text-slate-400 hover:text-white hover:bg-white/5 border border-transparent"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {effectiveActiveTab === "overview" && (
             <OverviewTab
