@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { offBatch, offBatchItem, offPayment, offPeriodClosure } from "@/db/schema";
+import { claimSubmission, claimWorkflow, offBatch, offBatchItem, offPayment, offPeriodClosure } from "@/db/schema";
 import {
   canActorPerformOffAction,
   getPrincipleByCode,
@@ -51,6 +51,34 @@ function moneyComparable(value: number) {
   return Math.round(Number(value || 0));
 }
 
+function isPeriodSubmittedBatch(batch: typeof offBatch.$inferSelect) {
+  return ![
+    "Draft",
+    "Returned by SM",
+    "Returned by Claim",
+    "Cancelled",
+    "Cancelled by OM",
+  ].includes(String(batch.status || ""));
+}
+
+function isPeriodClaimedBatch(batch: typeof offBatch.$inferSelect) {
+  const status = String(batch.status || "");
+  const financeStatus = String(batch.financeStatus || "");
+  const finalStatus = String(batch.finalStatus || "");
+
+  return (
+    ["Paid", "Completed", "Overpaid - Pending Refund"].includes(status) ||
+    ["Paid", "Partial Paid"].includes(financeStatus) ||
+    [
+      "Waiting Claim Final Verification",
+      "Completed",
+      "Pending Refund",
+      "Partially Refunded",
+      "Fully Refunded",
+    ].includes(finalStatus)
+  );
+}
+
 async function summarizePeriod(input: {
   principleCode: string;
   bulan: string;
@@ -66,10 +94,14 @@ async function summarizePeriod(input: {
         eq(offBatch.tahun, input.tahun),
       ),
     );
-  const batchIds = batches.map((batch) => batch.id);
+  const submittedBatches = batches.filter(isPeriodSubmittedBatch);
+  const claimableBatchIds = new Set(
+    submittedBatches.filter(isPeriodClaimedBatch).map((batch) => batch.id),
+  );
+  const batchIds = submittedBatches.map((batch) => batch.id);
   if (batchIds.length === 0) {
     return {
-      batches,
+      batches: submittedBatches,
       totalSubmitted: 0,
       totalClaimed: 0,
       submittedCount: 0,
@@ -82,11 +114,37 @@ async function summarizePeriod(input: {
     db.select().from(offBatchItem).where(inArray(offBatchItem.batchId, batchIds)),
     db.select().from(offPayment).where(inArray(offPayment.batchId, batchIds)),
   ]);
-  const claimedBatchIds = new Set(
-    batches
-      .filter((batch) => String(batch.noClaim || "").trim().length > 0)
+  const submissionClaims = await db
+    .select({
+      offBatchId: claimWorkflow.offBatchId,
+      noClaim: claimSubmission.noClaim,
+    })
+    .from(claimSubmission)
+    .innerJoin(claimWorkflow, eq(claimSubmission.claimWorkflowId, claimWorkflow.id))
+    .where(inArray(claimWorkflow.offBatchId, batchIds));
+  const claimedBatchIds = new Set<string>(
+    submittedBatches
+      .filter(
+        (batch) =>
+          claimableBatchIds.has(batch.id) &&
+          String(batch.noClaim || "").trim().length > 0,
+      )
       .map((batch) => batch.id),
   );
+  for (const item of items) {
+    if (claimableBatchIds.has(item.batchId) && String(item.noClaim || "").trim()) {
+      claimedBatchIds.add(item.batchId);
+    }
+  }
+  for (const submission of submissionClaims) {
+    if (
+      submission.offBatchId &&
+      claimableBatchIds.has(submission.offBatchId) &&
+      String(submission.noClaim || "").trim()
+    ) {
+      claimedBatchIds.add(submission.offBatchId);
+    }
+  }
 
   const totalSubmitted = items.reduce(
     (total, item) => total + Number(item.nominal || 0),
@@ -98,13 +156,13 @@ async function summarizePeriod(input: {
   );
 
   return {
-    batches,
+    batches: submittedBatches,
     totalSubmitted,
     totalClaimed,
-    submittedCount: batches.length,
+    submittedCount: submittedBatches.length,
     claimedCount: claimedBatchIds.size,
     isMatched:
-      batches.length > 0 &&
+      submittedBatches.length > 0 &&
       moneyComparable(totalSubmitted) === moneyComparable(totalClaimed),
   };
 }

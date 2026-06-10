@@ -6,20 +6,9 @@
  * Side Effects: Inject script tema dari localStorage sebelum paint dan render toaster global.
  */
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { applyStoredThemeScript } from "@/components/ThemeSwitcher";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -60,7 +49,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: applyStoredThemeScript }} />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0f1015] text-slate-200 min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200 overflow-x-hidden`}
+        className="antialiased bg-[#0f1015] text-slate-200 min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200 overflow-x-hidden"
       >
         <div className="fixed inset-0 -z-10 bg-[radial-gradient(ellipse_70%_60%_at_50%_-15%,rgba(242,210,138,0.34),rgba(255,255,255,0))]"></div>
         <div className="fixed inset-0 -z-10 bg-[radial-gradient(circle_760px_at_100%_180px,rgba(199,154,63,0.18),transparent)]"></div>

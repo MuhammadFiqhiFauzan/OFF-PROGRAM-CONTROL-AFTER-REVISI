@@ -118,6 +118,11 @@ export async function POST(request: Request, context: Context) {
         { ok: false, error: "Deadline Claim wajib diisi." },
         { status: 400 },
       );
+    if (!note)
+      return NextResponse.json(
+        { ok: false, error: "Keterangan kelengkapan wajib diisi sebelum submit validasi Claim." },
+        { status: 400 },
+      );
     // #10: Status dokumen Lengkap/Kurang/Revisi. Hanya "Lengkap" yang boleh approve
     // (terima "Aman" sebagai nilai legacy agar data lama tetap kompatibel).
     if (completenessStatus !== "Lengkap" && completenessStatus !== "Aman")

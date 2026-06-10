@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { offBatch, offNotification } from "@/db/schema";
-import { canActorPerformOffAction, getBatchWithItems, publicBatch, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
+import { canActorPerformOffAction, getBatchWithItems, isOffPeriodClosedForBatch, publicBatch, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -19,6 +19,9 @@ export async function POST(request: Request, context: Context) {
         const { id } = await context.params;
         const data = await getBatchWithItems(id);
         if (!data) return NextResponse.json({ ok: false, error: "Batch not found" }, { status: 404 });
+        if (actor.role !== "admin" && await isOffPeriodClosedForBatch(data.batch)) {
+            return NextResponse.json({ ok: false, error: "Periode ini sudah ditutup dan tidak dapat diubah." }, { status: 409 });
+        }
         if (!canReviewSm(data.batch.status, data.batch.smStatus)) {
             return NextResponse.json({ ok: false, error: "Batch tidak lagi menunggu review Sales Manager." }, { status: 409 });
         }

@@ -1,17 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { db } from "@/lib/db";
 import { offBatch, offBatchItem, offPayment } from "@/db/schema";
-import { canActorPerformOffAction, canProcessFinancePayment, computeOffFinancePaymentSummary, computeOffPaymentSummary, getBatchWithItems, normalizeOffPaymentMethod, publicBatch, publicPayment, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
+import { canActorPerformOffAction, canProcessFinancePayment, computeOffFinancePaymentSummary, computeOffPaymentSummary, generateOffPaymentProofPdf, getBatchWithItems, isOffPeriodClosedForBatch, normalizeOffPaymentMethod, publicBatch, publicPayment, requireOffSession, writeOffAudit } from "@/lib/off-program-control";
 
 type Context = { params: Promise<{ id: string }> };
-
-function sanitizeFileName(value: string) {
-    return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "payment-proof";
-}
 
 function proofMimeOk(type: string) {
     return ["application/pdf", "image/png", "image/jpeg", "image/jpg"].includes(type);
@@ -42,6 +36,9 @@ export async function POST(request: Request, context: Context) {
         const { id } = await context.params;
         const data = await getBatchWithItems(id);
         if (!data) return NextResponse.json({ ok: false, error: "Batch not found" }, { status: 404 });
+        if (actor.role !== "admin" && await isOffPeriodClosedForBatch(data.batch)) {
+            return NextResponse.json({ ok: false, error: "Periode ini sudah ditutup dan tidak dapat diubah." }, { status: 409 });
+        }
         if (data.batch.smStatus !== "Approved by SM" || data.batch.claimStatus !== "Approved") {
             return NextResponse.json({ ok: false, error: "Batch belum lengkap approval SM dan Claim." }, { status: 409 });
         }
@@ -78,15 +75,13 @@ export async function POST(request: Request, context: Context) {
         const paidAmount = selectedItems.reduce((total, item) => total + Number(item.nominal || 0), 0);
         if (paidAmount <= 0) return NextResponse.json({ ok: false, error: "Total item yang dipilih wajib lebih dari 0." }, { status: 400 });
 
-        const isTunai = paymentMethod === "Tunai";
         const hasProof = proof instanceof File && proof.size > 0;
-        if (!isTunai && !hasProof) {
-            return NextResponse.json({ ok: false, error: "Bukti pembayaran wajib diupload untuk pembayaran Transfer." }, { status: 400 });
-        }
+        let uploadedProofName: string | null = null;
         if (hasProof) {
             const proofFile = proof as File;
             if (!proofMimeOk(proofFile.type)) return NextResponse.json({ ok: false, error: "File bukti pembayaran harus PDF/PNG/JPG/JPEG." }, { status: 400 });
             if (proofFile.size > 5 * 1024 * 1024) return NextResponse.json({ ok: false, error: "Ukuran file maksimal 5MB." }, { status: 400 });
+            uploadedProofName = proofFile.name;
         }
 
         const totalNominal = computeOffPaymentSummary(data.items).total;
@@ -97,28 +92,23 @@ export async function POST(request: Request, context: Context) {
         const remainingAmount = totalNominal - totalPaidAfter;
         const isFullyPaid = remainingAmount === 0;
         const now = new Date();
-
-        // Simpan bukti hanya jika ada file. Untuk Tunai bukti opsional (revisi B).
-        let proofPath: string | null = null;
-        let proofName: string | null = null;
-        let proofMime: string | null = null;
-        let proofSize: number | null = null;
-        if (hasProof) {
-            const proofFile = proof as File;
-            const proofDir = path.join(process.cwd(), "runtime", "off-program-control", "payment-proofs", id);
-            fs.mkdirSync(proofDir, { recursive: true });
-            const storedName = `${sanitizeFileName(data.batch.noPengajuan)}-${paymentNo}-${sanitizeFileName(proofFile.name)}`;
-            const storedPath = path.join(proofDir, storedName);
-            const proofBuffer = Buffer.from(await proofFile.arrayBuffer());
-            fs.writeFileSync(storedPath, proofBuffer);
-            const proofStats = fs.statSync(storedPath);
-            if (proofStats.size <= 0) return NextResponse.json({ ok: false, error: "Gagal menyimpan bukti pembayaran." }, { status: 500 });
-            proofPath = storedPath;
-            proofName = proofFile.name;
-            proofMime = proofFile.type;
-            proofSize = proofFile.size;
-        }
         const paymentId = randomUUID();
+        const generatedProof = await generateOffPaymentProofPdf({
+            batch: data.batch,
+            paymentId,
+            paymentNo,
+            paymentDate,
+            paymentMethod,
+            paidAmount,
+            senderBank,
+            note,
+            items: selectedItems,
+            totalNominal,
+            totalPaidAfter,
+            remainingAmount,
+            isFullyPaid,
+            uploadedProofName,
+        });
         const [payment] = await db.transaction(async (tx) => {
             const [createdPayment] = await tx.insert(offPayment).values({
             id: paymentId,
@@ -128,10 +118,10 @@ export async function POST(request: Request, context: Context) {
             paymentMethod,
             paidAmount,
             senderBank,
-            paymentProofName: proofName,
-            paymentProofPath: proofPath,
-            paymentProofMime: proofMime,
-            paymentProofSize: proofSize,
+            paymentProofName: generatedProof.fileName,
+            paymentProofPath: generatedProof.filePath,
+            paymentProofMime: generatedProof.mime,
+            paymentProofSize: generatedProof.size,
             note,
             createdBy: actor.id,
             createdAt: now,
@@ -166,7 +156,7 @@ export async function POST(request: Request, context: Context) {
             fromStatus: data.batch.financeStatus,
             toStatus: isFullyPaid ? "Paid" : "Partial Paid",
             note,
-            metadata: { paymentNo, itemIds, selectedItemCount: itemIds.length, selectedTotal: paidAmount, paymentMethod, proofName: proofName || null, hasProof, totalPaidAfter, remainingAmount },
+            metadata: { paymentNo, itemIds, selectedItemCount: itemIds.length, selectedTotal: paidAmount, paymentMethod, proofName: generatedProof.fileName, uploadedProofName, hasUploadedProof: hasProof, totalPaidAfter, remainingAmount },
         });
         const updated = await getBatchWithItems(id);
         return NextResponse.json({

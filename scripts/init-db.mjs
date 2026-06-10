@@ -540,6 +540,7 @@ const migrations = [
   `ALTER TABLE off_batch ADD COLUMN no_rekening TEXT;`,
   `ALTER TABLE off_batch ADD COLUMN created_by_role TEXT;`,
   `ALTER TABLE off_batch_item ADD COLUMN no_claim TEXT;`,
+  `ALTER TABLE off_batch_item ADD COLUMN no_rekening TEXT;`,
   `ALTER TABLE off_batch_item ADD COLUMN finance_payment_status TEXT NOT NULL DEFAULT 'unpaid';`,
   `ALTER TABLE off_batch_item ADD COLUMN finance_paid_at INTEGER;`,
   `ALTER TABLE off_batch_item ADD COLUMN finance_payment_id TEXT;`,
@@ -650,6 +651,17 @@ for (const sql of legacyBackfill) {
 
 await db.execute(
   `UPDATE user SET role = 'viewer' WHERE role IS NULL OR role = '';`,
+  `UPDATE off_batch_item
+     SET no_rekening = (
+       SELECT off_batch.no_rekening
+       FROM off_batch
+       WHERE off_batch.id = off_batch_item.batch_id
+     )
+   WHERE (no_rekening IS NULL OR no_rekening = '')
+     AND LOWER(COALESCE(cara_bayar, '')) = 'transfer'
+     AND batch_id IN (
+       SELECT id FROM off_batch WHERE no_rekening IS NOT NULL AND no_rekening <> ''
+     );`,
 );
 await db.execute(
   `UPDATE user SET permissions = '{}' WHERE permissions IS NULL OR permissions = '';`,

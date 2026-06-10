@@ -1,12 +1,12 @@
 /**
  * stress-test.mjs
- * Login ke web-super.online lalu stress test /api/off-program-control/batches
+ * Login ke BASE_URL lalu stress test /api/off-program-control/batches
  * Usage: node scripts/stress-test.mjs [concurrency] [rounds]
  */
 
-const BASE = "https://web-super.online";
-const EMAIL = "admin@surya.local";
-const PASSWORD = "PasswordStrong123";
+const BASE = process.env.BASE_URL || process.env.SEED_BASE_URL || "http://localhost:3000";
+const EMAIL = process.env.STRESS_EMAIL || "admin@admin.com";
+const PASSWORD = process.env.STRESS_PASSWORD || "Admin#2026";
 const CONCURRENCY = parseInt(process.argv[2] || "10");
 const ROUNDS = parseInt(process.argv[3] || "3");
 

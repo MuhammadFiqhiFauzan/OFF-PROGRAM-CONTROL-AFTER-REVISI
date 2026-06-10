@@ -8,10 +8,10 @@
 
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { offBatch, offBatchItem, offPayment, claimWorkflow, claimSubmission } from "@/db/schema";
-import { buildNoPengajuan, buildSearchHaystack, canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, matchesSearch, parseCurrency, publicBatch, publicPayment, requireOffSession, resolveProgramTypeForSave, searchOffBatchIdsWithElasticsearch, writeOffAudit, type OffSearchDocument } from "@/lib/off-program-control";
+import { buildSearchHaystack, canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findOffNoSuratConflicts, getNextOffBatchNumber, getPrincipleByCode, getPrincipleByName, matchesSearch, parseCurrency, publicBatch, publicPayment, requireOffSession, resolveProgramTypeForSave, searchOffBatchIdsWithElasticsearch, writeOffAudit, type OffSearchDocument } from "@/lib/off-program-control";
 
 // PPh masih HOLD. NOTE: PPh disiapkan nullable di level item/toko, tetapi
 // perhitungan final ditahan karena masih terkait format kwitansi setelah pembayaran.
@@ -36,6 +36,14 @@ function normalizeCaraBayar(value: unknown) {
     throw new Error("Jenis pembayaran hanya boleh Tunai atau Transfer.");
 }
 
+function normalizeItemNoRekening(value: unknown, caraBayar: string) {
+    const noRekening = String(value || "").trim();
+    if (caraBayar === "Transfer" && !noRekening) {
+        throw new Error("No Rekening wajib diisi untuk baris Transfer.");
+    }
+    return caraBayar === "Transfer" ? noRekening : null;
+}
+
 function periodText(row: Record<string, unknown>) {
     const periodeAwal = String(row.periodeAwal || "").trim();
     const periodeAkhir = String(row.periodeAkhir || "").trim();
@@ -51,6 +59,7 @@ function normalizeItems(items: unknown[]) {
             row.type ?? row.normalizedType,
             row.originalType,
         );
+        const caraBayar = normalizeCaraBayar(row.caraBayar);
         return {
             id: randomUUID(),
             itemNo: index + 1,
@@ -61,7 +70,8 @@ function normalizeItems(items: unknown[]) {
             toko: String(row.toko || ""),
             barang: String(row.barang || ""),
             nominal: asNumber(row.nominal),
-            caraBayar: normalizeCaraBayar(row.caraBayar),
+            caraBayar,
+            noRekening: normalizeItemNoRekening(row.noRekening, caraBayar),
             type: resolvedType.normalizedType,
             normalizedType: resolvedType.normalizedType,
             originalType: resolvedType.originalType || resolvedType.normalizedType,
@@ -224,28 +234,12 @@ function buildElasticsearchDocument(
     };
 }
 
-function alreadySubmittedResponse(batch: typeof offBatch.$inferSelect) {
-    const publicRow = publicBatch(batch);
-    return NextResponse.json({
-        ok: false,
-        code: "ALREADY_SUBMITTED",
-        message: "Pengajuan ini sudah pernah disubmit.",
-        existingBatchId: batch.id,
-        noPengajuan: batch.noPengajuan,
-        pdfUrl: publicRow.pdfUrl,
-    }, { status: 409 });
-}
-
 export async function GET(request: Request) {
     const actor = await requireOffSession();
     if (!actor) return NextResponse.json({ ok: false, error: "Anda tidak memiliki akses untuk melakukan tindakan ini." }, { status: 401 });
     if (!canActorAccessOffData(actor)) {
         return NextResponse.json({ ok: false, error: "Role Anda tidak memiliki akses OFF Program Control." }, { status: 403 });
     }
-    // No Rekening (#8) hanya boleh dilihat divisi Keuangan/Pembayaran (dan admin).
-    // canActorPerformOffAction(..,"finance_payment") = true hanya untuk finance & admin.
-    const canSeeRekening = canActorPerformOffAction(actor, "finance_payment");
-
     // Revisi C/D: filter periode + pencarian dilakukan di backend bila parameter dikirim.
     // Default tanpa parameter mengembalikan data seperti sebelumnya (tidak kosong tiba-tiba).
     const url = new URL(request.url);
@@ -413,9 +407,8 @@ export async function GET(request: Request) {
                         || "";
                 return {
                     ...publicBatch(row),
-                    // No Rekening (#8): hanya Keuangan/Pembayaran/admin, atau pembuat batch
-                    // sendiri (agar SPV bisa melihat/mengedit input miliknya). Divisi lain di-mask.
-                    noRekening: (canSeeRekening || row.createdBy === actor.id) ? row.noRekening : null,
+                    // No Rekening pindah ke level item. Field batch legacy tidak dipakai UI baru.
+                    noRekening: null,
                     noClaim: resolvedNoClaim || null,
                     // Claim Workflow aggregate
                     claimWorkflowId: claimAgg?.claimWorkflowId ?? null,
@@ -463,11 +456,10 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: false, error: "Kode principal tidak sesuai dengan principal yang dipilih." }, { status: 400 });
         }
 
-        const gelombang = String(body.gelombang || "").padStart(3, "0");
         const bulan = String(body.bulan || "").padStart(2, "0");
         const tahun = String(body.tahun || "");
-        if (!gelombang || !bulan || !tahun) {
-            return NextResponse.json({ ok: false, error: "Gelombang, periode, dan tahun wajib diisi." }, { status: 400 });
+        if (!bulan || !tahun) {
+            return NextResponse.json({ ok: false, error: "Periode dan tahun wajib diisi." }, { status: 400 });
         }
 
         const items = normalizeItems(Array.isArray(body.items) ? body.items : []);
@@ -505,54 +497,69 @@ export async function POST(request: Request) {
         const batchId = randomUUID();
         // #1-3: pengajuan versi CLAIM mendapat prefix /CLM/ di No Pengajuan.
         const clmCreatedByRole = actor.role === "claim" ? "claim" : "supervisor";
-        const noPengajuan = buildNoPengajuan(gelombang, principle.code, bulan, tahun, clmCreatedByRole);
-        const [existingBatch] = await db.select().from(offBatch).where(eq(offBatch.noPengajuan, noPengajuan));
-        if (existingBatch) {
-            if (existingBatch.status !== "Draft" || existingBatch.pdfPath) return alreadySubmittedResponse(existingBatch);
+        let noPengajuan = "";
+        let gelombang = "";
+        let inserted = false;
+        let lastInsertError: unknown = null;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const nextNumber = await getNextOffBatchNumber({
+                principleCode: principle.code,
+                bulan,
+                tahun,
+                createdByRole: clmCreatedByRole,
+            });
+            noPengajuan = nextNumber.noPengajuan;
+            gelombang = nextNumber.gelombang;
+            try {
+                await db.insert(offBatch).values({
+                    id: batchId,
+                    noPengajuan,
+                    gelombang,
+                    principleCode: principle.code,
+                    principleName: principle.name,
+                    bulan,
+                    tahun,
+                    supervisorName: String(body.supervisorName || actor.name || "Supervisor"),
+                    noRekening: null,
+                    // Penanda asal pengajuan (#1-3): "claim" bila dibuat oleh divisi Claim,
+                    // "supervisor" untuk pengajuan normal SPV.
+                    createdByRole: clmCreatedByRole,
+                    status: "Draft",
+                    smStatus: "Not Started",
+                    claimStatus: "Not Started",
+                    omStatus: "Not Started",
+                    financeStatus: "Not Started",
+                    finalStatus: "Not Started",
+                    locked: false,
+                    pdfStatus: "pending",
+                    createdBy: actor.id,
+                    createdAt: now,
+                    updatedAt: now,
+                });
+                inserted = true;
+                break;
+            } catch (insertError) {
+                lastInsertError = insertError;
+                const message = insertError instanceof Error ? insertError.message.toLowerCase() : "";
+                if (!message.includes("unique") && !message.includes("no_pengajuan")) throw insertError;
+            }
+        }
+        if (!inserted) {
+            console.error("[OFF CREATE BATCH NUMBER RETRY ERROR]", lastInsertError);
             return NextResponse.json({
                 ok: false,
-                code: "DUPLICATE_DRAFT",
-                message: "No Pengajuan ini sudah ada sebagai draft.",
-                existingBatchId: existingBatch.id,
-                noPengajuan: existingBatch.noPengajuan,
-                pdfUrl: publicBatch(existingBatch).pdfUrl,
+                code: "ALREADY_SUBMITTED",
+                message: "No Pengajuan otomatis sedang dipakai. Silakan coba simpan ulang.",
             }, { status: 409 });
         }
-
-        await db.insert(offBatch).values({
-            id: batchId,
-            noPengajuan,
-            gelombang,
-            principleCode: principle.code,
-            principleName: principle.name,
-            bulan,
-            tahun,
-            supervisorName: String(body.supervisorName || actor.name || "Supervisor"),
-            // No Rekening (#8): hanya ditampilkan ke divisi Keuangan/Pembayaran saat GET.
-            noRekening: String(body.noRekening || "").trim() || null,
-            // Penanda asal pengajuan (#1-3): "claim" bila dibuat oleh divisi Claim,
-            // "supervisor" untuk pengajuan normal SPV.
-            createdByRole: clmCreatedByRole,
-            status: "Draft",
-            smStatus: "Not Started",
-            claimStatus: "Not Started",
-            omStatus: "Not Started",
-            financeStatus: "Not Started",
-            finalStatus: "Not Started",
-            locked: false,
-            pdfStatus: "pending",
-            createdBy: actor.id,
-            createdAt: now,
-            updatedAt: now,
-        });
 
         await db.insert(offBatchItem).values(items.map((item) => ({ ...item, batchId })));
         await writeOffAudit({ batchId, actor, action: "create_batch", toStatus: "Draft", metadata: { itemCount: items.length } });
 
-        return NextResponse.json({ ok: true, batchId, noPengajuan });
+        return NextResponse.json({ ok: true, batchId, noPengajuan, gelombang });
     } catch (error) {
         const message = error instanceof Error ? error.message : "";
-        if (message === "Jenis pembayaran hanya boleh Tunai atau Transfer.") {
+        if (message === "Jenis pembayaran hanya boleh Tunai atau Transfer." || message === "No Rekening wajib diisi untuk baris Transfer.") {
             return NextResponse.json({ ok: false, error: message }, { status: 400 });
         }
         if (message.toLowerCase().includes("unique") || message.toLowerCase().includes("no_pengajuan")) {

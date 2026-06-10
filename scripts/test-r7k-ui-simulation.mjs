@@ -29,7 +29,8 @@ loadEnvFile();
 const databaseUrl = process.env.DATABASE_URL || "file:/app/data/sqlite.db";
 const db = createClient({ url: databaseUrl });
 
-const BASE_URL = "http://localhost:3000";
+const BASE_URL = process.env.SEED_BASE_URL || process.env.BASE_URL || "http://localhost:3000";
+const API_COOKIE = process.env.API_COOKIE || "";
 const NOW = new Date();
 const P = "SIM-R7K";
 
@@ -41,7 +42,10 @@ function shortId(prefix = "") {
 async function api(method, path, body = null) {
   const opts = {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(API_COOKIE ? { Cookie: API_COOKIE } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   };
   const res = await fetch(`${BASE_URL}${path}`, opts);
@@ -55,7 +59,10 @@ async function api(method, path, body = null) {
 }
 
 async function fetchPDF(path) {
-  const res = await fetch(`${BASE_URL}${path}`, { method: "GET" });
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "GET",
+    headers: API_COOKIE ? { Cookie: API_COOKIE } : {},
+  });
   return {
     status: res.status,
     contentType: res.headers.get("content-type") || "",

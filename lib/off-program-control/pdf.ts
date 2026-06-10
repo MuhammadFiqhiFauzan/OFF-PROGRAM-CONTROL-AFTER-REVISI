@@ -369,6 +369,252 @@ async function uniqueReceiptPdfPath(noPengajuan: string) {
   return filePath;
 }
 
+async function uniquePaymentProofPdfPath(
+  noPengajuan: string,
+  batchId: string,
+  paymentNo: number,
+) {
+  const dir = path.join(
+    process.cwd(),
+    "runtime",
+    "off-program-control",
+    "payment-proofs",
+    batchId,
+  );
+  fs.mkdirSync(dir, { recursive: true });
+  const baseName = sanitizePdfFileName(noPengajuan).replace(
+    /\.pdf$/i,
+    `-payment-${paymentNo}.pdf`,
+  );
+  let filePath = path.join(dir, baseName);
+  try {
+    await stat(filePath);
+    const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+    filePath = path.join(dir, baseName.replace(/\.pdf$/i, `-${stamp}.pdf`));
+  } catch {
+    // file does not exist
+  }
+  return filePath;
+}
+
+type PaymentProofInput = {
+  batch: OffBatchRow;
+  paymentId: string;
+  paymentNo: number;
+  paymentDate: string;
+  paymentMethod: string;
+  paidAmount: number;
+  senderBank?: string | null;
+  note?: string | null;
+  items: OffItemRow[];
+  totalNominal: number;
+  totalPaidAfter: number;
+  remainingAmount: number;
+  isFullyPaid: boolean;
+  uploadedProofName?: string | null;
+};
+
+async function buildPaymentProofPdf(input: PaymentProofInput) {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.setTitle(`Bukti Pembayaran ${input.batch.noPengajuan} #${input.paymentNo}`);
+  pdfDoc.setSubject("Bukti Pembayaran OFF Program Control");
+  pdfDoc.setCreator("AccAPI OFF Program Control");
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const margin = 36;
+  const contentWidth = pageWidth - margin * 2;
+  const rowHeight = 19;
+  const rowsPerPage = 18;
+  const totalPages = Math.max(1, Math.ceil(input.items.length / rowsPerPage));
+  const printedAt = new Date().toLocaleString("id-ID", {
+    timeZone: "Asia/Makassar",
+  });
+
+  const drawLabelValue = (
+    page: ReturnType<typeof pdfDoc.addPage>,
+    x: number,
+    y: number,
+    label: string,
+    value: string,
+    maxChars = 34,
+  ) => {
+    page.drawText(label, { x, y, size: 8, font: bold, color: rgb(0.2, 0.24, 0.32) });
+    page.drawText(fitText(value || "-", maxChars), {
+      x: x + 112,
+      y,
+      size: 8.5,
+      font,
+      color: rgb(0.06, 0.08, 0.12),
+    });
+  };
+
+  for (let pageIndex = 0; pageIndex < totalPages; pageIndex += 1) {
+    const page = pdfDoc.addPage([pageWidth, pageHeight]);
+    const pageItems = input.items.slice(
+      pageIndex * rowsPerPage,
+      (pageIndex + 1) * rowsPerPage,
+    );
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: pageWidth,
+      height: pageHeight,
+      color: rgb(0.97, 0.98, 0.99),
+    });
+    page.drawRectangle({
+      x: margin,
+      y: margin,
+      width: contentWidth,
+      height: pageHeight - margin * 2,
+      borderWidth: 1,
+      borderColor: rgb(0.12, 0.16, 0.22),
+      color: rgb(1, 1, 1),
+    });
+    page.drawRectangle({
+      x: margin,
+      y: pageHeight - margin - 66,
+      width: contentWidth,
+      height: 66,
+      color: rgb(0.08, 0.18, 0.3),
+    });
+    page.drawText("BUKTI PEMBAYARAN OFF", {
+      x: margin + 18,
+      y: pageHeight - margin - 28,
+      size: 17,
+      font: bold,
+      color: rgb(1, 1, 1),
+    });
+    page.drawText(`No Pengajuan: ${fitText(input.batch.noPengajuan, 42)}`, {
+      x: margin + 18,
+      y: pageHeight - margin - 47,
+      size: 9,
+      font,
+      color: rgb(0.86, 0.93, 1),
+    });
+    page.drawText(`Halaman ${pageIndex + 1} / ${totalPages}`, {
+      x: pageWidth - margin - 92,
+      y: pageHeight - margin - 28,
+      size: 8,
+      font,
+      color: rgb(0.86, 0.93, 1),
+    });
+
+    let y = pageHeight - margin - 94;
+    drawLabelValue(page, margin + 18, y, "Principal", input.batch.principleName, 38);
+    drawLabelValue(page, margin + 300, y, "No Claim", input.batch.noClaim || "-", 18);
+    y -= 16;
+    drawLabelValue(page, margin + 18, y, "No Pembayaran", String(input.paymentNo), 20);
+    drawLabelValue(page, margin + 300, y, "Tanggal Bayar", formatDateForPrint(input.paymentDate), 18);
+    y -= 16;
+    drawLabelValue(page, margin + 18, y, "Metode", input.paymentMethod, 22);
+    drawLabelValue(page, margin + 300, y, "Bank Pengirim", input.senderBank || "-", 18);
+    y -= 16;
+    drawLabelValue(page, margin + 18, y, "Total Dibayar", money(input.paidAmount), 22);
+    drawLabelValue(page, margin + 300, y, "Status", input.isFullyPaid ? "Lunas" : "Belum Lunas", 18);
+    y -= 18;
+    drawLabelValue(page, margin + 18, y, "Terbilang", terbilangRupiah(input.paidAmount), 66);
+    y -= 16;
+    drawLabelValue(page, margin + 18, y, "Sisa Pembayaran", money(input.remainingAmount), 22);
+    drawLabelValue(page, margin + 300, y, "Total Batch", money(input.totalNominal), 18);
+    y -= 16;
+    drawLabelValue(page, margin + 18, y, "Dibuat", printedAt, 38);
+    if (input.uploadedProofName) {
+      drawLabelValue(page, margin + 300, y, "Lampiran", input.uploadedProofName, 18);
+    }
+
+    const tableY = y - 42;
+    const widths = [28, 80, 152, 90, 74, 86];
+    const headers = ["No", "No Surat", "Nama Program", "Toko", "Metode", "Nominal"];
+    let x = margin + 18;
+    page.drawRectangle({
+      x,
+      y: tableY,
+      width: widths.reduce((sum, width) => sum + width, 0),
+      height: 22,
+      color: rgb(0.12, 0.16, 0.22),
+    });
+    headers.forEach((header, idx) => {
+      page.drawText(header, {
+        x: x + 4,
+        y: tableY + 8,
+        size: 7,
+        font: bold,
+        color: rgb(1, 1, 1),
+      });
+      x += widths[idx];
+    });
+
+    let rowY = tableY - rowHeight;
+    pageItems.forEach((item) => {
+      x = margin + 18;
+      const row = [
+        String(item.itemNo || "-"),
+        item.noSurat || "-",
+        item.namaProgram || "-",
+        item.toko || "-",
+        item.caraBayar || "-",
+        money(Number(item.financePaidAmount || item.nominal || 0)),
+      ];
+      row.forEach((cell, idx) => {
+        page.drawRectangle({
+          x,
+          y: rowY,
+          width: widths[idx],
+          height: rowHeight,
+          borderWidth: 0.5,
+          borderColor: rgb(0.78, 0.82, 0.88),
+        });
+        page.drawText(fitText(cell, idx === 2 ? 28 : idx === 3 ? 16 : 14), {
+          x: x + 4,
+          y: rowY + 7,
+          size: 6.7,
+          font,
+          color: rgb(0.08, 0.1, 0.14),
+        });
+        x += widths[idx];
+      });
+      rowY -= rowHeight;
+    });
+
+    if (pageIndex === totalPages - 1) {
+      const noteY = Math.max(margin + 104, rowY - 36);
+      page.drawText("Catatan Keuangan", {
+        x: margin + 18,
+        y: noteY + 24,
+        size: 8,
+        font: bold,
+        color: rgb(0.2, 0.24, 0.32),
+      });
+      receiptLines(input.note || "-", 82).forEach((line, lineIndex) => {
+        page.drawText(fitText(line, 88), {
+          x: margin + 18,
+          y: noteY + 10 - lineIndex * 10,
+          size: 7.5,
+          font,
+          color: rgb(0.08, 0.1, 0.14),
+        });
+      });
+      page.drawText("Disetujui / Dibayar oleh Keuangan", {
+        x: pageWidth - margin - 190,
+        y: margin + 68,
+        size: 8,
+        font: bold,
+        color: rgb(0.12, 0.16, 0.22),
+      });
+      page.drawLine({
+        start: { x: pageWidth - margin - 190, y: margin + 42 },
+        end: { x: pageWidth - margin - 42, y: margin + 42 },
+        thickness: 0.7,
+        color: rgb(0.12, 0.16, 0.22),
+      });
+    }
+  }
+
+  return Buffer.from(await pdfDoc.save());
+}
+
 function receiptLines(text: string, maxChars: number) {
   const words = text.split(/\s+/);
   const lines: string[] = [];
@@ -707,4 +953,25 @@ export async function generateOffBatchReceiptPdf(
   const filePath = await uniqueReceiptPdfPath(data.batch.noPengajuan);
   await writeFile(filePath, pdf);
   return { pdf, filePath };
+}
+
+export async function generateOffPaymentProofPdf(input: PaymentProofInput) {
+  const filePath = await uniquePaymentProofPdfPath(
+    input.batch.noPengajuan,
+    input.batch.id,
+    input.paymentNo,
+  );
+  const pdf = await buildPaymentProofPdf(input);
+  if (pdf.byteLength === 0)
+    throw new Error("Cannot generate payment proof PDF: output is empty");
+  await writeFile(filePath, pdf);
+  const stats = await stat(filePath);
+  if (stats.size <= 0)
+    throw new Error("Cannot generate payment proof PDF: saved file is empty");
+  return {
+    filePath,
+    fileName: path.basename(filePath),
+    mime: "application/pdf",
+    size: stats.size,
+  };
 }

@@ -116,6 +116,8 @@ body {
  * ============================================ */
 
 :root {
+  --font-geist-sans: "Inter", "Segoe UI", Arial, sans-serif;
+  --font-geist-mono: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
   --background: #f7efe1;
   --foreground: #2d241b;
   /* Primary button (gold gradient) — single source of truth untuk seluruh web.
