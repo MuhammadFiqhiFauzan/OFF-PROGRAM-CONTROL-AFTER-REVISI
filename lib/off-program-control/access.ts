@@ -19,7 +19,6 @@ export type OffRole =
 export type OffRoleSource =
   | "session"
   | "email"
-  | "development_fallback"
   | "dev_preview"
   | "unknown";
 
@@ -188,14 +187,6 @@ export function resolveOffRoleFromUser(
     };
   }
 
-  if (process.env.NODE_ENV === "development") {
-    return {
-      role: "admin",
-      source: "development_fallback",
-      isFallback: true,
-    };
-  }
-
   return {
     role: "unknown",
     source: "unknown",
@@ -300,10 +291,6 @@ export function getOffRoleBadgeLabel(
 
   if (resolutionOrRole.source === "email") {
     return `${resolutionOrRole.role} (from email domain)`;
-  }
-
-  if (resolutionOrRole.source === "development_fallback") {
-    return `${resolutionOrRole.role} (fallback dev)`;
   }
 
   if (resolutionOrRole.source === "dev_preview") {

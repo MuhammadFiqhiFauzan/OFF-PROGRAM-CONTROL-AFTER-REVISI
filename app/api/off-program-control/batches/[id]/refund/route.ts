@@ -16,7 +16,7 @@ import {
     getBatchWithItems,
     computeOffFinancePaymentSummary,
     computeOffPaymentSummary,
-    publicBatch,
+    isOffPeriodClosedForBatch,
     requireOffSession,
     writeOffAudit,
 } from "@/lib/off-program-control";
@@ -106,6 +106,9 @@ export async function POST(request: Request, context: Context) {
     if (!data) {
         return NextResponse.json({ ok: false, error: "Batch tidak ditemukan." }, { status: 404 });
     }
+    if (actor.role !== "admin" && await isOffPeriodClosedForBatch(data.batch)) {
+        return NextResponse.json({ ok: false, error: "Periode ini sudah ditutup dan tidak dapat diubah." }, { status: 409 });
+    }
 
     // Hanya batch yang sudah dibayar bisa refund
     const itemSummary = computeOffPaymentSummary(data.items);
@@ -140,6 +143,13 @@ export async function POST(request: Request, context: Context) {
         .filter((r) => r.status === "Verified" || r.status === "Pending")
         .reduce((sum, r) => sum + r.refundAmount, 0);
 
+    if (overpaidAmount <= 0) {
+        return NextResponse.json({
+            ok: false,
+            error: "Tidak ada selisih dana yang perlu dikembalikan.",
+        }, { status: 409 });
+    }
+
     if (refundAmount + totalRefundedSoFar > overpaidAmount + 100) {
         // Toleransi 100 untuk pembulatan
         return NextResponse.json({
@@ -171,7 +181,7 @@ export async function POST(request: Request, context: Context) {
     // Update batch refund status
     const newRefundStatus = resolveRefundStatus(overpaidAmount, totalRefundedSoFar);
     await db.update(offBatch).set({
-        refundStatus: overpaidAmount > 0 ? "Pending Refund" : "Not Applicable",
+        refundStatus: newRefundStatus,
         refundAmount: overpaidAmount,
         updatedAt: now,
     }).where(eq(offBatch.id, id));
@@ -216,6 +226,14 @@ export async function PATCH(request: Request, context: Context) {
         return NextResponse.json({ ok: false, error: "Action harus 'verify' atau 'reject'." }, { status: 400 });
     }
 
+    const data = await getBatchWithItems(id);
+    if (!data) {
+        return NextResponse.json({ ok: false, error: "Batch tidak ditemukan." }, { status: 404 });
+    }
+    if (actor.role !== "admin" && await isOffPeriodClosedForBatch(data.batch)) {
+        return NextResponse.json({ ok: false, error: "Periode ini sudah ditutup dan tidak dapat diubah." }, { status: 409 });
+    }
+
     const [refundRecord] = await db.select().from(offRefund)
         .where(and(eq(offRefund.id, refundId), eq(offRefund.batchId, id)));
 
@@ -238,7 +256,6 @@ export async function PATCH(request: Request, context: Context) {
     }).where(eq(offRefund.id, refundId));
 
     // Recalculate batch refund status
-    const data = await getBatchWithItems(id);
     if (data) {
         const allRefunds = await db.select().from(offRefund).where(eq(offRefund.batchId, id));
         const itemSummary = computeOffPaymentSummary(data.items);

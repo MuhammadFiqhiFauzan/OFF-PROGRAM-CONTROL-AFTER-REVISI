@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { offBatch, offBatchItem } from "@/db/schema";
-import { buildNoPengajuan, canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findOffNoSuratConflicts, getPrincipleByCode, getPrincipleByName, getBatchWithItems, isOffPeriodClosedForBatch, parseCurrency, publicBatch, publicPayment, requireOffSession, resolveProgramTypeForSave, writeOffAudit } from "@/lib/off-program-control";
+import { canActorAccessOffData, canActorPerformOffAction, computeOffFinancePaymentSummary, computeOffPaymentSummary, findOffNoSuratConflicts, getNextOffBatchNumber, getPrincipleByCode, getPrincipleByName, getBatchWithItems, isOffPeriodClosedForBatch, parseCurrency, publicBatch, publicPayment, requireOffSession, resolveProgramTypeForSave, writeOffAudit } from "@/lib/off-program-control";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -36,6 +36,34 @@ function normalizeCaraBayar(value: unknown) {
     if (normalized === "transfer") return "Transfer";
     if (normalized === "tunai") return "Tunai";
     throw new Error("Jenis pembayaran hanya boleh Tunai atau Transfer.");
+}
+
+function normalizeItemNoRekening(value: unknown, caraBayar: string) {
+    const noRekening = String(value || "").trim();
+    if (caraBayar === "Transfer" && !noRekening) {
+        throw new Error("No Rekening wajib diisi untuk baris Transfer.");
+    }
+    return caraBayar === "Transfer" ? noRekening : null;
+}
+
+function isSupervisorEditableBatch(batch: typeof offBatch.$inferSelect) {
+    return !batch.locked && (
+        batch.status === "Draft" ||
+        batch.status === "Returned by SM" ||
+        batch.status === "Returned by Claim" ||
+        batch.smStatus === "Returned" ||
+        batch.claimStatus === "Returned"
+    );
+}
+
+function maskItemRekening(
+    items: Array<typeof offBatchItem.$inferSelect>,
+    canSeeRekening: boolean,
+) {
+    return items.map((item) => ({
+        ...item,
+        noRekening: canSeeRekening ? item.noRekening : null,
+    }));
 }
 
 function periodText(item: Record<string, unknown>) {
@@ -67,13 +95,15 @@ export async function GET(_request: Request, context: Context) {
         const data = await getBatchWithItems(id);
         if (!data) return NextResponse.json({ ok: false, error: "Batch not found" }, { status: 404 });
         const summary = batchSummary(data.items);
-        // No Rekening (#8): hanya Keuangan/Pembayaran/admin, atau pembuat batch sendiri.
+        // No Rekening item hanya terlihat oleh Finance/Admin, atau Supervisor pemilik
+        // saat batch masih editable. Field batch legacy tidak dipakai UI baru.
         const canSeeRekening =
-            canActorPerformOffAction(actor, "finance_payment") || data.batch.createdBy === actor.id;
+            canActorPerformOffAction(actor, "finance_payment") ||
+            (actor.role === "supervisor" && data.batch.createdBy === actor.id && isSupervisorEditableBatch(data.batch));
         return NextResponse.json({
             ok: true,
-            batch: { ...publicBatch(data.batch), noRekening: canSeeRekening ? data.batch.noRekening : null },
-            items: data.items,
+            batch: { ...publicBatch(data.batch), noRekening: null },
+            items: maskItemRekening(data.items, canSeeRekening),
             payments: data.payments.map(publicPayment),
             summary,
             paymentSummary: computeOffFinancePaymentSummary(summary.totalNominal, data.payments),
@@ -111,16 +141,24 @@ export async function PATCH(request: Request, context: Context) {
             return NextResponse.json({ ok: false, error: "Kode Principle tidak sesuai dengan Principle." }, { status: 400 });
         }
 
-        const gelombang = body.gelombang ? String(body.gelombang).padStart(3, "0") : data.batch.gelombang;
         const bulan = body.bulan ? String(body.bulan).padStart(2, "0") : data.batch.bulan;
         const tahun = body.tahun ? String(body.tahun) : data.batch.tahun;
-        // #1-3: pertahankan prefix /CLM/ untuk batch yang dibuat oleh Claim.
-        const noPengajuan = buildNoPengajuan(gelombang, nextPrinciple.code, bulan, tahun, data.batch.createdByRole);
-        if (noPengajuan !== data.batch.noPengajuan) {
-            const [duplicate] = await db.select().from(offBatch).where(eq(offBatch.noPengajuan, noPengajuan));
-            if (duplicate && duplicate.id !== id) {
-                return NextResponse.json({ ok: false, error: "No Pengajuan hasil revisi sudah digunakan batch lain." }, { status: 409 });
-            }
+        const numberScopeChanged =
+            nextPrinciple.code !== data.batch.principleCode ||
+            bulan !== data.batch.bulan ||
+            tahun !== data.batch.tahun;
+        let gelombang = data.batch.gelombang;
+        let noPengajuan = data.batch.noPengajuan;
+        if (numberScopeChanged) {
+            const nextNumber = await getNextOffBatchNumber({
+                principleCode: nextPrinciple.code,
+                bulan,
+                tahun,
+                createdByRole: data.batch.createdByRole,
+                excludeBatchId: id,
+            });
+            gelombang = nextNumber.gelombang;
+            noPengajuan = nextNumber.noPengajuan;
         }
 
         const patch: Partial<typeof offBatch.$inferInsert> = {
@@ -131,11 +169,8 @@ export async function PATCH(request: Request, context: Context) {
             bulan,
             tahun,
             supervisorName: body.supervisorName ? String(body.supervisorName) : data.batch.supervisorName,
-            // No Rekening (#8): perbarui bila dikirim, jika tidak pertahankan nilai lama.
-            noRekening:
-                body.noRekening !== undefined
-                    ? String(body.noRekening || "").trim() || null
-                    : data.batch.noRekening,
+            // Field batch legacy dipertahankan nullable, flow baru memakai item.noRekening.
+            noRekening: data.batch.noRekening || null,
             updatedAt: now,
         };
         await db.update(offBatch).set(patch).where(eq(offBatch.id, id));
@@ -197,6 +232,7 @@ export async function PATCH(request: Request, context: Context) {
                     barang: String(item.barang || ""),
                     nominal: asNumber(item.nominal),
                     caraBayar: normalizeCaraBayar(item.caraBayar),
+                    noRekening: normalizeItemNoRekening(item.noRekening, normalizeCaraBayar(item.caraBayar)),
                     type: resolvedType.normalizedType,
                     normalizedType: resolvedType.normalizedType,
                     originalType: resolvedType.originalType || resolvedType.normalizedType,
@@ -245,7 +281,7 @@ export async function PATCH(request: Request, context: Context) {
     } catch (error) {
         console.error("[OFF BATCH PATCH ERROR]", error);
         const message = error instanceof Error ? error.message : "";
-        if (message === "Jenis pembayaran hanya boleh Tunai atau Transfer.") {
+        if (message === "Jenis pembayaran hanya boleh Tunai atau Transfer." || message === "No Rekening wajib diisi untuk baris Transfer.") {
             return NextResponse.json({ ok: false, error: message }, { status: 400 });
         }
         return NextResponse.json({ ok: false, error: "Gagal menyimpan revisi batch." }, { status: 500 });

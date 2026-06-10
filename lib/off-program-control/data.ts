@@ -14,6 +14,7 @@ import { db } from "@/lib/db";
 import { offAuditLog, offBatch, offBatchItem, offPayment, offPeriodClosure } from "@/db/schema";
 import type { OffActor, OffBatchRow } from "./types";
 import { canPerformOffAction, resolveOffRole, type OffAction } from "./access";
+import { buildNoPengajuan } from "./helpers";
 
 // Status batch yang No Surat-nya dianggap sudah dibatalkan / dibebaskan.
 // Saat status batch berada di salah satu nilai ini, No Surat di dalamnya tidak
@@ -28,6 +29,109 @@ export type OffNoSuratConflict = {
     principleName: string;
     status: string;
 };
+
+type OffNumberSource = "claim" | "supervisor";
+
+function padGelombang(value: number) {
+    return String(value).padStart(3, "0");
+}
+
+function normalizeOffNumberSource(value?: string | null): OffNumberSource {
+    return value === "claim" ? "claim" : "supervisor";
+}
+
+function parseNoPengajuan(value: unknown) {
+    const parts = String(value || "").trim().split("/");
+    if (parts.length === 4) {
+        const [gelombang, principleCode, bulan, tahun] = parts;
+        if (/^\d+$/.test(gelombang) && principleCode && bulan && tahun) {
+            return { gelombang, principleCode, bulan, tahun, source: "supervisor" as OffNumberSource };
+        }
+    }
+    if (parts.length === 5 && parts[1] === "CLM") {
+        const [gelombang, , principleCode, bulan, tahun] = parts;
+        if (/^\d+$/.test(gelombang) && principleCode && bulan && tahun) {
+            return { gelombang, principleCode, bulan, tahun, source: "claim" as OffNumberSource };
+        }
+    }
+    return null;
+}
+
+function rowMatchesNumberSource(row: Pick<typeof offBatch.$inferSelect, "noPengajuan" | "createdByRole">, source: OffNumberSource) {
+    const parsed = parseNoPengajuan(row.noPengajuan);
+    if (parsed) return parsed.source === source;
+    const rowSource = row.createdByRole === "claim" ? "claim" : "supervisor";
+    return rowSource === source;
+}
+
+export async function getNextOffBatchNumber(input: {
+    principleCode: string;
+    bulan: string;
+    tahun: string;
+    createdByRole?: string | null;
+    excludeBatchId?: string | null;
+}) {
+    const principleCode = String(input.principleCode || "").trim();
+    const bulan = String(input.bulan || "").padStart(2, "0");
+    const tahun = String(input.tahun || "").trim();
+    const source = normalizeOffNumberSource(input.createdByRole);
+    if (!principleCode || !bulan || !tahun) {
+        throw new Error("Principle, bulan, dan tahun wajib diisi untuk membuat No Pengajuan otomatis.");
+    }
+
+    const rows = await db
+        .select({
+            id: offBatch.id,
+            noPengajuan: offBatch.noPengajuan,
+            gelombang: offBatch.gelombang,
+            principleCode: offBatch.principleCode,
+            bulan: offBatch.bulan,
+            tahun: offBatch.tahun,
+            createdByRole: offBatch.createdByRole,
+        })
+        .from(offBatch)
+        .where(and(
+            eq(offBatch.principleCode, principleCode),
+            eq(offBatch.bulan, bulan),
+            eq(offBatch.tahun, tahun),
+        ));
+
+    const used = new Set<number>();
+    const existingNoPengajuan = new Set<string>();
+    for (const row of rows) {
+        if (input.excludeBatchId && row.id === input.excludeBatchId) continue;
+        existingNoPengajuan.add(row.noPengajuan);
+        if (!rowMatchesNumberSource(row, source)) continue;
+
+        const parsed = parseNoPengajuan(row.noPengajuan);
+        if (
+            parsed &&
+            parsed.source === source &&
+            parsed.principleCode === principleCode &&
+            parsed.bulan === bulan &&
+            parsed.tahun === tahun
+        ) {
+            used.add(Number(parsed.gelombang));
+            continue;
+        }
+
+        const gelombang = String(row.gelombang || "").trim();
+        if (/^\d+$/.test(gelombang)) used.add(Number(gelombang));
+    }
+
+    let next = 1;
+    while (used.has(next)) next += 1;
+
+    let gelombang = padGelombang(next);
+    let noPengajuan = buildNoPengajuan(gelombang, principleCode, bulan, tahun, source);
+    while (existingNoPengajuan.has(noPengajuan)) {
+        next += 1;
+        gelombang = padGelombang(next);
+        noPengajuan = buildNoPengajuan(gelombang, principleCode, bulan, tahun, source);
+    }
+
+    return { gelombang, noPengajuan };
+}
 
 export async function requireOffSession() {
     const session = await auth.api.getSession({ headers: await headers() });

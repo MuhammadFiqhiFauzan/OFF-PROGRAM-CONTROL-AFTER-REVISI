@@ -141,6 +141,7 @@ type SupervisorBulkRow = {
   barang: string;
   nominal: string;
   caraBayar: string;
+  noRekening: string;
   type: string;
   originalType: string;
   typeIsLegacy: boolean;
@@ -240,6 +241,10 @@ type OffApiItem = {
   barang: string | null;
   nominal: number;
   caraBayar: string | null;
+  noRekening?: string | null;
+  financePaymentStatus?: string | null;
+  financePaymentId?: string | null;
+  financePaidAmount?: number | null;
   type: string | null;
   normalizedType?: string | null;
   originalType?: string | null;
@@ -427,6 +432,7 @@ const initialBulkRows: SupervisorBulkRow[] = [
     barang: "Dettol",
     nominal: "Rp 4.400.000",
     caraBayar: "Transfer",
+    noRekening: "1234567890 BCA Toko Makmur",
     type: "Display",
     originalType: "Display",
     typeIsLegacy: false,
@@ -451,6 +457,7 @@ const initialBulkRows: SupervisorBulkRow[] = [
     barang: "Harpic",
     nominal: "Rp 3.750.000",
     caraBayar: "Tunai",
+    noRekening: "",
     type: "Visibility",
     originalType: "Visibility",
     typeIsLegacy: false,
@@ -475,6 +482,7 @@ const initialBulkRows: SupervisorBulkRow[] = [
     barang: "Vanish",
     nominal: "Rp 4.350.000",
     caraBayar: "Tunai",
+    noRekening: "",
     // #13: Perbaikan data sample — pakai tipe baku agar tidak memunculkan badge "Data Lama".
     type: "Sample",
     originalType: "Sample",
@@ -496,6 +504,11 @@ const documentChecks = ["KWT", "SKP", "FP", "PC", "Foto", "Rekap", "Others"];
 
 function getPrincipleCode(name: string) {
   return PRINCIPLE_OPTIONS.find((item) => item.name === name)?.code || "";
+}
+
+function getGelombangFromNoPengajuan(noPengajuan: string) {
+  const firstPart = String(noPengajuan || "").split("/")[0] || "";
+  return /^\d+$/.test(firstPart) ? firstPart.padStart(3, "0") : "";
 }
 
 function parseUiCurrency(value: string | number) {
@@ -555,6 +568,7 @@ function createEmptyBulkRow(index: number): SupervisorBulkRow {
     barang: "",
     nominal: "",
     caraBayar: "Transfer",
+    noRekening: "",
     type: "",
     originalType: "",
     typeIsLegacy: false,
@@ -688,6 +702,7 @@ function apiItemToBulkRow(item: OffApiItem, index: number): SupervisorBulkRow {
       ? `Rp ${Number(item.nominal).toLocaleString("id-ID")}`
       : "",
     caraBayar: item.caraBayar || "Transfer",
+    noRekening: item.noRekening || "",
     // Bila forcedToFallback, biarkan kosong agar Supervisor wajib memilih ulang.
     type: resolved.forcedToFallback ? "" : resolved.normalizedType,
     originalType: item.originalType || String(item.type || ""),
@@ -3065,8 +3080,6 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
   // #17 Gap b: batch yang dipilih untuk dilihat refund-nya di view Selisih.
   const [selisihBatchId, setSelisihBatchId] = useState("");
   const [supervisorName, setSupervisorName] = useState("Supervisor Area 1");
-  // No Rekening (#8): diinput SPV, hanya ditampilkan ke divisi Keuangan/Pembayaran.
-  const [noRekening, setNoRekening] = useState("");
   const [batchPrinciple, setBatchPrinciple] = useState("RECKITT BENCKISER, PT");
   const [gelombangInput, setGelombangInput] = useState("001");
   const [bulanInput, setBulanInput] = useState(() => String(new Date().getMonth() + 1).padStart(2, "0"));
@@ -3105,11 +3118,63 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
   const [returnedStatus, setReturnedStatus] = useState("");
   const [duplicatePrompt, setDuplicatePrompt] =
     useState<SupervisorDuplicatePrompt | null>(null);
+  const [autoNoPengajuan, setAutoNoPengajuan] = useState("");
+  const [autoNumberStatus, setAutoNumberStatus] = useState("");
+  const [editingOriginalNumber, setEditingOriginalNumber] = useState<{
+    noPengajuan: string;
+    gelombang: string;
+    principleCode: string;
+    bulan: string;
+    tahun: string;
+  } | null>(null);
   const gelombang = gelombangInput.padStart(3, "0");
   const bulan = bulanInput.padStart(2, "0");
   const tahun = tahunInput;
   const batchCode = getPrincipleCode(batchPrinciple);
-  const generatedNo = `${gelombang}/${batchCode}/${bulan}/${tahun}`;
+  const generatedNo = autoNoPengajuan || `${gelombang}/${batchCode}/${bulan}/${tahun}`;
+
+  useEffect(() => {
+    if (!batchCode || !bulan || !tahun) return;
+    if (
+      editingOriginalNumber &&
+      editingOriginalNumber.principleCode === batchCode &&
+      editingOriginalNumber.bulan === bulan &&
+      editingOriginalNumber.tahun === tahun
+    ) {
+      setGelombangInput(editingOriginalNumber.gelombang || getGelombangFromNoPengajuan(editingOriginalNumber.noPengajuan) || "001");
+      setAutoNoPengajuan(editingOriginalNumber.noPengajuan);
+      setAutoNumberStatus("");
+      return;
+    }
+
+    const controller = new AbortController();
+    setAutoNumberStatus("Memuat No Pengajuan otomatis...");
+    const params = new URLSearchParams({
+      principleCode: batchCode,
+      bulan,
+      tahun,
+      source: "supervisor",
+    });
+    if (editingBatchId) params.set("excludeBatchId", editingBatchId);
+    fetch(`/api/off-program-control/batches/next-number?${params.toString()}`, {
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(parseJsonResponse)
+      .then((data) => {
+        if (!data.ok) throw new Error(String(data.error || "Gagal memuat No Pengajuan otomatis."));
+        const nextGelombang = String(data.gelombang || "001");
+        const nextNoPengajuan = String(data.noPengajuan || "");
+        setGelombangInput(nextGelombang);
+        setAutoNoPengajuan(nextNoPengajuan || `${nextGelombang}/${batchCode}/${bulan}/${tahun}`);
+        setAutoNumberStatus("");
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setAutoNumberStatus(error instanceof Error ? error.message : "Gagal memuat No Pengajuan otomatis.");
+      });
+    return () => controller.abort();
+  }, [batchCode, bulan, tahun, editingBatchId, editingOriginalNumber]);
 
   const loadReturnedBatches = async () => {
     try {
@@ -3252,8 +3317,15 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
       setSupervisorMenu("pengajuan");
       setReturnNote(detailBatch.claimNote || detailBatch.smNote || "");
       setSupervisorName(detailBatch.supervisorName || "Supervisor Area 1");
-      setNoRekening((detailBatch as { noRekening?: string | null }).noRekening || "");
       setGelombangInput(detailBatch.gelombang || "001");
+      setAutoNoPengajuan(detailBatch.noPengajuan || "");
+      setEditingOriginalNumber({
+        noPengajuan: detailBatch.noPengajuan || "",
+        gelombang: detailBatch.gelombang || getGelombangFromNoPengajuan(detailBatch.noPengajuan || "") || "001",
+        principleCode: detailBatch.principleCode || "",
+        bulan: detailBatch.bulan || "",
+        tahun: detailBatch.tahun || "",
+      });
       setBatchPrinciple(detailBatch.principleName || "RECKITT BENCKISER, PT");
       setBulanInput(detailBatch.bulan || "05");
       setTahunInput(detailBatch.tahun || "2026");
@@ -3304,7 +3376,15 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
     if (editingLocked) return;
     setRows((currentRows) =>
       currentRows.map((row) =>
-        row.id === rowId ? { ...row, [field]: value } : row,
+        row.id === rowId
+          ? {
+              ...row,
+              [field]: value,
+              ...(field === "caraBayar" && normalizeUiPaymentMethod(String(value)) === "Tunai"
+                ? { noRekening: "" }
+                : {}),
+            }
+          : row,
       ),
     );
   };
@@ -3333,6 +3413,15 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
     return index === -1 ? 0 : index + 1;
   };
 
+  const findMissingTransferRekeningRowNumber = () => {
+    const index = rows.findIndex(
+      (row) =>
+        normalizeUiPaymentMethod(row.caraBayar) === "Transfer" &&
+        !row.noRekening.trim(),
+    );
+    return index === -1 ? 0 : index + 1;
+  };
+
   const buildSupervisorItems = () =>
     rows.map((row) => ({
       noSurat: row.noSurat,
@@ -3344,6 +3433,10 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
       barang: row.barang,
       nominal: row.nominal,
       caraBayar: row.caraBayar,
+      noRekening:
+        normalizeUiPaymentMethod(row.caraBayar) === "Transfer"
+          ? row.noRekening
+          : "",
       type: row.type,
       // Audit legacy: kirim nilai asli agar backend menyimpan originalType.
       originalType: row.originalType || row.type,
@@ -3373,6 +3466,13 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
       );
       return;
     }
+    const missingRekeningRow = findMissingTransferRekeningRowNumber();
+    if (missingRekeningRow) {
+      setSubmitStatus(
+        `No Rekening pada baris ${missingRekeningRow} wajib diisi karena Cara Bayar adalah Transfer.`,
+      );
+      return;
+    }
     setIsSubmitting(true);
     setSubmitStatus("Menyimpan draf batch...");
     setSubmitResult(null);
@@ -3388,8 +3488,6 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             supervisorName,
-            noRekening,
-            gelombang,
             principleCode: batchCode,
             principleName: batchPrinciple,
             bulan,
@@ -3423,10 +3521,30 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
           String(data.message || data.error || "Gagal menyimpan draf."),
         );
       const savedBatchId = editingBatchId || String(data.batchId || "");
+      const savedNoPengajuan = String(
+        data.noPengajuan ||
+          (data.batch as OffApiBatch | undefined)?.noPengajuan ||
+          generatedNo,
+      );
+      const savedGelombang = String(
+        data.gelombang ||
+          (data.batch as OffApiBatch | undefined)?.gelombang ||
+          getGelombangFromNoPengajuan(savedNoPengajuan) ||
+          gelombang,
+      );
       setEditingBatchId(savedBatchId);
+      setGelombangInput(savedGelombang);
+      setAutoNoPengajuan(savedNoPengajuan);
+      setEditingOriginalNumber({
+        noPengajuan: savedNoPengajuan,
+        gelombang: savedGelombang,
+        principleCode: batchCode,
+        bulan,
+        tahun,
+      });
       setEditingLocked(false);
       setSubmitStatus(
-        `Draf ${data.noPengajuan || generatedNo} berhasil disimpan.`,
+        `Draf ${savedNoPengajuan} berhasil disimpan.`,
       );
       await loadReturnedBatches();
     } catch (error) {
@@ -3455,6 +3573,13 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
       );
       return;
     }
+    const missingRekeningRow = findMissingTransferRekeningRowNumber();
+    if (missingRekeningRow) {
+      setSubmitStatus(
+        `No Rekening pada baris ${missingRekeningRow} wajib diisi karena Cara Bayar adalah Transfer.`,
+      );
+      return;
+    }
     setIsSubmitting(true);
     setSubmitStatus(
       editingBatchId
@@ -3476,8 +3601,6 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             supervisorName,
-            noRekening,
-            gelombang,
             principleCode: batchCode,
             principleName: batchPrinciple,
             bulan,
@@ -3529,6 +3652,26 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
           String(saveData.message || saveData.error || "Gagal menyimpan batch"),
         );
       const savedBatchId = editingBatchId || String(saveData.batchId || "");
+      const savedNoPengajuan = String(
+        saveData.noPengajuan ||
+          (saveData.batch as OffApiBatch | undefined)?.noPengajuan ||
+          generatedNo,
+      );
+      const savedGelombang = String(
+        saveData.gelombang ||
+          (saveData.batch as OffApiBatch | undefined)?.gelombang ||
+          getGelombangFromNoPengajuan(savedNoPengajuan) ||
+          gelombang,
+      );
+      setGelombangInput(savedGelombang);
+      setAutoNoPengajuan(savedNoPengajuan);
+      setEditingOriginalNumber({
+        noPengajuan: savedNoPengajuan,
+        gelombang: savedGelombang,
+        principleCode: batchCode,
+        bulan,
+        tahun,
+      });
 
       const submitRes = await fetch(
         `/api/off-program-control/batches/${savedBatchId}/submit`,
@@ -3933,11 +4076,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                 value={supervisorName}
                 onChange={(value) => !editingLocked && setSupervisorName(value)}
               />
-              <EditableField
-                label="Gelombang Input"
-                value={gelombangInput}
-                onChange={(value) => !editingLocked && setGelombangInput(value)}
-              />
+              <Field label="Gelombang Otomatis" value={gelombang} />
               <PrincipleSelect
                 label="Principle"
                 value={batchPrinciple}
@@ -3948,11 +4087,6 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
               <Field label="Kode Principle" value={batchCode} />
               <Field label="Bulan" value={bulanInput} />
               <Field label="Tahun" value={tahunInput} />
-              <EditableField
-                label="No Rekening (Keuangan)"
-                value={noRekening}
-                onChange={(value) => !editingLocked && setNoRekening(value)}
-              />
             </div>
             <div className="mt-4 rounded-xl border border-teal-500/20 bg-teal-500/10 px-4 py-3">
               <p className="text-xs uppercase tracking-wider text-teal-300 font-bold">
@@ -3961,6 +4095,11 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
               <p className="mt-1 font-mono text-2xl font-black text-white">
                 {generatedNo}
               </p>
+              {autoNumberStatus ? (
+                <p className="mt-2 text-xs font-semibold text-teal-200">
+                  {autoNumberStatus}
+                </p>
+              ) : null}
             </div>
             {editingBatchId && (
               <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
@@ -3974,7 +4113,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
 
           <Panel title="Input Batch Pengajuan Supervisor" icon={FileText}>
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1980px] text-sm text-left">
+              <table className="w-full min-w-[2140px] text-sm text-left">
                 <thead className="bg-[#1a1c23] text-xs uppercase tracking-wider text-slate-300 border-b border-white/15">
                   <tr>
                     {[
@@ -3989,6 +4128,7 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                       "Barang",
                       "Nominal",
                       "Cara Bayar",
+                      "No Rekening",
                       "Tipe",
                       "PPh",
                       "Deadline",
@@ -4117,6 +4257,24 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                             </option>
                           ))}
                         </select>
+                      </td>
+                      <td className="px-3 py-3">
+                        <input
+                          readOnly={
+                            editingLocked ||
+                            normalizeUiPaymentMethod(row.caraBayar) === "Tunai"
+                          }
+                          value={row.noRekening}
+                          onChange={(event) =>
+                            updateRow(row.id, "noRekening", event.target.value)
+                          }
+                          placeholder={
+                            normalizeUiPaymentMethod(row.caraBayar) === "Transfer"
+                              ? "No rekening tujuan"
+                              : "-"
+                          }
+                          className="w-full min-w-[180px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50 read-only:opacity-60"
+                        />
                       </td>
                       <td className="px-3 py-3">
                         <div className="min-w-[180px] space-y-1.5">
@@ -4318,55 +4476,55 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
                 </a>
               ) : (
                 // #6: Cetak diblokir sampai pengajuan di-approve CLAIM.
-                <span className="mt-3 inline-flex rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm font-semibold text-slate-400">
+                <span className="mt-3 inline-flex rounded-xl border border-[#d4ad61]/40 bg-[#fff7e6] px-4 py-2 text-sm font-semibold text-[#5d4630]">
                   PDF Surat dapat dicetak setelah pengajuan di-approve CLAIM.
                 </span>
               ))}
             {submitResult && (
-              <div className="mt-4 rounded-xl border border-white/10 bg-[#0f1115]/80 p-4 text-xs text-slate-400">
-                <p className="mb-2 font-bold uppercase tracking-wider text-slate-300">
+              <div className="mt-4 rounded-xl border border-emerald-600/25 bg-[#fffaf0] p-4 text-xs text-[#5d4630] shadow-sm">
+                <p className="mb-2 font-bold uppercase tracking-wider text-emerald-700">
                   Hasil Pengiriman
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
                   <p>
                     Batch ID:{" "}
-                    <span className="font-mono text-slate-200">
+                    <span className="font-mono font-semibold text-[#2d241b]">
                       {submitResult.batchId}
                     </span>
                   </p>
                   <p>
                     No Pengajuan:{" "}
-                    <span className="font-mono text-slate-200">
+                    <span className="font-mono font-semibold text-[#2d241b]">
                       {submitResult.noPengajuan}
                     </span>
                   </p>
                   <p>
                     Jumlah baris terkirim:{" "}
-                    <span className="font-mono text-slate-200">
+                    <span className="font-mono font-semibold text-[#2d241b]">
                       {submitResult.rowCount}
                     </span>
                   </p>
                   <p>
                     Total Nominal:{" "}
-                    <span className="font-mono text-slate-200">
+                    <span className="font-mono font-semibold text-[#2d241b]">
                       Rp {submitResult.total.toLocaleString("id-ID")}
                     </span>
                   </p>
                   <p>
                     Transfer:{" "}
-                    <span className="font-mono text-slate-200">
+                    <span className="font-mono font-semibold text-[#2d241b]">
                       Rp {submitResult.transfer.toLocaleString("id-ID")}
                     </span>
                   </p>
                   <p>
                     Tunai:{" "}
-                    <span className="font-mono text-slate-200">
+                    <span className="font-mono font-semibold text-[#2d241b]">
                       Rp {submitResult.tunai.toLocaleString("id-ID")}
                     </span>
                   </p>
                   <p>
                     PDF URL:{" "}
-                    <span className="font-mono text-slate-200 break-all">
+                    <span className="font-mono font-semibold text-emerald-800 break-all">
                       {submitResult.pdfUrl}
                     </span>
                   </p>
@@ -5135,6 +5293,9 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
   const [clmRows, setClmRows] = useState<SupervisorBulkRow[]>([createEmptyBulkRow(1)]);
   const [clmPrinciple, setClmPrinciple] = useState("RECKITT BENCKISER, PT");
   const [clmGelombang, setClmGelombang] = useState("001");
+  const [clmAutoNoPengajuan, setClmAutoNoPengajuan] = useState("");
+  const [clmAutoNumberStatus, setClmAutoNumberStatus] = useState("");
+  const [clmNumberRefreshKey, setClmNumberRefreshKey] = useState(0);
   const [clmBulan, setClmBulan] = useState(() => String(new Date().getMonth() + 1).padStart(2, "0"));
   const [clmTahun, setClmTahun] = useState(() => String(new Date().getFullYear()));
   const [clmSubmitStatus, setClmSubmitStatus] = useState("");
@@ -5170,6 +5331,38 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
   const [completenessStatus, setCompletenessStatus] = useState("Lengkap");
   const [claimNote, setClaimNote] = useState("");
   const [finalClaimNote, setFinalClaimNote] = useState("");
+
+  useEffect(() => {
+    const clmCode = getPrincipleCode(clmPrinciple);
+    const clmBulanPad = clmBulan.padStart(2, "0");
+    if (!clmCode || !clmBulanPad || !clmTahun) return;
+    const controller = new AbortController();
+    setClmAutoNumberStatus("Memuat No Pengajuan CLM otomatis...");
+    const params = new URLSearchParams({
+      principleCode: clmCode,
+      bulan: clmBulanPad,
+      tahun: clmTahun,
+      source: "claim",
+    });
+    fetch(`/api/off-program-control/batches/next-number?${params.toString()}`, {
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(parseJsonResponse)
+      .then((data) => {
+        if (!data.ok) throw new Error(String(data.error || "Gagal memuat No Pengajuan CLM otomatis."));
+        const nextGelombang = String(data.gelombang || "001");
+        const nextNoPengajuan = String(data.noPengajuan || "");
+        setClmGelombang(nextGelombang);
+        setClmAutoNoPengajuan(nextNoPengajuan || `${nextGelombang}/CLM/${clmCode}/${clmBulanPad}/${clmTahun}`);
+        setClmAutoNumberStatus("");
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setClmAutoNumberStatus(error instanceof Error ? error.message : "Gagal memuat No Pengajuan CLM otomatis.");
+      });
+    return () => controller.abort();
+  }, [clmPrinciple, clmBulan, clmTahun, clmNumberRefreshKey]);
   // #17 Gap a: nilai yang bisa di-claim (nilai fix) — default = paidAmount.
   const [finalVerifiedAmount, setFinalVerifiedAmount] = useState("");
   const [finalClaimRefs, setFinalClaimRefs] = useState<Record<string, string>>(
@@ -5541,6 +5734,12 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
 
   const approveByClaim = async () => {
     if (!selectedBatch) return;
+    if (!claimNote.trim()) {
+      setClaimMessage(
+        "Keterangan kelengkapan wajib diisi sebelum submit validasi Claim.",
+      );
+      return;
+    }
     setIsActionLoading(true);
     setClaimMessage("");
     try {
@@ -6159,7 +6358,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                 <div className="mt-4">
                   <label className="block">
                     <span className="text-xs text-slate-500 font-semibold">
-                      Catatan Klaim
+                      Keterangan Kelengkapan Claim
                     </span>
                     <textarea
                       value={claimNote}
@@ -6167,6 +6366,10 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       rows={4}
                       className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500/50"
                     />
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Wajib diisi sebelum Setujui Klaim. Untuk koreksi, isi
+                      alasan kelengkapan yang perlu diperbaiki.
+                    </p>
                   </label>
                 </div>
                 {claimMessage && (
@@ -6854,7 +7057,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
         const clmCode = getPrincipleCode(clmPrinciple);
         const clmGelombangPad = clmGelombang.padStart(3, "0");
         const clmBulanPad = clmBulan.padStart(2, "0");
-        const previewNoClm = `${clmGelombangPad}/CLM/${clmCode}/${clmBulanPad}/${clmTahun}`;
+        const previewNoClm = clmAutoNoPengajuan || `${clmGelombangPad}/CLM/${clmCode}/${clmBulanPad}/${clmTahun}`;
         // Daftar CLM batches milik divisi Claim (bukan SPV)
         const myCLMBatches = allClaimBatches.filter((b) => b.createdByRole === "claim");
 
@@ -6863,6 +7066,8 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           if (clmRows.length === 0) { setClmSubmitStatus("Minimal satu baris wajib diisi."); return; }
           const invalidRow = clmRows.findIndex((r) => !(OFF_CLM_PROGRAM_TYPES as readonly string[]).includes(r.type));
           if (invalidRow >= 0) { setClmSubmitStatus(`Tipe program baris ${invalidRow + 1} belum dipilih.`); return; }
+          const missingRekeningRow = clmRows.findIndex((r) => normalizeUiPaymentMethod(r.caraBayar) === "Transfer" && !r.noRekening.trim());
+          if (missingRekeningRow >= 0) { setClmSubmitStatus(`No Rekening baris ${missingRekeningRow + 1} wajib diisi untuk Transfer.`); return; }
           setClmIsSubmitting(true);
           setClmSubmitStatus("");
           try {
@@ -6873,7 +7078,6 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               body: JSON.stringify({
                 principleName: clmPrinciple,
                 principleCode: clmCode,
-                gelombang: clmGelombangPad,
                 bulan: clmBulanPad,
                 tahun: clmTahun,
                 supervisorName: "Divisi Claim",
@@ -6886,6 +7090,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                   barang: r.barang,
                   nominal: r.nominal,
                   caraBayar: r.caraBayar || "Transfer",
+                  noRekening: normalizeUiPaymentMethod(r.caraBayar) === "Transfer" ? r.noRekening : "",
                   type: r.type,
                   originalType: r.type,
                   deadline: r.deadline,
@@ -6900,6 +7105,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
             setClmSubmitStatus(`Pengajuan CLM berhasil dibuat: ${String(data.noPengajuan || previewNoClm)}`);
             setClmRows([createEmptyBulkRow(1)]);
             await loadClaimBatches();
+            setClmNumberRefreshKey((value) => value + 1);
           } catch (err) {
             setClmSubmitStatus(err instanceof Error ? err.message : "Gagal membuat batch CLM.");
           } finally {
@@ -7000,7 +7206,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       ))}
                     </select>
                   </label>
-                  <EditableField label="Gelombang" value={clmGelombang} onChange={setClmGelombang} />
+                  <Field label="Gelombang Otomatis" value={clmGelombangPad} />
                   <EditableField label="Bulan (MM)" value={clmBulan} onChange={setClmBulan} />
                   <EditableField label="Tahun (YYYY)" value={clmTahun} onChange={setClmTahun} />
                 </div>
@@ -7008,13 +7214,18 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                   <p className="text-xs text-slate-400">No Pengajuan CLM:
                     <span className="ml-2 font-mono font-bold text-indigo-300">{previewNoClm}</span>
                   </p>
+                  {clmAutoNumberStatus ? (
+                    <p className="mt-1 text-xs font-semibold text-indigo-200">
+                      {clmAutoNumberStatus}
+                    </p>
+                  ) : null}
                 </div>
                 {/* Tabel baris CLM */}
                 <div className="mt-5 overflow-x-auto rounded-xl border border-white/10">
-                  <table className="w-full min-w-[1400px] text-left text-sm">
+                  <table className="w-full min-w-[1560px] text-left text-sm">
                     <thead className="border-b border-white/10 bg-black/50 text-xs uppercase tracking-wider text-slate-500">
                       <tr>
-                        {["No", "No Surat", "Nama Program", "Periode Awal", "Periode Akhir", "Toko", "Barang", "Nominal", "Cara Bayar", "Tipe Program (CLM)", "Deadline", ""].map((h) => (
+                        {["No", "No Surat", "Nama Program", "Periode Awal", "Periode Akhir", "Toko", "Barang", "Nominal", "Cara Bayar", "No Rekening", "Tipe Program (CLM)", "Deadline", ""].map((h) => (
                           <th key={h} className="px-2 py-3 font-bold">{h}</th>
                         ))}
                       </tr>
@@ -7031,11 +7242,12 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                           <td className="px-2 py-2"><input value={row.barang} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],barang:e.target.value}; setClmRows(r); }} className="w-28 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50" /></td>
                           <td className="px-2 py-2"><input value={row.nominal} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],nominal:e.target.value}; setClmRows(r); }} className="w-28 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-right font-mono text-emerald-300 outline-none focus:border-indigo-500/50" placeholder="0" /></td>
                           <td className="px-2 py-2">
-                            <select value={row.caraBayar} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],caraBayar:e.target.value}; setClmRows(r); }} className="w-24 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none">
+                            <select value={row.caraBayar} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],caraBayar:e.target.value,noRekening:e.target.value === "Tunai" ? "" : r[idx].noRekening}; setClmRows(r); }} className="w-24 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none">
                               <option value="Transfer">Transfer</option>
                               <option value="Tunai">Tunai</option>
                             </select>
                           </td>
+                          <td className="px-2 py-2"><input value={row.noRekening} readOnly={normalizeUiPaymentMethod(row.caraBayar) === "Tunai"} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],noRekening:e.target.value}; setClmRows(r); }} className="w-36 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500/50 read-only:opacity-60" placeholder={normalizeUiPaymentMethod(row.caraBayar) === "Transfer" ? "No rekening" : "-"} /></td>
                           <td className="px-2 py-2">
                             <select value={row.type} onChange={(e) => { const r=[...clmRows]; r[idx]={...r[idx],type:e.target.value,originalType:e.target.value}; setClmRows(r); }} className={`w-40 rounded border px-2 py-1 text-xs outline-none bg-black/30 ${row.type ? "border-white/10 text-slate-200" : "border-amber-500/40 text-amber-400"}`}>
                               <option value="">Pilih tipe...</option>
@@ -8086,13 +8298,12 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     string | null
   >(null);
   const [selectedItems, setSelectedItems] = useState<OffApiItem[]>([]);
+  const [selectedPaymentItemIds, setSelectedPaymentItemIds] = useState<string[]>([]);
   const [selectedPayments, setSelectedPayments] = useState<OffApiPayment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [financeMessage, setFinanceMessage] = useState("");
   const [paymentDate, setPaymentDate] = useState("");
-  const [paidAmount, setPaidAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Transfer");
   const [senderBank, setSenderBank] = useState("");
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [financeNote, setFinanceNote] = useState("");
@@ -8103,6 +8314,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     paymentMethod: string;
     senderBank: string;
     paymentProofName: string;
+    paymentProofUrl?: string | null;
     remainingAmount?: number;
     isFullyPaid?: boolean;
   } | null>(null);
@@ -8144,6 +8356,62 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     paymentSummary?.remainingAmount ?? Math.max(0, totalNominal - totalPaid),
   );
   const hasMixedItemPayments = transfer > 0 && tunai > 0;
+  const isFinanceItemPaid = (item: OffApiItem) =>
+    item.financePaymentStatus === "paid" || Boolean(item.financePaymentId);
+  const selectedPaymentItems = selectedItems.filter((item) =>
+    selectedPaymentItemIds.includes(item.id),
+  );
+  const selectedPaymentMethods = Array.from(
+    new Set(
+      selectedPaymentItems.map((item) =>
+        normalizeUiPaymentMethod(item.caraBayar || ""),
+      ),
+    ),
+  ).filter(Boolean);
+  const selectedPaymentTotal = selectedPaymentItems.reduce(
+    (total, item) => total + Number(item.nominal || 0),
+    0,
+  );
+  const selectedPaymentMethod =
+    selectedPaymentMethods.length === 1 ? selectedPaymentMethods[0] : "";
+  const selectedPaymentTotalLabel = `Rp ${selectedPaymentTotal.toLocaleString(
+    "id-ID",
+  )}`;
+  const selectedPaymentMethodLabel = selectedPaymentMethod || "-";
+
+  const syncFinanceItemSelection = () => {
+    setSelectedPaymentItemIds([]);
+  };
+
+  const toggleFinanceItemSelection = (item: OffApiItem) => {
+    if (isFinanceItemPaid(item)) return;
+    setSelectedPaymentItemIds((current) => {
+      const exists = current.includes(item.id);
+      if (exists) return current.filter((id) => id !== item.id);
+
+      const currentItems = selectedItems.filter((row) => current.includes(row.id));
+      const currentMethods = Array.from(
+        new Set(
+          currentItems.map((row) => normalizeUiPaymentMethod(row.caraBayar || "")),
+        ),
+      ).filter(Boolean);
+      const itemMethod = normalizeUiPaymentMethod(item.caraBayar || "");
+      if (currentMethods.length > 0 && !currentMethods.includes(itemMethod)) {
+        setFinanceMessage("Pilih item dengan cara bayar yang sama.");
+        return current;
+      }
+      setFinanceMessage("");
+      return [...current, item.id];
+    });
+  };
+
+  const isFinanceItemDisabledForSelection = (item: OffApiItem) => {
+    if (isFinanceItemPaid(item)) return true;
+    if (!selectedPaymentMethod || selectedPaymentItemIds.includes(item.id)) {
+      return false;
+    }
+    return normalizeUiPaymentMethod(item.caraBayar || "") !== selectedPaymentMethod;
+  };
 
   const isFinanceQueueBatch = (batch: OffApiBatch) =>
     batch.smStatus === "Approved by SM" &&
@@ -8173,12 +8441,13 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
       paymentSummary: data.paymentSummary as OffPaymentSummary | undefined,
       payments,
     });
-    setSelectedItems(
-      Array.isArray(data.items) ? (data.items as OffApiItem[]) : [],
-    );
+    const detailItems = Array.isArray(data.items)
+      ? (data.items as OffApiItem[])
+      : [];
+    setSelectedItems(detailItems);
+    syncFinanceItemSelection();
     setSelectedPayments(payments);
     setPaymentDate("");
-    setPaidAmount("");
     setFinanceNote(detailBatch?.financeNote || "");
   };
 
@@ -8226,9 +8495,9 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
         setSelectedBatch(null);
         setSelectedFinanceBatchId(null);
         setSelectedItems([]);
+        setSelectedPaymentItemIds([]);
         setSelectedPayments([]);
         setPaymentDate("");
-        setPaidAmount("");
         setFinanceNote("");
       }
     } catch (error) {
@@ -8237,6 +8506,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
       setFinanceBatches(monitoringRows.length > 0 ? monitoringRows : dummyBatches);
       setFinanceMessage("");
       setSelectedItems([]);
+      setSelectedPaymentItemIds([]);
       setSelectedPayments([]);
     } finally {
       setIsLoading(false);
@@ -8283,6 +8553,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     setSelectedBatch(batch);
     setSelectedFinanceBatchId(batch.id);
     setSelectedItems([]);
+    setSelectedPaymentItemIds([]);
     setSelectedPayments([]);
     setFinanceMessage("");
     setPaymentResult(null);
@@ -8304,12 +8575,15 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
     setIsActionLoading(true);
     setFinanceMessage("");
     try {
-      // Revisi B: bukti pembayaran tidak wajib untuk Tunai. Untuk Transfer tetap wajib.
-      const isTunai = normalizeUiPaymentMethod(paymentMethod) === "Tunai";
-      if (!isTunai && !paymentProofFile) {
-        setFinanceMessage("Bukti pembayaran wajib diupload untuk pembayaran Transfer.");
+      if (selectedPaymentItemIds.length === 0) {
+        setFinanceMessage("Pilih minimal satu item yang akan dibayar.");
         return;
       }
+      if (selectedPaymentMethods.length !== 1) {
+        setFinanceMessage("Pilih item dengan cara bayar yang sama.");
+        return;
+      }
+      const effectivePaymentMethod = selectedPaymentMethods[0];
       if (paymentProofFile) {
         if (
           !["application/pdf", "image/png", "image/jpeg"].includes(
@@ -8326,10 +8600,9 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
       }
       const formData = new FormData();
       formData.append("paymentDate", paymentDate);
-      formData.append("paidAmount", paidAmount);
-      formData.append("paymentMethod", paymentMethod);
       formData.append("senderBank", senderBank);
       formData.append("note", financeNote);
+      formData.append("itemIds", JSON.stringify(selectedPaymentItemIds));
       if (paymentProofFile) {
         formData.append("paymentProof", paymentProofFile);
       }
@@ -8358,15 +8631,15 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
       setPaymentResult({
         paymentNo: payment?.paymentNo,
         paymentDate,
-        paidAmount,
-        paymentMethod,
+        paidAmount: selectedPaymentTotalLabel,
+        paymentMethod: effectivePaymentMethod,
         senderBank,
-        paymentProofName: paymentProofFile?.name || "",
+        paymentProofName: payment?.paymentProofName || "",
+        paymentProofUrl: payment?.proofUrl || null,
         remainingAmount: nextPaymentSummary?.remainingAmount,
         isFullyPaid: nextPaymentSummary?.isFullyPaid,
       });
       setPaymentDate("");
-      setPaidAmount("");
       setPaymentProofFile(null);
       await loadFinanceBatches({
         preserveSelectedId: selectedBatch.id,
@@ -8532,10 +8805,6 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                 label="Supervisor"
                 value={selectedBatch?.supervisorName || "-"}
               />
-              <Field
-                label="No Rekening"
-                value={(selectedBatch as { noRekening?: string | null } | null)?.noRekening || "-"}
-              />
               <Field label="No Claim" value={selectedBatch?.noClaim || "-"} />
               <Field
                 label="Tanggal Diajukan Claim"
@@ -8605,10 +8874,11 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
 
           <Panel title="Item Batch untuk Pembayaran" icon={ListChecks}>
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1250px] text-sm text-left">
+              <table className="w-full min-w-[1450px] text-sm text-left">
                 <thead className="bg-black/50 text-xs uppercase tracking-wider text-slate-500 border-b border-white/10">
                   <tr>
                     {[
+                      "Bayar",
                       "No",
                       "No Surat",
                       "Nama Program",
@@ -8618,6 +8888,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                       "Barang",
                       "Nominal",
                       "Cara Bayar",
+                      "No Rekening",
                       "Tipe",
                       "Deadline",
                     ].map((header) => (
@@ -8635,6 +8906,22 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                         key={item.id || `${item.noSurat}-${index}`}
                         className="hover:bg-white/[0.03]"
                       >
+                        <td className="px-3 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedPaymentItemIds.includes(item.id)}
+                            disabled={isFinanceItemDisabledForSelection(item)}
+                            onChange={() => toggleFinanceItemSelection(item)}
+                            className="h-4 w-4 rounded border-white/10 bg-black/50 text-teal-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label={`Pilih item ${item.itemNo || index + 1} untuk dibayar`}
+                            title={
+                              !isFinanceItemPaid(item) &&
+                              isFinanceItemDisabledForSelection(item)
+                                ? "Item ini berbeda metode pembayaran dari pilihan saat ini."
+                                : undefined
+                            }
+                          />
+                        </td>
                         <td className="px-3 py-3 font-mono text-slate-300">
                           {item.itemNo || index + 1}
                         </td>
@@ -8662,6 +8949,11 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                         <td className="px-3 py-3 text-slate-300">
                           {item.caraBayar || "-"}
                         </td>
+                        <td className="px-3 py-3 font-mono text-xs text-slate-300">
+                          {normalizeUiPaymentMethod(item.caraBayar || "") === "Transfer"
+                            ? item.noRekening || "-"
+                            : "-"}
+                        </td>
                         <td className="px-3 py-3 text-slate-300">
                           {item.type || "-"}
                         </td>
@@ -8674,7 +8966,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                   {!isLoading && selectedItems.length === 0 && (
                     <tr>
                       <td
-                        colSpan={11}
+                        colSpan={13}
                         className="px-3 py-6 text-center text-sm text-slate-500"
                       >
                         Pilih batch untuk melihat item.
@@ -8772,81 +9064,18 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                 value={paymentDate}
                 onChange={setPaymentDate}
               />
-              <div className="space-y-2">
-                <EditableField
-                  label="Jumlah Dibayar oleh Keuangan"
-                  value={paidAmount}
-                  onChange={setPaidAmount}
-                />
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPaidAmount(
-                        `Rp ${remainingAmount.toLocaleString("id-ID")}`,
-                      )
-                    }
-                    className="rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-1.5 text-xs font-bold text-teal-200 hover:bg-teal-500/20"
-                  >
-                    Bayar Sisa
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPaidAmount(
-                        `Rp ${Math.min(transfer, remainingAmount).toLocaleString("id-ID")}`,
-                      )
-                    }
-                    disabled={transfer <= 0}
-                    className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-bold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Bayar Transfer
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPaidAmount(
-                        `Rp ${Math.min(tunai, remainingAmount).toLocaleString("id-ID")}`,
-                      )
-                    }
-                    disabled={tunai <= 0}
-                    className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-200 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Bayar Tunai
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPaidAmount("")}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-white/10"
-                  >
-                    Kosongkan
-                  </button>
-                </div>
-              </div>
-              <label className="block">
-                <span className="text-xs text-slate-500 font-semibold">
-                  Metode Pembayaran
-                </span>
-                <select
-                  value={paymentMethod}
-                  onChange={(event) => setPaymentMethod(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-teal-500/50"
-                >
-                  {offPaymentMethods.map((method) => (
-                    <option
-                      key={method}
-                      className="bg-[#1a1c23]"
-                      value={method}
-                    >
-                      {method}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Field
+                label="Jumlah Dibayar oleh Keuangan"
+                value={selectedPaymentTotalLabel}
+              />
+              <Field
+                label="Metode Pembayaran"
+                value={selectedPaymentMethodLabel}
+              />
+              <Field
+                label="Item Dipilih"
+                value={`${selectedPaymentItemIds.length} item`}
+              />
               <EditableField
                 label="Bank Pengirim"
                 value={senderBank}
@@ -8854,16 +9083,10 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
               />
               <label className="block">
                 <span className="text-xs text-slate-500 font-semibold">
-                  Bukti Pembayaran
-                  {normalizeUiPaymentMethod(paymentMethod) === "Tunai" ? (
-                    <span className="ml-1 font-normal text-emerald-300">
-                      (opsional untuk Tunai)
-                    </span>
-                  ) : (
-                    <span className="ml-1 font-normal text-slate-500">
-                      (wajib untuk Transfer)
-                    </span>
-                  )}
+                  Lampiran Bank
+                  <span className="ml-1 font-normal text-emerald-300">
+                    (opsional, PDF bukti dibuat otomatis)
+                  </span>
                 </span>
                 <input
                   type="file"
@@ -8875,9 +9098,7 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-teal-600 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white outline-none focus:border-teal-500/50"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
-                  {normalizeUiPaymentMethod(paymentMethod) === "Tunai"
-                    ? "Pembayaran Tunai boleh tanpa bukti. Bukti tetap boleh diupload bila ada. PDF/PNG/JPG/JPEG, maks 5MB."
-                    : "PDF, PNG, JPG, atau JPEG. Maksimal 5MB."}
+                  PDF bukti pembayaran akan dibuat otomatis setelah pembayaran dicatat. Lampiran bank opsional: PDF, PNG, JPG, atau JPEG. Maksimal 5MB.
                 </p>
               </label>
             </div>
@@ -8932,8 +9153,19 @@ function FinanceDashboard({ offRole }: OffDashboardProps) {
                   <p>
                     Bukti Pembayaran:{" "}
                     <span className="font-mono">
-                      {paymentResult.paymentProofName}
+                      {paymentResult.paymentProofName || "-"}
                     </span>
+                    {paymentResult.paymentProofUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          window.open(paymentResult.paymentProofUrl || "", "_blank")
+                        }
+                        className="ml-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 font-bold text-emerald-100 hover:bg-emerald-400/20"
+                      >
+                        Lihat Bukti
+                      </button>
+                    )}
                   </p>
                   <p>
                     No Pembayaran:{" "}

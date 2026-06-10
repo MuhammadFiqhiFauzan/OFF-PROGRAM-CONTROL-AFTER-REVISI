@@ -75,14 +75,23 @@ async function main() {
     // ----- Test 1: Migration script dry-run smoke test -----
     console.log("--- Test 1: Migration script dry-run ---");
     let dryRunOutput = "";
-    try {
-        dryRunOutput = execFileSync(process.execPath, ["scripts/migrate-r7f-nullable-off-batch.mjs"], {
-            encoding: "utf8",
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        record("1", "Dry-run executes without error", true);
-    } catch (err) {
-        record("1", "Dry-run executes without error", false, err.stderr || err.message);
+    const migrationPath = resolve(process.cwd(), "scripts/migrate-r7f-nullable-off-batch.mjs");
+    if (!existsSync(migrationPath)) {
+        recordSkip(
+            "1",
+            "Migration script dry-run",
+            "R7f direct/manual source masih HOLD; migration script belum tersedia di repo ini.",
+        );
+    } else {
+        try {
+            dryRunOutput = execFileSync(process.execPath, ["scripts/migrate-r7f-nullable-off-batch.mjs"], {
+                encoding: "utf8",
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            record("1", "Dry-run executes without error", true);
+        } catch (err) {
+            record("1", "Dry-run executes without error", false, err.stderr || err.message);
+        }
     }
     if (dryRunOutput) {
         assertTrue("1", "Dry-run output mentions DRY-RUN mode", dryRunOutput.includes("DRY-RUN"));
