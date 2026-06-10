@@ -118,6 +118,37 @@ body {
 :root {
   --background: #f7efe1;
   --foreground: #2d241b;
+  /* Primary button (gold gradient) — single source of truth untuk seluruh web.
+   * Pengecualian: rute /login tidak memakai .btn-primary. */
+  --btn-primary-bg: linear-gradient(135deg, var(--luxury-gold-2), var(--luxury-gold) 52%, var(--luxury-bronze));
+  --btn-primary-text: #3d2814;
+  --btn-primary-border: rgba(242, 210, 138, 0.7);
+  --btn-primary-shadow: 0 12px 26px rgba(199, 154, 63, 0.22);
+  --btn-primary-shadow-hover: 0 16px 34px rgba(199, 154, 63, 0.28);
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+  padding: 0.625rem 1rem;
+  font-weight: 700;
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-primary-shadow);
+  transition: all 150ms ease;
+}
+
+.btn-primary:hover {
+  box-shadow: var(--btn-primary-shadow-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /*
@@ -525,8 +556,8 @@ body {
 .hover\:bg-indigo-500:hover,
 .hover\:bg-orange-500:hover,
 .hover\:bg-teal-500:hover {
-  background: linear-gradient(135deg, var(--luxury-gold-2), var(--luxury-gold) 52%, var(--luxury-bronze)) !important;
-  color: #3d2814 !important;
+  background: var(--btn-primary-bg) !important;
+  color: var(--btn-primary-text) !important;
 }
 
 .hover\:bg-rose-500\/20:hover {
@@ -544,8 +575,8 @@ body {
 
 .file\:bg-blue-600::file-selector-button,
 .file\:bg-teal-600::file-selector-button {
-  background: linear-gradient(135deg, var(--luxury-gold-2), var(--luxury-gold) 52%, var(--luxury-bronze));
-  color: #3d2814;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
 }
 
 .file\:text-white::file-selector-button {

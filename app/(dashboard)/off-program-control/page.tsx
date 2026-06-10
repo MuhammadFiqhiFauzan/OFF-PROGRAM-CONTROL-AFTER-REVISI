@@ -5781,7 +5781,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
     return (
       <div className="space-y-6">
         <div className="rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-6 shadow-xl">
-          <h2 className="text-2xl font-black text-white">Dashboard Klaim</h2>
+          <h2 className="text-2xl font-black text-white">Panel Klaim</h2>
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <section className="rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-6 shadow-xl">
@@ -5798,7 +5798,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
             </h3>
             <button
               onClick={() => setClaimView("after-sm")}
-              className="mt-6 inline-flex rounded-xl border border-[#f2d28a]/70 bg-gradient-to-r from-[#f2d28a] via-[#d6a948] to-[#b77a25] px-4 py-2.5 text-sm font-bold text-[#3d2814] shadow-[0_12px_26px_rgba(199,154,63,0.22)] transition-all hover:shadow-[0_16px_34px_rgba(199,154,63,0.28)]"
+              className="btn-primary mt-6 text-sm"
             >
               Buka Validasi Setelah SM
             </button>
@@ -5817,7 +5817,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
             </h3>
             <button
               onClick={() => setClaimView("after-finance")}
-              className="mt-6 inline-flex rounded-xl border border-[#f2d28a]/70 bg-gradient-to-r from-[#f2d28a] via-[#d6a948] to-[#b77a25] px-4 py-2.5 text-sm font-bold text-[#3d2814] shadow-[0_12px_26px_rgba(199,154,63,0.22)] transition-all hover:shadow-[0_16px_34px_rgba(199,154,63,0.28)]"
+              className="btn-primary mt-6 text-sm"
             >
               Buka Validasi Setelah Keuangan
             </button>
@@ -5833,16 +5833,16 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               </span>
             </div>
             <h3 className="mt-5 text-xl font-black text-white">
-              Dashboard Data Claim
+              Panel Data Klaim
             </h3>
             <p className="mt-2 text-sm text-slate-400">
               Input pengajuan versi CLAIM (Insentif, Diskon Reguler, Insentif Distributor, Retur) — data dari direksi.
             </p>
             <button
               onClick={() => setClaimView("data-claim")}
-              className="mt-6 inline-flex rounded-xl border border-indigo-500/50 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-colors hover:bg-indigo-600/50"
+              className="btn-primary mt-6 text-sm"
             >
-              Buka Dashboard Data Claim
+              Buka Panel Data Klaim
             </button>
           </section>
         </div>
@@ -5862,7 +5862,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           onClick={() => setClaimView("hub")}
           className="inline-flex rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-bold text-slate-200 hover:bg-white/10"
         >
-          ← Dashboard Klaim
+          ← Panel Klaim
         </button>
         <button
           onClick={() => setClaimView("after-sm")}
@@ -5881,7 +5881,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           onClick={() => setClaimView("data-claim")}
           className={`rounded-xl border px-4 py-2.5 text-sm font-bold ${claimView === "data-claim" ? "border-indigo-500 bg-indigo-600 text-white" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
         >
-          Dashboard Data Claim
+          Panel Data Klaim
         </button>
       </div>
       <div className="rounded-2xl border border-white/10 bg-[#1a1c23]/60 p-5 shadow-xl">
@@ -5889,7 +5889,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           {claimView === "after-sm"
             ? "Validasi Setelah SM"
             : claimView === "data-claim"
-              ? "Dashboard Data Claim (Pengajuan Versi CLM)"
+              ? "Panel Data Klaim (Pengajuan Versi CLM)"
               : "Validasi Setelah Keuangan"}
         </h2>
       </div>
@@ -6983,13 +6983,13 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                   Isi data pengajuan dari direksi. Tipe program: Insentif, Diskon Reguler, Insentif Distributor, Retur.
                   No Pengajuan akan otomatis menggunakan format CLM.
                 </InfoNote>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500">Principal</label>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 items-end gap-3">
+                  <label className="block">
+                    <span className="text-xs text-slate-500 font-semibold">Principal</span>
                     <select
                       value={clmPrinciple}
                       onChange={(e) => setClmPrinciple(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500/50"
+                      className="mt-1 h-[38px] w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500/50"
                     >
                       {getPrincipalOptions(allClaimBatches).concat(
                         getPrincipalOptions(allClaimBatches).length === 0
@@ -6999,7 +6999,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
-                  </div>
+                  </label>
                   <EditableField label="Gelombang" value={clmGelombang} onChange={setClmGelombang} />
                   <EditableField label="Bulan (MM)" value={clmBulan} onChange={setClmBulan} />
                   <EditableField label="Tahun (YYYY)" value={clmTahun} onChange={setClmTahun} />
