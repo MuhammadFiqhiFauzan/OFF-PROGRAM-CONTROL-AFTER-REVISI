@@ -1,14 +1,14 @@
 // Tujuan: Shell navigasi utama dashboard Smart ERP dengan filtering navigasi berdasarkan RBAC dan satu pintu fitur Accurate.
 // Caller: `app/(dashboard)/layout.tsx`.
-// Dependensi: `authClient`, router Next.js, ikon `lucide-react`, helper RBAC, ThemeSwitcher.
+// Dependensi: `authClient`, pathname Next.js, ikon `lucide-react`, helper RBAC, ThemeSwitcher.
 // Main Functions: `SidebarLayout`, `handleSignOut`.
 // Side Effects: Sign-out Better Auth dan navigasi browser; tidak melakukan DB/file I/O langsung.
 "use client";
 
 import { useState } from "react";
-import { Menu, Home, Users, Database, Server, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Settings2, FileText, Shield, ClipboardCheck, ReceiptText, X } from "lucide-react";
+import { Menu, Home, Database, Server, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Settings2, FileText, Shield, ClipboardCheck, ReceiptText, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { canAccessPath, normalizeRole } from "@/lib/rbac";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 
@@ -16,7 +16,6 @@ export default function SidebarLayout({ children, role, permissions }: { childre
     // Desktop: sidebar collapse/expand. Mobile: drawer open/close (hamburger).
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileOpen, setIsMobileOpen] = useState(false);
-    const router = useRouter();
     const pathname = usePathname();
     const { data: session } = authClient.useSession();
     const userRole = normalizeRole(role || session?.user?.role);
@@ -134,14 +133,6 @@ export default function SidebarLayout({ children, role, permissions }: { childre
                 {/* Top Header */}
                 <header className="h-16 bg-[#1a1c23]/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 md:px-6 z-10 sticky top-0">
                     <div className="flex items-center gap-3">
-                        {/* Hamburger hanya di desktop (md+); mobile pakai floating capsule */}
-                        <button
-                            onClick={() => setIsMobileOpen(true)}
-                            className="hidden md:block p-1.5 hover:bg-white/10 rounded-md transition-colors"
-                            aria-label="Buka menu"
-                        >
-                            <Menu size={20} className="text-slate-300" />
-                        </button>
                         <span className="text-sm font-medium text-slate-400 hidden sm:inline">Headless Accurate Frontend</span>
                     </div>
                     <div className="flex items-center gap-3">
