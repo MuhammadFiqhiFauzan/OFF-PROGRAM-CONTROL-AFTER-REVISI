@@ -31,8 +31,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
                 <div className="relative">
                     <select
                         className={cn(
-                            "flex h-10 w-full appearance-none rounded-md border text-sm transition-colors",
-                            "bg-[#16181d] border-white/10 text-slate-100 placeholder:text-slate-500",
+                            "flex h-10 w-full appearance-none rounded-md border text-sm shadow-sm transition-colors",
+                            "bg-[#16181d] border-white/5 text-slate-100 placeholder:text-slate-500",
                             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:border-indigo-500",
                             "disabled:cursor-not-allowed disabled:opacity-50",
                             error && "border-red-500/50 focus-visible:ring-red-500/50 focus-visible:border-red-500",

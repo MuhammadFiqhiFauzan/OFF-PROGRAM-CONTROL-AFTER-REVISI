@@ -10,6 +10,7 @@ import {
     getSortedRowModel,
     useReactTable,
     SortingState,
+    FilterFn,
 } from "@tanstack/react-table";
 import { ChevronDown, ChevronUp, Search, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { fuzzyMatch } from "@/lib/fuzzySearch";
@@ -25,7 +26,6 @@ interface DataTableProps<TData, TValue> {
 export function DataTable<TData, TValue>({
     columns,
     data,
-    searchKey,
     searchPlaceholder = "Search all columns...",
     isLoading = false
 }: DataTableProps<TData, TValue>) {
@@ -35,9 +35,9 @@ export function DataTable<TData, TValue>({
 
     const [isViewOpen, setIsViewOpen] = useState(false);
 
-    const fuzzyOrWildcardFilter = (row: any, columnId: string, filterValue: string) => {
+    const fuzzyOrWildcardFilter: FilterFn<TData> = (row, columnId, filterValue) => {
         const value = row.getValue(columnId);
-        return fuzzyMatch(value, filterValue);
+        return fuzzyMatch(value, String(filterValue || ""));
     };
 
     const table = useReactTable({
@@ -62,7 +62,7 @@ export function DataTable<TData, TValue>({
         <div className="space-y-4">
             {/* Toolbar */}
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 w-72 focus-within:ring-2 focus-within:ring-indigo-500/50 focus-within:border-indigo-500 transition-all">
+                <div className="flex items-center gap-2 bg-white/5 border border-white/5 rounded-lg px-3 py-2 w-72 shadow-sm focus-within:ring-2 focus-within:ring-indigo-500/50 focus-within:border-indigo-500 transition-all">
                     <Search className="h-4 w-4 text-slate-400" />
                     <input
                         placeholder={searchPlaceholder}
@@ -75,14 +75,14 @@ export function DataTable<TData, TValue>({
                 <div className="flex items-center gap-2 relative">
                     <button 
                         onClick={() => setIsViewOpen(!isViewOpen)}
-                        className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 transition-colors"
+                        className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg px-3 py-2 text-sm text-slate-300 transition-colors shadow-sm"
                     >
                         <SlidersHorizontal className="h-4 w-4" />
                         Kolom
                     </button>
 
                     {isViewOpen && (
-                        <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1c23] border border-white/10 rounded-lg shadow-xl shadow-black/50 z-50 p-2 py-3 backdrop-blur-xl">
+                        <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1c23] border border-white/5 rounded-lg shadow-xl shadow-black/50 z-50 p-2 py-3 backdrop-blur-xl">
                             <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">Tampilkan Kolom</div>
                             <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
                                 {table.getAllLeafColumns().map(column => {
@@ -108,10 +108,10 @@ export function DataTable<TData, TValue>({
             </div>
 
             {/* Table */}
-            <div className="rounded-xl border border-white/10 bg-[#16181d]/80 overflow-hidden backdrop-blur-md shadow-xl">
+            <div className="rounded-xl border border-white/5 bg-[#16181d]/80 overflow-hidden backdrop-blur-md shadow-xl">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left relative">
-                        <thead className="text-xs text-slate-400 uppercase bg-black/20 border-b border-white/10">
+                        <thead className="text-xs text-slate-400 uppercase bg-black/20 border-b border-white/5">
                             {table.getHeaderGroups().map((headerGroup) => (
                                 <tr key={headerGroup.id}>
                                     {headerGroup.headers.map((header) => {
@@ -195,7 +195,7 @@ export function DataTable<TData, TValue>({
                             onChange={(e) => {
                                 table.setPageSize(Number(e.target.value));
                             }}
-                            className="bg-white/5 border border-white/10 rounded-md py-1 px-2 focus:ring-1 focus:ring-indigo-500 outline-none text-xs"
+                            className="bg-white/5 border border-white/5 rounded-md py-1 px-2 focus:ring-1 focus:ring-indigo-500 outline-none text-xs"
                         >
                             {[10, 20, 30, 40, 50].map((pageSize) => (
                                 <option key={pageSize} value={pageSize} className="bg-[#1a1c23]">
@@ -212,7 +212,7 @@ export function DataTable<TData, TValue>({
                         <button
                             onClick={() => table.setPageIndex(0)}
                             disabled={!table.getCanPreviousPage()}
-                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors border border-white/5"
+                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
                             <span className="sr-only">Go to first page</span>
                             <ChevronsLeft className="h-4 w-4" />
@@ -220,7 +220,7 @@ export function DataTable<TData, TValue>({
                         <button
                             onClick={() => table.previousPage()}
                             disabled={!table.getCanPreviousPage()}
-                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors border border-white/5"
+                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
                             <span className="sr-only">Go to previous page</span>
                             <ChevronLeft className="h-4 w-4" />
@@ -228,7 +228,7 @@ export function DataTable<TData, TValue>({
                         <button
                             onClick={() => table.nextPage()}
                             disabled={!table.getCanNextPage()}
-                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors border border-white/5"
+                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
                             <span className="sr-only">Go to next page</span>
                             <ChevronRight className="h-4 w-4" />
@@ -236,7 +236,7 @@ export function DataTable<TData, TValue>({
                         <button
                             onClick={() => table.setPageIndex(table.getPageCount() - 1)}
                             disabled={!table.getCanNextPage()}
-                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors border border-white/5"
+                            className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
                             <span className="sr-only">Go to last page</span>
                             <ChevronsRight className="h-4 w-4" />

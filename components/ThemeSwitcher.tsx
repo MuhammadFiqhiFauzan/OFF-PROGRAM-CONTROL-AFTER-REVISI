@@ -58,7 +58,7 @@ export default function ThemeSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10"
+        className="flex items-center gap-2 rounded-lg bg-black/30 px-2.5 py-1.5 text-xs font-medium text-slate-300 shadow-sm transition-colors hover:bg-white/10"
         title="Ganti tema"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -71,10 +71,10 @@ export default function ThemeSwitcher() {
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden="true" />
           <div
-            className="absolute right-0 z-40 mt-2 w-60 overflow-hidden rounded-xl border border-white/10 bg-[#1a1c23] shadow-2xl"
+            className="absolute right-0 z-40 mt-2 w-60 overflow-hidden rounded-xl border border-white/5 bg-[#1a1c23] shadow-2xl"
             role="menu"
           >
-            <div className="border-b border-white/5 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Tema Tampilan
             </div>
             {OFF_THEMES.map((option) => (
@@ -87,7 +87,7 @@ export default function ThemeSwitcher() {
                 className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/5"
               >
                 <span
-                  className="h-6 w-6 shrink-0 rounded-md border border-white/20"
+                  className="h-6 w-6 shrink-0 rounded-md shadow-sm"
                   style={{ backgroundColor: option.swatch }}
                   aria-hidden="true"
                 />
