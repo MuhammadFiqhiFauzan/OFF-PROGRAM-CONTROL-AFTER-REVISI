@@ -1102,4 +1102,45 @@ html[data-theme="neon"] .shadow-\[\#d7b56d\]\/10 {
   --tw-shadow-color: rgba(31, 143, 255, 0.15) !important;
 }
 
+
+/* ─── Border-radius override: angular sci-fi aesthetic ─── */
+html[data-theme="neon"] .rounded-md,
+html[data-theme="neon"] .rounded-lg,
+html[data-theme="neon"] .rounded-xl,
+html[data-theme="neon"] .rounded-2xl,
+html[data-theme="neon"] .rounded-3xl,
+html[data-theme="neon"] .rounded-\[1\.5rem\],
+html[data-theme="neon"] .rounded-\[1\.75rem\],
+html[data-theme="neon"] .rounded-\[2rem\] {
+  border-radius: 4px !important;
+}
+
+/* ─── Semantic neon text utilities ─── */
+html[data-theme="neon"] .neon-text-success {
+  color: #2ee56b !important;
+  text-shadow: 0 0 10px rgba(46,229,107,.5);
+}
+html[data-theme="neon"] .neon-text-warn {
+  color: #ffc233 !important;
+  text-shadow: 0 0 10px rgba(255,194,51,.5);
+}
+html[data-theme="neon"] .neon-text-danger {
+  color: #ff5d5d !important;
+  text-shadow: 0 0 10px rgba(255,93,93,.5);
+}
+html[data-theme="neon"] .neon-text-info {
+  color: #3ed0ff !important;
+  text-shadow: 0 0 10px rgba(62,208,255,.5);
+}
+
+/* ─── Heading glow refinement ─── */
+html[data-theme="neon"] h1,
+html[data-theme="neon"] h2 {
+  text-shadow: 0 0 18px rgba(62,208,255,.55), 0 0 36px rgba(31,143,255,.25) !important;
+  letter-spacing: 0.05em;
+}
+html[data-theme="neon"] h3 {
+  text-shadow: 0 0 12px rgba(62,208,255,.4) !important;
+}
+
 /* neon-theme: end */
