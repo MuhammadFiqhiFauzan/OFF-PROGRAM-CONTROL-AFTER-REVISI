@@ -25,7 +25,7 @@
 #   python -m uvicorn main:app --reload --port 8000
 
 from fastapi import FastAPI, UploadFile, File, Request, Form, Response, Cookie, BackgroundTasks
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, ORJSONResponse
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -208,6 +208,8 @@ app = FastAPI(title="Discount Validator API", version=f"PATCH-{PATCH_VERSION}")
 BACKGROUND_JOBS: Dict[str, Dict[str, Any]] = {}
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex="^https?://.*$",
@@ -1469,25 +1471,36 @@ def append_error_log(where: str, err: Exception, context: Optional[Dict[str, Any
 # ---------------------------
 # Payments (LPB) helpers
 # ---------------------------
+_PAYMENTS_DB_CACHE: Optional[Dict[str, Any]] = None
+_PAYMENTS_DB_MTIME: float = 0.0
+_PAYMENTS_DB_EMPTY: Dict[str, Any] = {"lpb": {}, "submissions": {}, "drafts": {}, "finance_mappings": {}, "proofs": {}, "sppd_settings": {}}
+
 def load_payments_db() -> Dict[str, Any]:
+    global _PAYMENTS_DB_CACHE, _PAYMENTS_DB_MTIME
     if not PAYMENTS_DB_PATH or not os.path.exists(PAYMENTS_DB_PATH):
-        return {"lpb": {}, "submissions": {}, "drafts": {}, "finance_mappings": {}, "proofs": {}, "sppd_settings": {}}
+        return dict(_PAYMENTS_DB_EMPTY)
     try:
+        mtime = os.path.getmtime(PAYMENTS_DB_PATH)
+        if _PAYMENTS_DB_CACHE is not None and mtime == _PAYMENTS_DB_MTIME:
+            return _PAYMENTS_DB_CACHE
         with open(PAYMENTS_DB_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
-        return {"lpb": {}, "submissions": {}, "drafts": {}, "finance_mappings": {}, "proofs": {}, "sppd_settings": {}}
+        return dict(_PAYMENTS_DB_EMPTY)
     if not isinstance(data, dict):
-        return {"lpb": {}, "submissions": {}, "drafts": {}, "finance_mappings": {}, "proofs": {}, "sppd_settings": {}}
+        return dict(_PAYMENTS_DB_EMPTY)
     data.setdefault("lpb", {})
     data.setdefault("submissions", {})
     data.setdefault("drafts", {})
     data.setdefault("finance_mappings", {})
     data.setdefault("proofs", {})
     data.setdefault("sppd_settings", {})
+    _PAYMENTS_DB_CACHE = data
+    _PAYMENTS_DB_MTIME = mtime
     return data
 
 def save_payments_db(data: Dict[str, Any]) -> None:
+    global _PAYMENTS_DB_CACHE, _PAYMENTS_DB_MTIME
     if not PAYMENTS_DB_PATH:
         return
     os.makedirs(os.path.dirname(PAYMENTS_DB_PATH), exist_ok=True)
@@ -1495,6 +1508,8 @@ def save_payments_db(data: Dict[str, Any]) -> None:
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=True, indent=2)
     os.replace(tmp_path, PAYMENTS_DB_PATH)
+    _PAYMENTS_DB_CACHE = data
+    _PAYMENTS_DB_MTIME = os.path.getmtime(PAYMENTS_DB_PATH)
 
 def empty_payments_db_preserving_config(db: Dict[str, Any]) -> Dict[str, Any]:
     db = db if isinstance(db, dict) else {}
@@ -5645,7 +5660,7 @@ def payments_data(request: Request):
             row["gap_nilai_display"] = format_idr(gap_val)
         row["status_pembayaran"] = row.get("status_pembayaran", "")
         rows.append(row)
-    return JSONResponse({"ok": True, "data": rows})
+    return ORJSONResponse({"ok": True, "data": rows})
 
 @app.get("/payments/export")
 def payments_export(request: Request):
