@@ -2869,7 +2869,7 @@ export default function Home() {
                           <td className="px-4 py-3 align-top">
                             <div className="font-mono text-xs break-all">{item.invoiceNo || "-"}</div>
                             {item.recommended && (
-                              <div className="mt-2 inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                              <div className="mt-2 inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300 neon-text-success">
                                 Rekomendasi
                               </div>
                             )}
@@ -2879,7 +2879,7 @@ export default function Home() {
                           <td className="px-4 py-3 align-top">
                             <div className="flex flex-wrap gap-2">
                               {item.reasons.map((reason) => (
-                                <span key={`${item.reviewId}-${reason}`} className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                                <span key={`${item.reviewId}-${reason}`} className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300 neon-text-warn">
                                   {getDuplicateReasonLabel(reason)}
                                 </span>
                               ))}

@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { Menu, Home, Users, Database, Server, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Settings2, FileText, Shield, ClipboardCheck, ReceiptText, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { canAccessPath, normalizeRole } from "@/lib/rbac";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 
@@ -17,6 +17,7 @@ export default function SidebarLayout({ children, role, permissions }: { childre
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileOpen, setIsMobileOpen] = useState(false);
     const router = useRouter();
+    const pathname = usePathname();
     const { data: session } = authClient.useSession();
     const userRole = normalizeRole(role || session?.user?.role);
 
@@ -133,10 +134,10 @@ export default function SidebarLayout({ children, role, permissions }: { childre
                 {/* Top Header */}
                 <header className="h-16 bg-[#1a1c23]/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 md:px-6 z-10 sticky top-0">
                     <div className="flex items-center gap-3">
-                        {/* Hamburger hanya tampil di mobile */}
+                        {/* Hamburger hanya di desktop (md+); mobile pakai floating capsule */}
                         <button
                             onClick={() => setIsMobileOpen(true)}
-                            className="md:hidden p-1.5 hover:bg-white/10 rounded-md transition-colors"
+                            className="hidden md:block p-1.5 hover:bg-white/10 rounded-md transition-colors"
                             aria-label="Buka menu"
                         >
                             <Menu size={20} className="text-slate-300" />
@@ -155,9 +156,33 @@ export default function SidebarLayout({ children, role, permissions }: { childre
                 </header>
 
                 {/* Page Content */}
-                <main className="flex-1 overflow-y-auto p-4 md:p-6 relative">
+                <main className="flex-1 overflow-y-auto p-4 md:p-6 relative pb-20 md:pb-6">
                     {children}
                 </main>
+
+                {/* Mobile floating capsule nav (< md) — swipeable, semua item */}
+                <nav className="md:hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-32px)] max-w-sm rounded-2xl bg-[#1a1c23]/90 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+                    <div className="flex items-center h-14 px-2 overflow-x-auto gap-1" style={{ scrollbarWidth: "none" }}>
+                        {navItems.map((item) => {
+                            const Icon = item.icon;
+                            const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+                            return (
+                                <a
+                                    key={item.href}
+                                    href={item.href}
+                                    className={`flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl shrink-0 min-w-[52px] transition-all ${
+                                        active ? "text-amber-400" : "text-slate-500 hover:text-slate-300"
+                                    }`}
+                                >
+                                    <Icon size={20} strokeWidth={active ? 2.5 : 2} />
+                                    <span className={`text-[10px] leading-tight truncate max-w-[56px] text-center ${active ? "font-semibold" : "font-medium"}`}>
+                                        {item.name.split(" ")[0]}
+                                    </span>
+                                </a>
+                            );
+                        })}
+                    </div>
+                </nav>
             </div>
         </div>
     );
