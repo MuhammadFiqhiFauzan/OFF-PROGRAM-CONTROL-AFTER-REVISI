@@ -2030,7 +2030,30 @@ html[data-theme="ios"] .hover\:text-\[\#a87518\]:hover {
   color: var(--ios-primary) !important;
 }
 
-/* ios-theme: end (rev8b) */
+/* ===== OFF Program Control (drilldown role): cream surface & teks coklat ===== */
+html[data-theme="ios"] .bg-\[\#fffaf0\]\/78,
+html[data-theme="ios"] .bg-\[\#fffaf0\]\/85,
+html[data-theme="ios"] .bg-\[\#fffaf0\]\/90 {
+  background-color: var(--ios-card) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+html[data-theme="ios"] .border-\[\#d4ad61\]\/28,
+html[data-theme="ios"] .border-\[\#d4ad61\]\/30,
+html[data-theme="ios"] .border-\[\#d4ad61\]\/35 {
+  border-color: var(--ios-border) !important;
+}
+
+html[data-theme="ios"] .text-\[\#2d241b\] {
+  color: var(--ios-heading) !important;
+}
+
+html[data-theme="ios"] .hover\:bg-\[\#f2d28a\]\/20:hover {
+  background-color: rgba(0, 122, 255, 0.06) !important;
+}
+
+/* ios-theme: end (rev9a) */
 
 /* Pertahankan teks putih di atas tombol/gradient solid (override
  * kelas literal warm yang sebelumnya bisa berubah menjadi gelap). */
