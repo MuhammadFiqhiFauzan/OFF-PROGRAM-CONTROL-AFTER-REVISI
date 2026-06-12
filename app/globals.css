@@ -1541,14 +1541,28 @@ html[data-theme="ios"] {
 
 html[data-theme="ios"] body {
   background:
-    radial-gradient(1200px 600px at 100% 0%, #ffffff 0%, rgba(255, 255, 255, 0) 60%),
+    radial-gradient(circle at 12% 14%, rgba(0, 122, 255, 0.12), transparent 42%),
+    radial-gradient(circle at 88% 16%, rgba(88, 86, 214, 0.12), transparent 42%),
+    radial-gradient(circle at 78% 88%, rgba(255, 45, 85, 0.08), transparent 45%),
+    radial-gradient(circle at 20% 90%, rgba(52, 199, 89, 0.07), transparent 45%),
     var(--ios-page) !important;
+  background-attachment: fixed !important;
   color: var(--ios-body);
   font-family: -apple-system, "SF Pro Display", "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
 }
 
+/* Ambient warm layers (dashboard) → sembunyikan; mesh iOS dari body yang tampil. */
 html[data-theme="ios"] body > div.fixed.-z-10 {
   display: none;
+}
+
+/* Login wrapper memakai bg radial warm sendiri → ganti jadi mesh iOS terang. */
+html[data-theme="ios"] .min-h-screen.flex.items-center.justify-center {
+  background:
+    radial-gradient(circle at 14% 12%, rgba(0, 122, 255, 0.16), transparent 40%),
+    radial-gradient(circle at 86% 20%, rgba(88, 86, 214, 0.16), transparent 42%),
+    radial-gradient(circle at 75% 85%, rgba(255, 45, 85, 0.10), transparent 44%),
+    var(--ios-page) !important;
 }
 
 /* ===== Override kelas literal warm/dark agar konsisten dengan palet iOS ===== */
@@ -1573,6 +1587,9 @@ html[data-theme="ios"] .bg-\[\#1a1c23\]\/70,
 html[data-theme="ios"] .bg-\[\#1a1c23\]\/80,
 html[data-theme="ios"] .bg-\[\#1a1c23\]\/90 {
   background-color: var(--ios-card) !important;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
 }
 
 html[data-theme="ios"] .bg-black\/20,
@@ -1683,19 +1700,34 @@ html[data-theme="ios"] .bg-\[\#f7ead0\]\/72 {
   background-color: var(--ios-card) !important;
 }
 
+/* Banner/hero gradient warm → kaca terang (bukan slab biru). Teks gelap tetap terbaca.
+   Tailwind v4: set background-image langsung, jangan override --tw-gradient-* (rapuh). */
+html[data-theme="ios"] .from-\[\#fff3d1\] {
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(229, 240, 255, 0.55)) !important;
+}
+
+html[data-theme="ios"] .bg-gradient-to-br.from-\[\#fffaf0\]\/90 {
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(229, 240, 255, 0.5)) !important;
+}
+
+/* Tombol primary warm (gradient emas) → biru iOS solid + teks putih. */
+html[data-theme="ios"] .from-\[\#f2d28a\] {
+  background-image: linear-gradient(135deg, #2a93ff, #007aff) !important;
+  background-color: #007aff !important;
+  border-color: rgba(0, 122, 255, 0.5) !important;
+}
+
+/* Teks tombol primary → putih (compound selector menang atas remap .text-[#3d2814]). */
+html[data-theme="ios"] .from-\[\#f2d28a\].text-\[\#3d2814\],
+html[data-theme="ios"] .from-\[\#f2d28a\] * {
+  color: #ffffff !important;
+}
+
+/* Solid warm fills → biru iOS */
 html[data-theme="ios"] .bg-\[\#f2d28a\],
 html[data-theme="ios"] .bg-\[\#c79a3f\],
 html[data-theme="ios"] .bg-\[\#b77a25\],
-html[data-theme="ios"] .bg-\[\#7a4e20\],
-html[data-theme="ios"] .from-\[\#f2d28a\],
-html[data-theme="ios"] .from-\[\#fff3d1\],
-html[data-theme="ios"] .via-\[\#e4ba62\],
-html[data-theme="ios"] .via-\[\#c79a3f\],
-html[data-theme="ios"] .to-\[\#9a6424\],
-html[data-theme="ios"] .to-\[\#7a4e20\] {
-  --tw-gradient-from: #2a93ff var(--tw-gradient-from-position) !important;
-  --tw-gradient-via: #007aff var(--tw-gradient-via-position) !important;
-  --tw-gradient-to: #0051d5 var(--tw-gradient-to-position) !important;
+html[data-theme="ios"] .bg-\[\#7a4e20\] {
   background-color: var(--ios-primary) !important;
 }
 
@@ -1825,7 +1857,7 @@ html[data-theme="ios"] .shadow-black {
   --tw-shadow-color: rgba(0, 0, 0, 0.08) !important;
 }
 
-/* ios-theme: end */
+/* ios-theme: end (rev3) */
 
 /* Pertahankan teks putih di atas tombol/gradient solid (override
  * kelas literal warm yang sebelumnya bisa berubah menjadi gelap). */
