@@ -1867,7 +1867,92 @@ html[data-theme="ios"] .bg-gradient-to-br.from-\[\#fffaf0\]\/90 {
   background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(229, 240, 255, 0.55), rgba(88, 86, 214, 0.10)) !important;
 }
 
-/* ios-theme: end (rev4) */
+/* ===== Status pill colors → tint iOS semantik =====
+ * Default global (un-scoped, baris ~497-522) meretint bg-amber/emerald/sky/teal/
+ * orange/purple/cyan → emas hangat #f2d28a. iOS belum override sehingga krem
+ * bocor ke seluruh pill status & blob dekoratif hero. Petakan ke tint iOS:
+ * hijau (sukses), oranye (warning), biru (info), ungu (accent), merah (danger). */
+
+/* Success → hijau iOS #34c759 */
+html[data-theme="ios"] .bg-emerald-500\/10,
+html[data-theme="ios"] .bg-emerald-500\/20,
+html[data-theme="ios"] .bg-emerald-300\/10,
+html[data-theme="ios"] .bg-emerald-600\/20,
+html[data-theme="ios"] .bg-teal-500\/10,
+html[data-theme="ios"] .bg-teal-500\/20,
+html[data-theme="ios"] .bg-teal-300\/10,
+html[data-theme="ios"] .bg-green-500\/10 {
+  background-color: rgba(52, 199, 89, 0.12) !important;
+}
+
+/* Warning → oranye iOS #ff9500 */
+html[data-theme="ios"] .bg-amber-500,
+html[data-theme="ios"] .bg-amber-500\/10,
+html[data-theme="ios"] .bg-amber-500\/20,
+html[data-theme="ios"] .bg-amber-500\/30,
+html[data-theme="ios"] .bg-amber-500\/\[0\.06\],
+html[data-theme="ios"] .bg-orange-500\/10,
+html[data-theme="ios"] .bg-orange-500\/20 {
+  background-color: rgba(255, 149, 0, 0.14) !important;
+}
+
+/* Info → biru iOS lembut */
+html[data-theme="ios"] .bg-sky-500\/10,
+html[data-theme="ios"] .bg-sky-500\/20,
+html[data-theme="ios"] .bg-cyan-500\/10,
+html[data-theme="ios"] .bg-cyan-500\/20,
+html[data-theme="ios"] .bg-indigo-500\/5,
+html[data-theme="ios"] .bg-indigo-600\/30 {
+  background-color: var(--ios-primary-soft) !important;
+}
+
+/* Accent → ungu iOS #5856d6 */
+html[data-theme="ios"] .bg-purple-500\/10,
+html[data-theme="ios"] .bg-purple-500\/20 {
+  background-color: rgba(88, 86, 214, 0.12) !important;
+}
+
+/* Danger → merah iOS #ff3b30 */
+html[data-theme="ios"] .bg-rose-500\/10,
+html[data-theme="ios"] .bg-rose-500\/20 {
+  background-color: rgba(255, 59, 48, 0.10) !important;
+}
+
+/* Hover status fills */
+html[data-theme="ios"] .hover\:bg-emerald-500\/30:hover,
+html[data-theme="ios"] .hover\:bg-teal-500\/20:hover,
+html[data-theme="ios"] .hover\:bg-teal-500\/30:hover {
+  background-color: rgba(52, 199, 89, 0.18) !important;
+}
+
+html[data-theme="ios"] .hover\:bg-rose-500\/20:hover {
+  background-color: rgba(255, 59, 48, 0.16) !important;
+}
+
+/* Teks status semantik (default global memetakan amber/sky/orange/purple → biru
+ * via --luxury-soft; perjelas warning=oranye, accent=ungu, info=biru). */
+html[data-theme="ios"] .text-amber-100,
+html[data-theme="ios"] .text-amber-100\/80,
+html[data-theme="ios"] .text-amber-200,
+html[data-theme="ios"] .text-amber-300,
+html[data-theme="ios"] .text-amber-400,
+html[data-theme="ios"] .text-orange-300 {
+  color: #b25000 !important;
+}
+
+html[data-theme="ios"] .text-purple-300,
+html[data-theme="ios"] .text-purple-400 {
+  color: #5856d6 !important;
+}
+
+html[data-theme="ios"] .text-sky-200,
+html[data-theme="ios"] .text-sky-300,
+html[data-theme="ios"] .text-sky-400,
+html[data-theme="ios"] .text-cyan-400 {
+  color: var(--ios-primary) !important;
+}
+
+/* ios-theme: end (rev5a) */
 
 /* Pertahankan teks putih di atas tombol/gradient solid (override
  * kelas literal warm yang sebelumnya bisa berubah menjadi gelap). */
