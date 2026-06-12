@@ -1957,7 +1957,80 @@ html[data-theme="ios"] .text-\[\#7a664c\] {
   color: var(--ios-primary) !important;
 }
 
-/* ios-theme: end (rev6) */
+/* ===== Claim Workflow: palet warm arbitrary khusus → iOS =====
+ * Halaman ini punya banyak hex hangat sendiri (cream surface, gold accent,
+ * teks coklat) yang belum tertangani remap umum. */
+
+/* Surface cream (kartu) → kaca putih */
+html[data-theme="ios"] .bg-\[\#fffaf0\],
+html[data-theme="ios"] .bg-\[\#fff7e6\] {
+  background-color: var(--ios-card) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* Header tabel / pill cream → abu muda netral */
+html[data-theme="ios"] .bg-\[\#f7ead1\],
+html[data-theme="ios"] .bg-\[\#f1dfbd\] {
+  background-color: rgba(242, 242, 247, 0.92) !important;
+}
+
+/* Gold solid (badge/tombol) → biru iOS */
+html[data-theme="ios"] .bg-\[\#c6922e\] {
+  background-color: var(--ios-primary) !important;
+}
+
+html[data-theme="ios"] .hover\:bg-\[\#a87518\]:hover {
+  background-color: var(--ios-primary-dark) !important;
+}
+
+/* Hover baris cream → tint biru iOS */
+html[data-theme="ios"] .hover\:bg-\[\#fff7e6\]:hover,
+html[data-theme="ios"] .hover\:bg-\[\#f1dfbd\]:hover {
+  background-color: rgba(0, 122, 255, 0.06) !important;
+}
+
+/* Gradient banner cream → kaca terang (set background-image langsung). */
+html[data-theme="ios"] .from-\[\#fff7e6\] {
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(229, 240, 255, 0.5)) !important;
+}
+
+/* Borders warm → hairline iOS */
+html[data-theme="ios"] .border-\[\#e7c98f\],
+html[data-theme="ios"] .border-\[\#d7b56d\] {
+  border-color: var(--ios-border) !important;
+}
+
+html[data-theme="ios"] .border-\[\#b9821f\] {
+  border-color: rgba(0, 122, 255, 0.42) !important;
+}
+
+html[data-theme="ios"] .divide-\[\#e7c98f\]\/60 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--ios-border-quiet) !important;
+}
+
+/* Teks coklat gelap (heading/tabel) → heading iOS */
+html[data-theme="ios"] .text-\[\#1f1408\],
+html[data-theme="ios"] .text-\[\#3a240c\] {
+  color: var(--ios-heading) !important;
+}
+
+/* Teks coklat sedang (body/keterangan) → body/muted iOS */
+html[data-theme="ios"] .text-\[\#7a5a2a\],
+html[data-theme="ios"] .text-\[\#a98a55\] {
+  color: var(--ios-muted) !important;
+}
+
+/* Teks aksen emas (label/link bold) → biru iOS */
+html[data-theme="ios"] .text-\[\#b9821f\],
+html[data-theme="ios"] .text-\[\#8a4703\],
+html[data-theme="ios"] .text-\[\#7a4b00\],
+html[data-theme="ios"] .text-\[\#a87518\],
+html[data-theme="ios"] .hover\:text-\[\#a87518\]:hover {
+  color: var(--ios-primary) !important;
+}
+
+/* ios-theme: end (rev8b) */
 
 /* Pertahankan teks putih di atas tombol/gradient solid (override
  * kelas literal warm yang sebelumnya bisa berubah menjadi gelap). */
