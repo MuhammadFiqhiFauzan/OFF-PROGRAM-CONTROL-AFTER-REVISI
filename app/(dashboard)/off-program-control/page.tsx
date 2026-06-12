@@ -5331,6 +5331,9 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
   const [completenessStatus, setCompletenessStatus] = useState("Lengkap");
   const [claimNote, setClaimNote] = useState("");
   const [finalClaimNote, setFinalClaimNote] = useState("");
+  // Ref ke kontainer detail/form validasi Claim — dipakai auto-scroll saat
+  // tombol "Proses" diklik (pola sama dengan smReviewDetailRef di SM Dashboard).
+  const claimDetailRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const clmCode = getPrincipleCode(clmPrinciple);
@@ -5625,6 +5628,15 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           ? error.message
           : "Gagal mengambil detail Claim.",
       );
+    } finally {
+      // Setelah detail dimuat, gulir mulus ke kontainer form validasi Claim
+      // supaya user tidak perlu scroll manual mencari form-nya.
+      setTimeout(() => {
+        claimDetailRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 50);
     }
   };
 
@@ -6134,7 +6146,24 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               </CompactFilterToolbar>
             </div>
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1300px] text-left text-sm">
+              {/* table-fixed + colgroup: kolom mengikuti lebar kontainer (w-full)
+                  sehingga muat di PC normal tanpa scroll horizontal; teks panjang
+                  dipotong (truncate) / dibungkus, tombol Aksi selalu terlihat. */}
+              <table className="w-full min-w-[860px] table-fixed text-left text-sm">
+                <colgroup>
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[6%]" />
+                </colgroup>
                 <thead className="bg-black/50 text-xs uppercase tracking-wider text-slate-500">
                   <tr>
                     {[
@@ -6151,7 +6180,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       "Diperbarui",
                       "Aksi",
                     ].map((header) => (
-                      <th key={header} className="px-3 py-3 font-bold">
+                      <th key={header} className="px-2 py-3 font-bold">
                         {header}
                       </th>
                     ))}
@@ -6162,46 +6191,55 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                     const canProcess = isClaimInitialProcessableBatch(batch);
                     return (
                       <tr key={batch.id} className="hover:bg-white/[0.03]">
-                        <td className="px-3 py-3 font-mono text-slate-200">
+                        <td
+                          className="truncate px-2 py-3 font-mono text-slate-200"
+                          title={batch.noPengajuan}
+                        >
                           {batch.noPengajuan}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td
+                          className="truncate px-2 py-3 text-slate-300"
+                          title={batch.principleName}
+                        >
                           {batch.principleName}
                         </td>
-                        <td className="px-3 py-3 font-mono text-teal-300">
+                        <td className="truncate px-2 py-3 font-mono text-teal-300">
                           {batch.principleCode}
                         </td>
-                        <td className="px-3 py-3 text-right font-mono text-emerald-300">
+                        <td className="px-2 py-3 text-right font-mono text-emerald-300">
                           Rp{" "}
                           {Number(
                             batch.summary?.totalNominal || 0,
                           ).toLocaleString("id-ID")}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.claimStatus)}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.omStatus)}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.financeStatus)}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.finalStatus)}
                         </td>
-                        <td className="px-3 py-3 min-w-[130px]">
+                        <td className="px-2 py-3">
                           <ProgressBar value={computeUiBatchProgress(batch)} />
                         </td>
-                        <td className="px-3 py-3 text-slate-400">
+                        <td
+                          className="truncate px-2 py-3 text-slate-400"
+                          title={batch.claimNote || "-"}
+                        >
                           {batch.claimNote || "-"}
                         </td>
-                        <td className="px-3 py-3 text-slate-400">
+                        <td className="px-2 py-3 text-slate-400 break-words">
                           {formatDateDisplay(batch.updatedAt)}
                         </td>
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-3">
                           <button
                             onClick={() => selectClaimBatch(batch)}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${canProcess ? "border-teal-500 bg-teal-600 text-white hover:bg-teal-500" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
+                            className={`w-full rounded-lg border px-2 py-1.5 text-xs font-bold ${canProcess ? "border-teal-500 bg-teal-600 text-white hover:bg-teal-500" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
                           >
                             {canProcess ? "Proses" : "Lihat"}
                           </button>
@@ -6225,7 +6263,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           </Panel>
 
           {selectedBatch && (
-            <div className="space-y-6">
+            <div ref={claimDetailRef} className="scroll-mt-6 space-y-6">
               <div className="flex justify-end">
                 <button
                   onClick={() => {
