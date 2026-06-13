@@ -5,7 +5,8 @@
 // Side Effects: Set atribut data-theme pada <html> dan tulis localStorage.
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Palette, Check } from "lucide-react";
 
 export const OFF_THEME_STORAGE_KEY = "off-theme";
@@ -29,6 +30,18 @@ export const applyStoredThemeScript = `(function(){try{var t=localStorage.getIte
 
 export default function ThemeSwitcher() {
   const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
+  const toggleOpen = () => {
+    setOpen((v) => {
+      const next = !v;
+      if (next && btnRef.current) {
+        const r = btnRef.current.getBoundingClientRect();
+        setCoords({ top: r.bottom + 8, right: window.innerWidth - r.right });
+      }
+      return next;
+    });
+  };
   const [theme, setTheme] = useState<OffThemeKey>(() => {
     if (typeof window === "undefined") return DEFAULT_THEME;
     try {
@@ -56,8 +69,9 @@ export default function ThemeSwitcher() {
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggleOpen}
         className="flex items-center gap-2 rounded-lg bg-black/30 px-2.5 py-1.5 text-xs font-medium text-slate-300 shadow-sm transition-colors hover:bg-white/10"
         title="Ganti tema"
         aria-haspopup="menu"
@@ -67,13 +81,15 @@ export default function ThemeSwitcher() {
         <span className="hidden sm:inline">Tema</span>
       </button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div
-            className="absolute right-0 z-40 mt-2 w-60 overflow-hidden rounded-xl border border-white/5 bg-[#1a1c23] shadow-2xl"
-            role="menu"
-          >
+      {open && coords &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[2147483646]" onClick={() => setOpen(false)} aria-hidden="true" />
+            <div
+              className="fixed z-[2147483647] w-60 overflow-hidden rounded-xl border border-white/5 bg-[#1a1c23] shadow-2xl"
+              style={{ top: coords.top, right: coords.right }}
+              role="menu"
+            >
             <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Tema Tampilan
             </div>
@@ -98,9 +114,10 @@ export default function ThemeSwitcher() {
                 {theme === option.key && <Check size={16} className="text-teal-400" />}
               </button>
             ))}
-          </div>
-        </>
-      )}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
