@@ -10670,6 +10670,10 @@ function OverviewTab({
 
 export default function OffProgramControlPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  // Cegah hydration mismatch: role berasal dari authClient.useSession() (client-only),
+  // sehingga SSR (tanpa sesi) berbeda dgn render klien. Render shell stabil dulu,
+  // baru tampilkan UI berbasis role setelah mount.
+  const [mounted, setMounted] = useState(false);
   const [paidIncompleteCount, setPaidIncompleteCount] = useState(0);
   const [showAccessDetail, setShowAccessDetail] = useState(false);
   const [pendingBatchId, setPendingBatchId] = useState("");
@@ -10706,6 +10710,7 @@ export default function OffProgramControlPage() {
     ? activeTab
     : accessibleTabs[0]?.key;
   const isAdminMode = offRole === "admin";
+  useEffect(() => setMounted(true), []);
   const mappingSummary = useMemo(
     () => `${PRINCIPLE_OPTIONS.length} mapping principle dimuat`,
     [],
@@ -10815,6 +10820,20 @@ export default function OffProgramControlPage() {
       window.clearInterval(interval);
     };
   }, [offRole]);
+
+  // Shell stabil (SSR === render klien pertama) sampai sesi/role siap di klien.
+  if (!mounted) {
+    return (
+      <div className="max-w-[1800px] mx-auto pb-12">
+        <OffBreadcrumb />
+        <div className="mb-6">
+          <h1 className="text-3xl font-black text-white tracking-tight">
+            Program OFF — Pengelolaan Klaim
+          </h1>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1800px] mx-auto pb-12">
