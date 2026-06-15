@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { Upload, CheckCircle, AlertTriangle, FileSpreadsheet, Play, Percent } from "lucide-react";
+import { resolveApiBase } from "@/lib/apiBase";
 
 export default function ValidatorPage() {
-    const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || "http://localhost:8000";
+    const API_BASE = resolveApiBase();
     const [salesFile, setSalesFile] = useState<File | null>(null);
     const [promoFile, setPromoFile] = useState<File | null>(null);
     const [channelFile, setChannelFile] = useState<File | null>(null);

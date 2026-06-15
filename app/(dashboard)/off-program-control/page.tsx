@@ -86,6 +86,7 @@ type TabKey =
 
 type OffDashboardProps = {
   offRole: OffRole;
+  supervisorDisplayName?: string;
 };
 
 type Principle = (typeof offPrinciples)[number];
@@ -3071,15 +3072,21 @@ function DuplicateNoSuratPrompt({
   );
 }
 
-function SupervisorDashboard({ offRole }: OffDashboardProps) {
+function SupervisorDashboard({
+  offRole,
+  supervisorDisplayName = "",
+}: OffDashboardProps) {
   const canSubmitSupervisor = canPerformOffAction(offRole, "submit_batch");
   const canEditSupervisor = canPerformOffAction(offRole, "edit_returned_batch");
+  const resolvedSupervisorDisplayName = supervisorDisplayName.trim();
   const [supervisorMenu, setSupervisorMenu] = useState<
     "pengajuan" | "monitoring" | "diskon" | "selisih"
   >("pengajuan");
   // #17 Gap b: batch yang dipilih untuk dilihat refund-nya di view Selisih.
   const [selisihBatchId, setSelisihBatchId] = useState("");
-  const [supervisorName, setSupervisorName] = useState("Supervisor Area 1");
+  const [supervisorName, setSupervisorName] = useState(
+    () => resolvedSupervisorDisplayName,
+  );
   const [batchPrinciple, setBatchPrinciple] = useState("RECKITT BENCKISER, PT");
   const [gelombangInput, setGelombangInput] = useState("001");
   const [bulanInput, setBulanInput] = useState(() => String(new Date().getMonth() + 1).padStart(2, "0"));
@@ -3132,6 +3139,17 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
   const tahun = tahunInput;
   const batchCode = getPrincipleCode(batchPrinciple);
   const generatedNo = autoNoPengajuan || `${gelombang}/${batchCode}/${bulan}/${tahun}`;
+
+  useEffect(() => {
+    if (!resolvedSupervisorDisplayName) return;
+    setSupervisorName((current) => {
+      const normalizedCurrent = current.trim();
+      if (!normalizedCurrent || normalizedCurrent === "Supervisor Area 1") {
+        return resolvedSupervisorDisplayName;
+      }
+      return current;
+    });
+  }, [resolvedSupervisorDisplayName]);
 
   useEffect(() => {
     if (!batchCode || !bulan || !tahun) return;
@@ -3316,7 +3334,9 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
       // Pindah ke panel input/Setup agar aksi (termasuk cetak PDF ter-gate) terlihat.
       setSupervisorMenu("pengajuan");
       setReturnNote(detailBatch.claimNote || detailBatch.smNote || "");
-      setSupervisorName(detailBatch.supervisorName || "Supervisor Area 1");
+      setSupervisorName(
+        detailBatch.supervisorName || resolvedSupervisorDisplayName || "Supervisor",
+      );
       setGelombangInput(detailBatch.gelombang || "001");
       setAutoNoPengajuan(detailBatch.noPengajuan || "");
       setEditingOriginalNumber({
@@ -11005,7 +11025,12 @@ export default function OffProgramControlPage() {
             />
           )}
           {effectiveActiveTab === "supervisor" && (
-            <SupervisorDashboard offRole={offRole} />
+            <SupervisorDashboard
+              offRole={offRole}
+              supervisorDisplayName={
+                sessionUser?.name || sessionUser?.email || ""
+              }
+            />
           )}
           {effectiveActiveTab === "sales" && (
             <SalesManagerDashboard offRole={offRole} />

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { accurateFetch } from "@/lib/apiFetcher";
 import DatePickerField from "@/components/ui/DatePickerField";
 import { fuzzyMatch } from "@/lib/fuzzySearch";
+import { resolveApiBase } from "@/lib/apiBase";
 
 interface FinanceMapping {
     principle?: string;
@@ -75,7 +76,7 @@ interface PurchasePaymentPayload {
     detailInvoice: Array<{ invoiceNo: string; paymentAmount: number }>;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
+const API_BASE = resolveApiBase();
 let cachedCsrfToken = "";
 
 function parseMoneyAmount(value: unknown): number {

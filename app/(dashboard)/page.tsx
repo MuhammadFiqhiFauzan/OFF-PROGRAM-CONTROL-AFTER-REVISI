@@ -101,7 +101,7 @@ export default async function DashboardLanding() {
                         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-bold tracking-widest uppercase shadow-[0_10px_30px_rgba(199,154,63,0.14)]">
                             <ShieldCheck size={14} /> ERP Sistem Terpusat
                         </div>
-                        <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight leading-tight">
+                        <h1 className="text-4xl md:text-5xl font-black text-blue-600 tracking-tight leading-tight">
                             Portal Internal <br className="hidden md:block"/>
                             <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#b77a25] via-[#d6a948] to-[#7a4e20]">
                                 CV. Surya Perkasa

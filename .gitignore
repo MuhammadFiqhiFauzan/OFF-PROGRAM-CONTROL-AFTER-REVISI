@@ -18,6 +18,8 @@
 
 # testing
 /coverage
+/playwright-report
+/test-results
 
 # next.js
 /.next/
@@ -49,6 +51,7 @@ database.sqlite
 python_backend/database.sqlite
 python_backend/data/*.json
 python_backend/data/*.jsonl
+python_backend/data/*.bak
 !python_backend/data/.gitkeep
 
 # generated outputs, uploads, and runtime logs
@@ -65,6 +68,17 @@ scratch/
 *.csv
 *.pdf
 ~$*
+
+# local debug artifacts and editor workspaces
+runtime/
+.kilo/
+
+# local skill/tooling repos & scratch docs (bukan kode app)
+awesome-codex-skills/
+docs/superpowers/
+
+# crash dumps / junk
+*.stackdump
 
 # vercel
 .vercel

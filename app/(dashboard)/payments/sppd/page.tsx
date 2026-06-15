@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, AlertTriangle, FileText, RefreshCcw, Save, Settings2, Upload, Database } from "lucide-react";
 import { toast } from "sonner";
 import DatePickerField from "@/components/ui/DatePickerField";
+import { resolveApiBase } from "@/lib/apiBase";
 
 interface SppdSettings {
     last_sequence: number;
@@ -44,7 +45,7 @@ interface UploadResponse {
     changed_fields?: Record<string, number>;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
+const API_BASE = resolveApiBase();
 
 async function getJson<T>(url: string): Promise<T> {
     const res = await fetch(`${API_BASE}${url}`, { credentials: "include" });
@@ -151,7 +152,7 @@ function BankDataSection() {
     const [autoFixing, setAutoFixing] = useState(false);
     const [showTable, setShowTable] = useState(false);
 
-    const API = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
+    const API = resolveApiBase();
 
     const fetchBankData = async () => {
         setLoading(true);
@@ -347,7 +348,7 @@ function BankDataSection() {
                     <button
                         onClick={() => handleAutoFix(false)}
                         disabled={autoFixing}
-                        className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-600 disabled:opacity-50"
+                        className="px-4 py-2 rounded-lg btn-preview text-sm font-semibold"
                     >
                         {autoFixing ? "..." : "Preview"}
                     </button>
@@ -628,7 +629,7 @@ export default function PaymentsSppdSettingsPage() {
                             onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
                             className="max-w-[280px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
                         />
-                        <button disabled={uploading || !uploadFile} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 disabled:opacity-50">
+                        <button type="submit" disabled={uploading || !uploadFile} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 disabled:opacity-50">
                             <Upload size={16} /> {uploading ? "Uploading..." : "Upload"}
                         </button>
                     </form>
@@ -652,6 +653,7 @@ export default function PaymentsSppdSettingsPage() {
             </section>
 
             <BankDataSection />
+
         </div>
     );
 }

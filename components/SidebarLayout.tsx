@@ -131,7 +131,7 @@ export default function SidebarLayout({ children, role, permissions }: { childre
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col min-w-0 bg-black/20">
                 {/* Top Header */}
-                <header className="h-16 bg-[#1a1c23]/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 md:px-6 z-10 sticky top-0 shadow-sm">
+                <header className="h-16 bg-[#1a1c23]/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 md:px-6 z-50 sticky top-0 shadow-sm">
                     <div className="flex items-center gap-3">
                         <span className="text-sm font-medium text-slate-400 hidden sm:inline">Headless Accurate Frontend</span>
                     </div>

@@ -9,12 +9,15 @@
  */
 
 import { useEffect, useState, useMemo } from "react";
-import { Wallet, Upload, FileSpreadsheet, Send, Plus, Search, Save, Trash2, DownloadCloud, Landmark, FileText, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Wallet, Upload, FileSpreadsheet, Send, Plus, Search, Save, Trash2, DownloadCloud, Landmark, FileText, AlertTriangle, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import DatePickerField from "@/components/ui/DatePickerField";
 import { fuzzyMatch } from "@/lib/fuzzySearch";
 import { parseAnyDate } from "@/lib/dateFilter";
+import { resolveApiBase } from "@/lib/apiBase";
+import PrincipleFilterDropdown, { PrincipleOption } from "./PrincipleFilterDropdown";
 
 // Kolom tanggal di Engine Filter Kolom Data: dipilih via kalender dan dicocokkan persis.
 const DATE_FILTER_KEYS = new Set([
@@ -55,7 +58,7 @@ interface PaymentRecord {
 type PaymentApiRecord = PaymentRecord & { id?: string; ajukan?: boolean };
 type PaymentRecordPatch = Partial<Pick<PaymentRecord, "ajukan" | "tgl_invoice" | "invoice_no" | "jenis_dokumen" | "nomor_dokumen" | "nilai_invoice" | "jt_invoice" | "actual_date" | "tgl_pembayaran" | "principle">>;
 
-const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
+const API_BASE = resolveApiBase();
 const PAGE_SIZE_OPTIONS = [50, 100, 200];
 let cachedCsrfToken = "";
 
@@ -183,6 +186,7 @@ export default function PaymentsPage() {
     // Upload & Manual
     const [uploadFile, setUploadFile] = useState<File | null>(null);
     const [isUploading, setIsUploading] = useState(false);
+    const [uploadError, setUploadError] = useState<string | null>(null);
     const [manualEntry, setManualEntry] = useState({
         tipe: 'CBD', no_lpb: '', principle: '', invoice_no: '', nilai_invoice: '', jenis_dokumen: '', nomor_dokumen: ''
     });
@@ -199,6 +203,14 @@ export default function PaymentsPage() {
 
     // Filters
     const [filters, setFilters] = useState<Record<string, string>>({});
+
+    // Filter Principle gaya Excel (multi-select, instan). Kosong = tampilkan semua.
+    const [principleFilter, setPrincipleFilter] = useState<string[]>([]);
+
+    const handlePrincipleFilterChange = (next: string[]) => {
+        setPrincipleFilter(next);
+        setPage(1);
+    };
 
     useEffect(() => {
         fetchData();
@@ -237,9 +249,9 @@ export default function PaymentsPage() {
                 toast.success(res.data.message || `Berhasil mengunggah ${res.data.added} data pembayaran.`);
                 fetchData();
             } else {
-                toast.error(res.data.error || "Gagal mengunggah dataset pembayaran.");
+                setUploadError(res.data.error || "Gagal mengunggah dataset pembayaran.");
             }
-        } catch (err: unknown) { toast.error(err instanceof Error ? `Upload gagal: ${err.message}` : "Koneksi gagal saat upload. Pastikan backend menyala."); }
+        } catch (err: unknown) { setUploadError(err instanceof Error ? `Upload gagal: ${err.message}` : "Koneksi gagal saat upload. Pastikan backend menyala."); }
         finally { setIsUploading(false); }
     };
 
@@ -421,11 +433,29 @@ export default function PaymentsPage() {
         setFilters(prev => ({ ...prev, [key]: value.toLowerCase() }));
     };
 
+    // Nilai principle unik (dari seluruh records) + jumlah record, urut A–Z.
+    const principleOptions = useMemo<PrincipleOption[]>(() => {
+        const counts = new Map<string, number>();
+        for (const r of records) {
+            const v = (r.principle ?? "").trim();
+            if (!v) continue;
+            counts.set(v, (counts.get(v) ?? 0) + 1);
+        }
+        return [...counts.entries()]
+            .map(([value, count]) => ({ value, count }))
+            .sort((a, b) => a.value.localeCompare(b.value, "id"));
+    }, [records]);
+
     // Filter Logic (fuzzy search — user tidak perlu ketik persis)
     const filteredRecords = useMemo(() => {
         return records.filter(r => {
             if (filters['ajukan'] === 'checked' && !r.ajukan) return false;
             if (filters['ajukan'] === 'unchecked' && r.ajukan) return false;
+
+            // Filter Principle (multi-select). Kosong = lolos semua; selain itu irisan AND.
+            if (principleFilter.length > 0 && !principleFilter.includes((r.principle ?? "").trim())) {
+                return false;
+            }
 
             // Filter No. LPB/Ref: exact substring match (lebih ketat, tanpa fuzzy)
             const lpbFilter = filters['no_lpb'];
@@ -437,7 +467,7 @@ export default function PaymentsPage() {
             }
 
             const searchParams: { [key: string]: string | undefined } = {
-                principle: r.principle, tgl_setor: r.tgl_setor, tgl_win: r.tgl_win,
+                tgl_setor: r.tgl_setor, tgl_win: r.tgl_win,
                 jtempo_win: r.tgl_jtempo_win || r.jt_win,
                 nilai_sistem: r.nilai_win_display || formatInvoiceAmountDisplay(r.nilai_sistem || r.nilai_win),
                 tgl_terima_barang: r.tgl_terima_barang, tgl_invoice: r.tgl_invoice,
@@ -461,7 +491,7 @@ export default function PaymentsPage() {
 
             return true;
         });
-    }, [records, filters]);
+    }, [records, filters, principleFilter]);
 
     const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
     const activePage = Math.min(page, pageCount);
@@ -679,7 +709,13 @@ export default function PaymentsPage() {
                                 </th>
                                 {['principle', 'tgl_setor', 'tgl_win', 'jtempo_win', 'nilai_sistem', 'tgl_terima_barang', 'tgl_invoice', 'invoice', 'jenis_dokumen', 'nomor_dokumen', 'nilai_invoice', 'jt_invoice', 'gap_nilai_display', 'actual_date', 'tgl_pembayaran', 'status_pembayaran'].map((fKey, i) => (
                                     <th key={i} className="px-1.5 py-2 bg-[#0f1115] border-b border-white/10 sticky top-[37px] z-30">
-                                        {DATE_FILTER_KEYS.has(fKey) ? (
+                                        {fKey === 'principle' ? (
+                                            <PrincipleFilterDropdown
+                                                options={principleOptions}
+                                                selected={principleFilter}
+                                                onChange={handlePrincipleFilterChange}
+                                            />
+                                        ) : DATE_FILTER_KEYS.has(fKey) ? (
                                             <DatePickerField
                                                 value={filters[fKey] || ""}
                                                 onChange={(value) => handleFilterChange(fKey, value)}
@@ -745,6 +781,82 @@ export default function PaymentsPage() {
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(176, 125, 43, 0.25); border-radius: 4px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(176, 125, 43, 0.45); }
             `}</style>
+
+            {uploadError && typeof document !== "undefined" && createPortal(
+            <>
+                <style>{`
+                    @keyframes _uploadErrIn {
+                        from { opacity: 0; transform: scale(0.86) translateY(16px); }
+                        to   { opacity: 1; transform: scale(1)    translateY(0);    }
+                    }
+                    @keyframes _uploadErrBg {
+                        from { opacity: 0; }
+                        to   { opacity: 1; }
+                    }
+                    ._upload-err-backdrop { animation: _uploadErrBg 0.18s ease both; }
+                    ._upload-err-card     { animation: _uploadErrIn 0.24s cubic-bezier(0.16,1,0.3,1) both; }
+                    ._upload-err-close:hover { background: rgba(255,255,255,0.1) !important; color: #fff !important; }
+                    ._upload-err-btn:hover   { filter: brightness(1.15); transform: translateY(-1px); box-shadow: var(--modal-err-btn-shadow) !important; }
+                    ._upload-err-btn:active  { transform: translateY(0); filter: brightness(1); }
+                `}</style>
+                <div
+                    className="_upload-err-backdrop"
+                    style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", background: "var(--modal-err-overlay-bg, rgba(0,0,0,0.82))", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
+                    onClick={() => setUploadError(null)}
+                >
+                    <div
+                        className="_upload-err-card"
+                        style={{ position: "relative", width: "100%", maxWidth: "25rem", background: "var(--modal-err-card-bg)", border: "1px solid var(--modal-err-accent-border)", borderRadius: "20px", boxShadow: "var(--modal-err-card-shadow)", backdropFilter: "var(--modal-err-card-filter, none)", WebkitBackdropFilter: "var(--modal-err-card-filter, none)", overflow: "hidden" }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Top theme glow line */}
+                        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "1px", background: "linear-gradient(90deg, transparent 0%, var(--modal-err-glow-line) 50%, transparent 100%)" }} />
+
+                        {/* Close X */}
+                        <button
+                            className="_upload-err-close"
+                            onClick={() => setUploadError(null)}
+                            aria-label="Tutup"
+                            style={{ position: "absolute", top: "12px", right: "12px", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "8px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "#475569", cursor: "pointer", transition: "all 0.15s ease" }}
+                        >
+                            <X size={13} />
+                        </button>
+
+                        {/* Icon + Title */}
+                        <div style={{ padding: "2rem 1.5rem 1.25rem", textAlign: "center" }}>
+                            <div style={{ width: "64px", height: "64px", margin: "0 auto 1.125rem", borderRadius: "50%", background: "var(--modal-err-accent-subtle)", border: "1px solid var(--modal-err-accent-border)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 28px var(--modal-err-accent-subtle)" }}>
+                                <AlertTriangle size={28} style={{ color: "var(--modal-err-icon-color)" }} />
+                            </div>
+                            <h3 style={{ margin: "0 0 0.25rem", fontSize: "1.125rem", fontWeight: 700, color: "var(--modal-err-title)", letterSpacing: "-0.015em" }}>
+                                Upload Gagal
+                            </h3>
+                            <p style={{ margin: 0, fontSize: "0.75rem", color: "#475569", letterSpacing: "0.02em", textTransform: "uppercase", fontWeight: 500 }}>
+                                Validasi data ditolak
+                            </p>
+                        </div>
+
+                        {/* Error message box */}
+                        <div style={{ margin: "0 1.25rem 1.25rem", padding: "0.875rem 1rem", background: "var(--modal-err-accent-subtle)", border: "1px solid var(--modal-err-accent-border)", borderRadius: "12px" }}>
+                            <p style={{ margin: 0, fontSize: "0.8125rem", lineHeight: 1.65, color: "#cbd5e1", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                {uploadError}
+                            </p>
+                        </div>
+
+                        {/* Footer */}
+                        <div style={{ padding: "0 1.25rem 1.375rem", display: "flex", justifyContent: "flex-end" }}>
+                            <button
+                                className="_upload-err-btn"
+                                onClick={() => setUploadError(null)}
+                                style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", padding: "0.5625rem 1.375rem", borderRadius: "10px", background: "var(--modal-err-btn-bg)", border: "1px solid var(--modal-err-btn-border)", color: "#fff", fontSize: "0.875rem", fontWeight: 600, cursor: "pointer", boxShadow: "var(--modal-err-btn-shadow)", transition: "all 0.15s ease", letterSpacing: "0.01em" }}
+                            >
+                                <X size={13} /> Mengerti
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </>,
+            document.body
+        )}
         </div>
     );
 }
