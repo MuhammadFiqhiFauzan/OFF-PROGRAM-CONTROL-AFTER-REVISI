@@ -1775,7 +1775,20 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
         raise ValueError("Format backup PAYMENTS tidak valid.")
 
     rows: List[Tuple[str, Dict[str, Any]]] = []
-    for _, r in df.iterrows():
+    date_errors: List[str] = []
+
+    def parse_backup_date(r, excel_row: int, *names: str) -> str:
+        col = _col_lookup(cols, *names)
+        if col is None:
+            return ""
+        try:
+            return parse_sppd_date_ddmmyyyy(r[col])
+        except ValueError as de:
+            date_errors.append(f"kolom '{s(col)}' baris {excel_row} = {str(de)}")
+            return ""
+
+    for idx, (_, r) in enumerate(df.iterrows()):
+        excel_row = idx + 2
         raw_key = s(_row_value(r, cols, "Record ID"))
         tipe = normalize_pengajuan_type(_row_value(r, cols, "Tipe Pengajuan", default="LPB"))
         no_lpb = s(_row_value(r, cols, "No LPB"))
@@ -1797,16 +1810,16 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
             "record_id": key,
             "tipe_pengajuan": tipe,
             "no_lpb": no_lpb,
-            "tgl_setor": to_date_str(_row_value(r, cols, "Tgl Setor", "TGL. SETOR")),
-            "tgl_win": to_date_str(_row_value(r, cols, "Tgl Win", "TGL. WIN")),
-            "tgl_jtempo_win": to_date_str(_row_value(r, cols, "Tgl J.Tempo Win", "TGL. J. TEMPO WIN")),
+            "tgl_setor": parse_backup_date(r, excel_row, "Tgl Setor", "TGL. SETOR"),
+            "tgl_win": parse_backup_date(r, excel_row, "Tgl Win", "TGL. WIN"),
+            "tgl_jtempo_win": parse_backup_date(r, excel_row, "Tgl J.Tempo Win", "TGL. J. TEMPO WIN"),
             "principle": principle,
             "nilai_win": nilai_win,
-            "tgl_terima_barang": to_date_str(_row_value(r, cols, "Tgl Terima Barang", "TGL TERIMA BARANG")),
-            "tgl_invoice": to_date_str(_row_value(r, cols, "Tgl Invoice")),
-            "jt_invoice": to_date_str(_row_value(r, cols, "J.T Invoice")),
-            "tgl_pembayaran": to_date_str(_row_value(r, cols, "Tgl Pembayaran")),
-            "actual_date": to_date_str(_row_value(r, cols, "Actual Date")),
+            "tgl_terima_barang": parse_backup_date(r, excel_row, "Tgl Terima Barang", "TGL TERIMA BARANG"),
+            "tgl_invoice": parse_backup_date(r, excel_row, "Tgl Invoice"),
+            "jt_invoice": parse_backup_date(r, excel_row, "J.T Invoice"),
+            "tgl_pembayaran": parse_backup_date(r, excel_row, "Tgl Pembayaran"),
+            "actual_date": parse_backup_date(r, excel_row, "Actual Date"),
             "nilai_invoice": nilai_invoice,
             "gap_nilai": gap_nilai,
             "invoice_no": invoice_no,
@@ -1818,7 +1831,7 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
             "draft_id": s(_row_value(r, cols, "Draft ID")),
             "potongan": potongan,
             "nilai_pembayaran": nilai_pembayaran,
-            "target_payment_date": to_date_str(_row_value(r, cols, "Tanggal Pengajuan Pembayaran")),
+            "target_payment_date": parse_backup_date(r, excel_row, "Tanggal Pengajuan Pembayaran"),
             "jenis_pembayaran": s(_row_value(r, cols, "Jenis Pembayaran")),
             "jenis_dokumen": jenis_dokumen,
             "nomor_dokumen": nomor_dokumen,
@@ -1828,6 +1841,13 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
             "created_by": s(_row_value(r, cols, "Created By")),
         }
         rows.append((key, rec))
+    if date_errors:
+        shown = "; ".join(date_errors[:5])
+        extra = len(date_errors) - 5
+        suffix = f"; dan {extra} lainnya" if extra > 0 else ""
+        raise ValueError(
+            f"Tanggal tidak valid (harus DD/MM/YYYY): {shown}{suffix}. Restore backup dibatalkan."
+        )
     return rows
 
 def max_sppd_sequence_from_records(records: List[Dict[str, Any]]) -> int:
