@@ -145,7 +145,7 @@ export default function LoginPage() {
                                 <h1
                                     className="login-portal-hero-title max-w-[440px] text-5xl font-extrabold leading-[1.03] tracking-[-0.04em] lg:text-7xl"
                                 >
-                                    Portal CV. Surya Perkasa
+                                    Portal<br />CV. Surya Perkasa
                                 </h1>
                                 <p className="login-portal-hero-subtitle mt-5 text-xl font-medium">
                                     Masuk ke sistem kontrol
