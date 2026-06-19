@@ -1820,28 +1820,42 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
 @media (max-width: 767px) {
   .login-portal-brand {
     min-height: 0;
-    padding-bottom: 1.75rem;
+    padding-top: 1.5rem;
+    padding-bottom: 1.25rem;
+  }
+
+  .login-portal-brand .login-portal-logo-mark {
+    width: min(68vw, 13.5rem) !important;
   }
 
   .login-portal-form-side {
     min-height: 0;
+    padding: 2rem 1rem 2.5rem;
     box-shadow: none;
+  }
+
+  .login-portal-card {
+    max-width: 100%;
+    border-radius: 1rem;
+    box-shadow: 0 16px 38px rgba(0, 31, 65, 0.08);
   }
 }
 
 .login-portal-dot-layer {
+  opacity: 0.16 !important;
   background-image:
-    linear-gradient(120deg, transparent 0 66%, rgba(255, 255, 255, 0.08) 66.2%, transparent 67%),
-    radial-gradient(circle at 82% 8%, rgba(255, 255, 255, 0.28) 1px, transparent 1.4px);
-  background-size: 100% 100%, 10px 10px;
+    linear-gradient(120deg, transparent 0 66%, rgba(255, 255, 255, 0.05) 66.2%, transparent 67%),
+    radial-gradient(circle at 82% 8%, rgba(255, 255, 255, 0.22) 1px, transparent 1.4px);
+  background-size: 100% 100%, 14px 14px;
 }
 
 .login-portal-pattern {
+  opacity: 0.34 !important;
   background-image:
-    linear-gradient(180deg, rgba(0, 80, 157, 0), rgba(0, 31, 65, 0.24)),
-    radial-gradient(ellipse at 58% 82%, rgba(255, 255, 255, 0.13), transparent 42%),
-    linear-gradient(90deg, transparent 0 8%, rgba(255, 255, 255, 0.08) 8.2% 9%, transparent 9.2% 20%, rgba(255, 255, 255, 0.06) 20.2% 21%, transparent 21.2% 36%, rgba(255, 255, 255, 0.05) 36.2% 37%, transparent 37.2%),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+    linear-gradient(180deg, rgba(0, 80, 157, 0), rgba(0, 31, 65, 0.18)),
+    radial-gradient(ellipse at 58% 82%, rgba(255, 255, 255, 0.08), transparent 42%),
+    linear-gradient(90deg, transparent 0 12%, rgba(255, 255, 255, 0.05) 12.2% 13%, transparent 13.2% 32%, rgba(255, 255, 255, 0.04) 32.2% 33%, transparent 33.2%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
   background-position: center bottom;
   background-repeat: no-repeat;
   background-size: 100% 100%, 100% 100%, 100% 100%, 100% 22px;
@@ -1849,7 +1863,7 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
 }
 
 .login-portal-ring {
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .login-portal-logo-stack {
@@ -1875,13 +1889,21 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
   color: #ffffff !important;
 }
 
+.login-portal-shell :is(h1, h2, h3) {
+  font-family: inherit !important;
+  font-style: normal !important;
+  letter-spacing: 0 !important;
+  text-shadow: none !important;
+  text-transform: none !important;
+}
+
 .login-portal-brand-subtitle,
 .login-portal-feature-copy {
   color: rgba(255, 255, 255, 0.78) !important;
 }
 
 .login-portal-hero-title {
-  filter: drop-shadow(0 8px 22px rgba(0, 31, 65, 0.2));
+  filter: none;
 }
 
 .login-portal-hero-subtitle {
@@ -1890,9 +1912,9 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
 
 .login-portal-feature-icon {
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.13);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .login-portal-form-side {
@@ -1903,9 +1925,9 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
 }
 
 .login-portal-card {
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(0, 80, 157, 0.1);
-  box-shadow: 0 24px 76px rgba(0, 31, 65, 0.1), 0 8px 24px rgba(0, 31, 65, 0.06);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(0, 80, 157, 0.09);
+  box-shadow: 0 22px 54px rgba(0, 31, 65, 0.1), 0 8px 18px rgba(0, 31, 65, 0.05);
 }
 
 .login-portal-card-title,
@@ -1920,9 +1942,9 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
 
 .login-portal-input {
   color: #102033;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0, 80, 157, 0.16);
-  box-shadow: 0 1px 2px rgba(0, 31, 65, 0.04);
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(0, 80, 157, 0.17);
+  box-shadow: 0 1px 2px rgba(0, 31, 65, 0.03);
 }
 
 .login-portal-input::placeholder {
@@ -1931,15 +1953,47 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
 
 .login-portal-input:focus {
   border-color: rgba(0, 80, 157, 0.68);
-  box-shadow: 0 0 0 4px rgba(0, 80, 157, 0.14);
+  box-shadow: 0 0 0 4px rgba(0, 80, 157, 0.13);
 }
 
 .login-portal-input-icon {
   color: #00509d;
 }
 
+.login-portal-input-error {
+  border-color: rgba(190, 18, 60, 0.72) !important;
+  box-shadow: 0 0 0 4px rgba(190, 18, 60, 0.1) !important;
+}
+
+.login-portal-error,
+.login-portal-alert {
+  color: #be123c !important;
+}
+
+.login-portal-alert {
+  background: rgba(255, 241, 242, 0.96);
+  border: 1px solid rgba(190, 18, 60, 0.18);
+}
+
+.login-portal-password-toggle {
+  color: #00509d;
+}
+
+.login-portal-password-toggle:hover:not(:disabled) {
+  background: rgba(0, 80, 157, 0.08);
+}
+
+.login-portal-password-toggle:focus-visible {
+  box-shadow: 0 0 0 3px rgba(0, 80, 157, 0.18);
+}
+
 .login-portal-forgot {
   color: #00509d !important;
+}
+
+.login-portal-forgot[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: 0.5;
 }
 
 .login-portal-forgot:hover {
@@ -1973,17 +2027,19 @@ html[data-theme="office-calm"] .login-portal-brand {
 }
 
 html[data-theme="office-calm"] .login-portal-dot-layer {
+  opacity: 0.14 !important;
   background-image:
-    linear-gradient(120deg, transparent 0 66%, rgba(130, 83, 31, 0.12) 66.2%, transparent 67%),
-    radial-gradient(circle at 82% 8%, rgba(130, 83, 31, 0.32) 1px, transparent 1.4px);
+    linear-gradient(120deg, transparent 0 66%, rgba(130, 83, 31, 0.08) 66.2%, transparent 67%),
+    radial-gradient(circle at 82% 8%, rgba(130, 83, 31, 0.24) 1px, transparent 1.4px);
 }
 
 html[data-theme="office-calm"] .login-portal-pattern {
+  opacity: 0.28 !important;
   background-image:
-    linear-gradient(180deg, rgba(246, 229, 198, 0), rgba(130, 83, 31, 0.38)),
-    radial-gradient(ellipse at 58% 82%, rgba(255, 252, 244, 0.28), transparent 42%),
-    linear-gradient(90deg, transparent 0 8%, rgba(130, 83, 31, 0.1) 8.2% 9%, transparent 9.2% 20%, rgba(15, 118, 110, 0.08) 20.2% 21%, transparent 21.2%),
-    linear-gradient(0deg, rgba(130, 83, 31, 0.1) 1px, transparent 1px);
+    linear-gradient(180deg, rgba(246, 229, 198, 0), rgba(130, 83, 31, 0.26)),
+    radial-gradient(ellipse at 58% 82%, rgba(255, 252, 244, 0.18), transparent 42%),
+    linear-gradient(90deg, transparent 0 12%, rgba(130, 83, 31, 0.07) 12.2% 13%, transparent 13.2% 32%, rgba(15, 118, 110, 0.05) 32.2% 33%, transparent 33.2%),
+    linear-gradient(0deg, rgba(130, 83, 31, 0.06) 1px, transparent 1px);
 }
 
 html[data-theme="office-calm"] .login-portal-ring {
@@ -2016,9 +2072,9 @@ html[data-theme="office-calm"] .login-portal-hero-subtitle {
 
 html[data-theme="office-calm"] .login-portal-feature-icon {
   color: #0f766e;
-  background: rgba(255, 252, 244, 0.56);
+  background: rgba(255, 252, 244, 0.66);
   border-color: rgba(190, 141, 54, 0.18);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.46), 0 12px 30px rgba(130, 83, 31, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 10px 24px rgba(130, 83, 31, 0.1);
 }
 
 html[data-theme="office-calm"] .login-portal-form-side {
@@ -2029,9 +2085,9 @@ html[data-theme="office-calm"] .login-portal-form-side {
 }
 
 html[data-theme="office-calm"] .login-portal-card {
-  background: rgba(255, 252, 244, 0.86);
-  border-color: rgba(190, 141, 54, 0.18);
-  box-shadow: 0 24px 76px rgba(130, 83, 31, 0.12), 0 8px 24px rgba(130, 83, 31, 0.08);
+  background: rgba(255, 252, 244, 0.96);
+  border-color: rgba(190, 141, 54, 0.16);
+  box-shadow: 0 22px 54px rgba(130, 83, 31, 0.12), 0 8px 18px rgba(130, 83, 31, 0.06);
 }
 
 html[data-theme="office-calm"] .login-portal-card-title,
@@ -2046,13 +2102,18 @@ html[data-theme="office-calm"] .login-portal-note {
 
 html[data-theme="office-calm"] .login-portal-input {
   color: #2e261d;
-  background: rgba(255, 250, 239, 0.9);
+  background: rgba(255, 250, 239, 0.98);
   border-color: rgba(190, 141, 54, 0.22);
 }
 
 html[data-theme="office-calm"] .login-portal-input-icon,
-html[data-theme="office-calm"] .login-portal-forgot {
+html[data-theme="office-calm"] .login-portal-forgot,
+html[data-theme="office-calm"] .login-portal-password-toggle {
   color: #8b6730 !important;
+}
+
+html[data-theme="office-calm"] .login-portal-password-toggle:hover:not(:disabled) {
+  background: rgba(200, 148, 50, 0.12);
 }
 
 html[data-theme="office-calm"] .login-portal-button {
@@ -2078,18 +2139,19 @@ html[data-theme="neon"] .login-portal-brand {
 }
 
 html[data-theme="neon"] .login-portal-dot-layer {
-  opacity: 0.38 !important;
+  opacity: 0.22 !important;
   background-image:
-    linear-gradient(120deg, transparent 0 66%, rgba(62, 208, 255, 0.22) 66.2%, transparent 67%),
-    radial-gradient(circle at 82% 8%, rgba(62, 208, 255, 0.55) 1px, transparent 1.5px);
+    linear-gradient(120deg, transparent 0 66%, rgba(62, 208, 255, 0.14) 66.2%, transparent 67%),
+    radial-gradient(circle at 82% 8%, rgba(62, 208, 255, 0.42) 1px, transparent 1.5px);
 }
 
 html[data-theme="neon"] .login-portal-pattern {
+  opacity: 0.34 !important;
   background-image:
-    linear-gradient(180deg, rgba(6, 26, 53, 0), rgba(2, 8, 18, 0.92)),
-    radial-gradient(ellipse at 58% 82%, rgba(62, 208, 255, 0.16), transparent 42%),
-    linear-gradient(90deg, transparent 0 8%, rgba(62, 208, 255, 0.16) 8.2% 9%, transparent 9.2% 20%, rgba(46, 229, 107, 0.11) 20.2% 21%, transparent 21.2%),
-    linear-gradient(0deg, rgba(31, 143, 255, 0.18) 1px, transparent 1px);
+    linear-gradient(180deg, rgba(6, 26, 53, 0), rgba(2, 8, 18, 0.72)),
+    radial-gradient(ellipse at 58% 82%, rgba(62, 208, 255, 0.1), transparent 42%),
+    linear-gradient(90deg, transparent 0 12%, rgba(62, 208, 255, 0.1) 12.2% 13%, transparent 13.2% 32%, rgba(46, 229, 107, 0.07) 32.2% 33%, transparent 33.2%),
+    linear-gradient(0deg, rgba(31, 143, 255, 0.1) 1px, transparent 1px);
 }
 
 html[data-theme="neon"] .login-portal-ring {
@@ -2110,7 +2172,7 @@ html[data-theme="neon"] .login-portal-brand-title,
 html[data-theme="neon"] .login-portal-hero-title,
 html[data-theme="neon"] .login-portal-feature-title {
   color: #e7f7ff !important;
-  text-shadow: 0 0 14px rgba(62, 208, 255, 0.38);
+  text-shadow: none;
 }
 
 html[data-theme="neon"] .login-portal-brand-subtitle,
@@ -2121,9 +2183,9 @@ html[data-theme="neon"] .login-portal-hero-subtitle {
 
 html[data-theme="neon"] .login-portal-feature-icon {
   color: #3ed0ff;
-  background: rgba(31, 143, 255, 0.11);
+  background: rgba(31, 143, 255, 0.09);
   border-color: rgba(62, 208, 255, 0.28);
-  box-shadow: inset 0 0 16px rgba(31, 143, 255, 0.12), 0 0 18px rgba(31, 143, 255, 0.18);
+  box-shadow: inset 0 0 12px rgba(31, 143, 255, 0.1), 0 0 14px rgba(31, 143, 255, 0.14);
 }
 
 html[data-theme="neon"] .login-portal-form-side {
@@ -2134,9 +2196,9 @@ html[data-theme="neon"] .login-portal-form-side {
 }
 
 html[data-theme="neon"] .login-portal-card {
-  background: rgba(4, 16, 31, 0.86);
+  background: rgba(4, 16, 31, 0.94);
   border: 1px solid rgba(62, 208, 255, 0.22);
-  box-shadow: 0 0 0 1px rgba(31, 143, 255, 0.08), 0 0 34px rgba(31, 143, 255, 0.2), 0 22px 62px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 0 0 1px rgba(31, 143, 255, 0.08), 0 0 26px rgba(31, 143, 255, 0.14), 0 22px 54px rgba(0, 0, 0, 0.42);
 }
 
 html[data-theme="neon"] .login-portal-card-title,
@@ -2151,9 +2213,9 @@ html[data-theme="neon"] .login-portal-note {
 
 html[data-theme="neon"] .login-portal-input {
   color: #dff6ff;
-  background: rgba(3, 6, 13, 0.72);
+  background: rgba(3, 6, 13, 0.9);
   border-color: rgba(62, 208, 255, 0.2);
-  box-shadow: inset 0 0 16px rgba(31, 143, 255, 0.08);
+  box-shadow: inset 0 0 12px rgba(31, 143, 255, 0.06);
 }
 
 html[data-theme="neon"] .login-portal-input::placeholder {
@@ -2166,8 +2228,18 @@ html[data-theme="neon"] .login-portal-input:focus {
 }
 
 html[data-theme="neon"] .login-portal-input-icon,
-html[data-theme="neon"] .login-portal-forgot {
+html[data-theme="neon"] .login-portal-forgot,
+html[data-theme="neon"] .login-portal-password-toggle {
   color: #3ed0ff !important;
+}
+
+html[data-theme="neon"] .login-portal-password-toggle:hover:not(:disabled) {
+  background: rgba(62, 208, 255, 0.1);
+}
+
+html[data-theme="neon"] .login-portal-alert {
+  background: rgba(76, 5, 25, 0.72);
+  border-color: rgba(251, 113, 133, 0.22);
 }
 
 html[data-theme="neon"] .login-portal-forgot:hover {
@@ -2197,15 +2269,16 @@ html[data-theme="ios"] .login-portal-brand {
 }
 
 html[data-theme="ios"] .login-portal-dot-layer {
-  opacity: 0.18 !important;
+  opacity: 0.12 !important;
 }
 
 html[data-theme="ios"] .login-portal-pattern {
+  opacity: 0.3 !important;
   background-image:
-    linear-gradient(180deg, rgba(67, 94, 190, 0), rgba(37, 57, 111, 0.62)),
-    radial-gradient(ellipse at 58% 82%, rgba(255, 255, 255, 0.22), transparent 42%),
-    linear-gradient(90deg, transparent 0 8%, rgba(255, 255, 255, 0.12) 8.2% 9%, transparent 9.2% 20%, rgba(255, 255, 255, 0.1) 20.2% 21%, transparent 21.2%),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+    linear-gradient(180deg, rgba(67, 94, 190, 0), rgba(37, 57, 111, 0.46)),
+    radial-gradient(ellipse at 58% 82%, rgba(255, 255, 255, 0.14), transparent 42%),
+    linear-gradient(90deg, transparent 0 12%, rgba(255, 255, 255, 0.08) 12.2% 13%, transparent 13.2% 32%, rgba(255, 255, 255, 0.07) 32.2% 33%, transparent 33.2%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
 }
 
 html[data-theme="ios"] .login-portal-logo-mark-white {
@@ -2231,9 +2304,9 @@ html[data-theme="ios"] .login-portal-hero-subtitle {
 
 html[data-theme="ios"] .login-portal-feature-icon {
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.24);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 12px 28px rgba(37, 57, 111, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 10px 24px rgba(37, 57, 111, 0.14);
 }
 
 html[data-theme="ios"] .login-portal-form-side {
@@ -2244,11 +2317,11 @@ html[data-theme="ios"] .login-portal-form-side {
 }
 
 html[data-theme="ios"] .login-portal-card {
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  box-shadow: 0 22px 64px rgba(60, 60, 67, 0.14);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: 0 22px 54px rgba(60, 60, 67, 0.13);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
 }
 
 html[data-theme="ios"] .login-portal-card-title,
@@ -2278,8 +2351,13 @@ html[data-theme="ios"] .login-portal-input:focus {
 }
 
 html[data-theme="ios"] .login-portal-input-icon,
-html[data-theme="ios"] .login-portal-forgot {
+html[data-theme="ios"] .login-portal-forgot,
+html[data-theme="ios"] .login-portal-password-toggle {
   color: #435ebe !important;
+}
+
+html[data-theme="ios"] .login-portal-password-toggle:hover:not(:disabled) {
+  background: rgba(67, 94, 190, 0.08);
 }
 
 html[data-theme="ios"] .login-portal-forgot:hover {

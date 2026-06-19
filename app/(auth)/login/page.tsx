@@ -12,7 +12,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
-import { BarChart3, Eye, Lock, Mail, ShieldCheck, UsersRound } from "lucide-react";
+import { AlertCircle, BarChart3, Eye, EyeOff, Lock, Mail, ShieldCheck, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 
 type LoginAuthError = {
@@ -27,6 +27,12 @@ type FeatureItem = {
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 };
 
+type LoginFieldErrors = {
+    email?: string;
+    password?: string;
+    general?: string;
+};
+
 function isEmailVerificationError(error: LoginAuthError) {
     const text = `${error.message || ""} ${error.code || ""}`.toLowerCase();
     return (
@@ -37,20 +43,21 @@ function isEmailVerificationError(error: LoginAuthError) {
 }
 
 const BASE_FONT = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif";
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FEATURE_ITEMS: FeatureItem[] = [
     {
-        title: "Kontrol Operasional",
-        description: "Pantau dan kelola operasional secara real-time.",
+        title: "Pantau Operasional",
+        description: "Kelola aktivitas dan data operasional secara lebih terpusat.",
         icon: BarChart3,
     },
     {
-        title: "Aman & Terpercaya",
-        description: "Sistem terintegrasi dengan standar keamanan perusahaan.",
+        title: "Akses Internal Aman",
+        description: "Hanya pengguna terdaftar yang dapat masuk ke sistem.",
         icon: ShieldCheck,
     },
     {
-        title: "Akses Internal",
-        description: "Akun dibuat oleh admin internal perusahaan.",
+        title: "Data Terintegrasi",
+        description: "Mendukung proses monitoring, pelaporan, dan pengambilan keputusan.",
         icon: UsersRound,
     },
 ];
@@ -59,26 +66,47 @@ export default function LoginPage() {
     const router = useRouter();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [errors, setErrors] = useState<LoginFieldErrors>({});
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
+        const trimmedEmail = email.trim();
+        const nextErrors: LoginFieldErrors = {};
+
+        if (!trimmedEmail) {
+            nextErrors.email = "Email wajib diisi.";
+        } else if (!EMAIL_PATTERN.test(trimmedEmail)) {
+            nextErrors.email = "Format email belum sesuai.";
+        }
+
+        if (!password) {
+            nextErrors.password = "Password wajib diisi.";
+        }
+
+        if (nextErrors.email || nextErrors.password) {
+            setErrors(nextErrors);
+            return;
+        }
+
+        setErrors({});
         setLoading(true);
 
         const { error } = await authClient.signIn.email({
-            email,
+            email: trimmedEmail,
             password,
         });
 
         if (error) {
             if (isEmailVerificationError(error)) {
+                setErrors({ general: "Email belum diverifikasi." });
                 toast.error("Email belum diverifikasi.", {
                     description: "Silakan periksa kotak masuk email Anda dan klik tautan verifikasi.",
                 });
             } else {
-                toast.error(error.message || "Gagal masuk. Periksa kembali email dan kata sandi Anda.", {
-                    description: error.status === 403 ? "Akses login ditolak oleh konfigurasi auth server." : undefined,
-                });
+                setErrors({ general: "Email atau password tidak sesuai." });
+                toast.error("Email atau password tidak sesuai.");
             }
             setLoading(false);
         } else {
@@ -155,7 +183,7 @@ export default function LoginPage() {
                         <div className="hidden md:block">
                             <div className="mt-12 lg:mt-16">
                                 <h1
-                                    className="login-portal-hero-title max-w-[430px] text-[clamp(2.75rem,4.6vw,4.6rem)] font-extrabold leading-[1.04] tracking-[-0.04em]"
+                                    className="login-portal-hero-title max-w-[390px] text-[clamp(2.25rem,3.7vw,3.65rem)] font-extrabold leading-[1.08] tracking-normal"
                                 >
                                     Portal<br />CV. Surya Perkasa
                                 </h1>
@@ -194,19 +222,27 @@ export default function LoginPage() {
                 >
                     <form
                         onSubmit={handleLogin}
-                        className="login-portal-card w-full max-w-[430px] rounded-xl px-6 py-8 sm:px-9 sm:py-10"
+                        noValidate
+                        className="login-portal-card w-full max-w-[430px] rounded-2xl px-6 py-8 sm:px-9 sm:py-10"
                     >
                         <div className="text-center">
-                            <h2 className="login-portal-card-title text-2xl font-extrabold tracking-[-0.02em]">
+                            <h2 className="login-portal-card-title text-2xl font-extrabold tracking-normal">
                                 Selamat Datang
                             </h2>
                             <p className="login-portal-card-subtitle mt-3 text-sm font-medium">
-                                Silakan masuk untuk melanjutkan
+                                Masuk menggunakan akun internal perusahaan.
                             </p>
                         </div>
 
-                        <div className="mt-8">
-                            <label htmlFor="email" className="login-portal-label block text-sm font-extrabold">
+                        {errors.general ? (
+                            <div className="login-portal-alert mt-6 flex items-start gap-3 rounded-lg px-4 py-3 text-sm font-semibold" role="alert">
+                                <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2.2} />
+                                <span>{errors.general}</span>
+                            </div>
+                        ) : null}
+
+                        <div className={errors.general ? "mt-6" : "mt-8"}>
+                            <label htmlFor="email" className="login-portal-label block text-sm font-bold">
                                 Email
                             </label>
                             <div className="relative mt-3">
@@ -218,25 +254,39 @@ export default function LoginPage() {
                                 <input
                                     id="email"
                                     type="email"
-                                    required
                                     autoComplete="email"
                                     value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="email@perusahaan.com"
+                                    onChange={(e) => {
+                                        setEmail(e.target.value);
+                                        setErrors((current) => ({ ...current, email: undefined, general: undefined }));
+                                    }}
+                                    placeholder="Masukkan email Anda"
                                     disabled={loading}
-                                    className="login-portal-input h-12 w-full rounded-lg pl-12 pr-4 text-sm font-medium outline-none transition disabled:opacity-60"
+                                    aria-invalid={Boolean(errors.email)}
+                                    aria-describedby={errors.email ? "email-error" : undefined}
+                                    className={`login-portal-input h-12 w-full rounded-lg pl-12 pr-4 text-sm font-medium outline-none transition disabled:opacity-60 ${errors.email ? "login-portal-input-error" : ""}`}
                                 />
                             </div>
+                            {errors.email ? (
+                                <p id="email-error" className="login-portal-error mt-2 text-sm font-semibold">
+                                    {errors.email}
+                                </p>
+                            ) : null}
                         </div>
 
                         <div className="mt-6">
                             <div className="flex items-center justify-between">
-                                <label htmlFor="password" className="login-portal-label block text-sm font-extrabold">
+                                <label htmlFor="password" className="login-portal-label block text-sm font-bold">
                                     Password
                                 </label>
                                 <Link
                                     href="/forgot-password"
-                                    className="login-portal-forgot text-xs font-extrabold transition"
+                                    aria-disabled={loading}
+                                    tabIndex={loading ? -1 : undefined}
+                                    onClick={(event) => {
+                                        if (loading) event.preventDefault();
+                                    }}
+                                    className="login-portal-forgot text-xs font-bold transition"
                                 >
                                     Lupa Password?
                                 </Link>
@@ -249,33 +299,51 @@ export default function LoginPage() {
                                 />
                                 <input
                                     id="password"
-                                    type="password"
-                                    required
+                                    type={showPassword ? "text" : "password"}
                                     autoComplete="current-password"
                                     value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    placeholder="********"
+                                    onChange={(e) => {
+                                        setPassword(e.target.value);
+                                        setErrors((current) => ({ ...current, password: undefined, general: undefined }));
+                                    }}
+                                    placeholder="Masukkan password"
                                     disabled={loading}
-                                    className="login-portal-input h-12 w-full rounded-lg pl-12 pr-12 text-sm font-medium outline-none transition disabled:opacity-60"
+                                    aria-invalid={Boolean(errors.password)}
+                                    aria-describedby={errors.password ? "password-error" : undefined}
+                                    className={`login-portal-input h-12 w-full rounded-lg pl-12 pr-12 text-sm font-medium outline-none transition disabled:opacity-60 ${errors.password ? "login-portal-input-error" : ""}`}
                                 />
-                                <Eye
-                                    aria-hidden="true"
-                                    className="login-portal-input-icon absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2"
-                                    strokeWidth={1.9}
-                                />
+                                <button
+                                    type="button"
+                                    disabled={loading}
+                                    aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                                    aria-pressed={showPassword}
+                                    onClick={() => setShowPassword((current) => !current)}
+                                    className="login-portal-password-toggle absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                                >
+                                    {showPassword ? (
+                                        <EyeOff aria-hidden="true" className="h-5 w-5" strokeWidth={1.9} />
+                                    ) : (
+                                        <Eye aria-hidden="true" className="h-5 w-5" strokeWidth={1.9} />
+                                    )}
+                                </button>
                             </div>
+                            {errors.password ? (
+                                <p id="password-error" className="login-portal-error mt-2 text-sm font-semibold">
+                                    {errors.password}
+                                </p>
+                            ) : null}
                         </div>
 
                         <button
                             type="submit"
                             disabled={loading}
-                            className="login-portal-button mt-8 h-14 w-full rounded-lg text-base font-extrabold transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            className="login-portal-button mt-8 h-14 w-full rounded-lg text-base font-bold transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
                         >
                             {loading ? "Memproses..." : "Masuk"}
                         </button>
 
                         <p className="login-portal-note mt-8 text-center text-sm font-medium">
-                            Akun dibuat oleh admin internal.
+                            Belum memiliki akun? Hubungi admin internal perusahaan.
                         </p>
                     </form>
                 </section>
