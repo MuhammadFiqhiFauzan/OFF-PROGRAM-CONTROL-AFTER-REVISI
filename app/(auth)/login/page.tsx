@@ -139,15 +139,6 @@ export default function LoginPage() {
                                 </div>
                                 <input
                                     id="password"
-                                    type="password"
-                                    required
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    className="block w-full pl-10 pr-3 py-2.5 border border-[#c79a3f]/24 rounded-xl focus:ring-[#d6a948] focus:border-[#c79a3f] sm:text-sm shadow-sm transition-colors text-[#2d241b] bg-white/72"
-                                    placeholder="••••••••"
-                                />
-                                <input
-                                    id="password"
                                     type={showPassword ? "text" : "password"}
                                     autoComplete="current-password"
                                     value={password}

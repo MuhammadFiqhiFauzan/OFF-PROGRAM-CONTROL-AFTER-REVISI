@@ -1019,16 +1019,16 @@ function FinanceView({ apiRows, month, year }: { apiRows: ApiRow[]; month: numbe
     const [checked, setChecked] = useState<Record<string, boolean>>({});
 
     // Fetch 12-month payment summary
-    const fetchPayments = useCallback(async () => {
-        try {
-            const res = await fetch(`/api/insentif-sales/payments?year=${year}`);
-            if (!res.ok) return;
-            const data = await res.json();
-            setPayments(data.rows ?? []);
-        } catch { /* silent — fallback ke empty */ }
+    useEffect(() => {
+        (async () => {
+            try {
+                const res = await fetch(`/api/insentif-sales/payments?year=${year}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                setPayments(data.rows ?? []);
+            } catch { /* silent — fallback ke empty */ }
+        })();
     }, [year]);
-
-    useEffect(() => { fetchPayments(); }, [fetchPayments]);
 
     // Build monthly summary from payments rows
     const monthlySummary = useMemo(() => {

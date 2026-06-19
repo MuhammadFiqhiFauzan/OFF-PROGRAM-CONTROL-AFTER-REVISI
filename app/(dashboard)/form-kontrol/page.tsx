@@ -33,7 +33,7 @@ export default function FormKontrolPage() {
         if (visibleTabs.length > 0 && !visibleTabs.find(t => t.key === activeTab)) {
             setActiveTab(visibleTabs[0].key);
         }
-    });
+    }, [activeTab, visibleTabs]);
 
     if (scopeLoading) {
         return (
