@@ -86,6 +86,10 @@ type TabKey =
 
 type OffDashboardProps = {
   offRole: OffRole;
+  supervisorDisplayName?: string;
+  // Id user yang sedang login — dipakai SupervisorDashboard untuk filter defensif
+  // agar SPV hanya melihat pengajuan miliknya (createdBy === sessionUserId).
+  sessionUserId?: string;
 };
 
 type Principle = (typeof offPrinciples)[number];
@@ -193,6 +197,8 @@ type OffApiBatch = {
   payments?: OffApiPayment[];
   // #1-3: penanda asal pengajuan ("supervisor" | "claim").
   createdByRole?: string | null;
+  // Pemilik pengajuan (id user pembuat) — dipakai untuk isolasi tampilan per-supervisor.
+  createdBy?: string | null;
   // #17: status dan jumlah refund dari alur selisih.
   refundStatus?: string | null;
   refundAmount?: number | null;
@@ -3071,15 +3077,22 @@ function DuplicateNoSuratPrompt({
   );
 }
 
-function SupervisorDashboard({ offRole }: OffDashboardProps) {
+function SupervisorDashboard({
+  offRole,
+  supervisorDisplayName = "",
+  sessionUserId = "",
+}: OffDashboardProps) {
   const canSubmitSupervisor = canPerformOffAction(offRole, "submit_batch");
   const canEditSupervisor = canPerformOffAction(offRole, "edit_returned_batch");
+  const resolvedSupervisorDisplayName = supervisorDisplayName.trim();
   const [supervisorMenu, setSupervisorMenu] = useState<
     "pengajuan" | "monitoring" | "diskon" | "selisih"
   >("pengajuan");
   // #17 Gap b: batch yang dipilih untuk dilihat refund-nya di view Selisih.
   const [selisihBatchId, setSelisihBatchId] = useState("");
-  const [supervisorName, setSupervisorName] = useState("Supervisor Area 1");
+  const [supervisorName, setSupervisorName] = useState(
+    () => resolvedSupervisorDisplayName,
+  );
   const [batchPrinciple, setBatchPrinciple] = useState("RECKITT BENCKISER, PT");
   const [gelombangInput, setGelombangInput] = useState("001");
   const [bulanInput, setBulanInput] = useState(() => String(new Date().getMonth() + 1).padStart(2, "0"));
@@ -3134,6 +3147,17 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
   const generatedNo = autoNoPengajuan || `${gelombang}/${batchCode}/${bulan}/${tahun}`;
 
   useEffect(() => {
+    if (!resolvedSupervisorDisplayName) return;
+    setSupervisorName((current) => {
+      const normalizedCurrent = current.trim();
+      if (!normalizedCurrent || normalizedCurrent === "Supervisor Area 1") {
+        return resolvedSupervisorDisplayName;
+      }
+      return current;
+    });
+  }, [resolvedSupervisorDisplayName]);
+
+  useEffect(() => {
     if (!batchCode || !bulan || !tahun) return;
     if (
       editingOriginalNumber &&
@@ -3186,9 +3210,15 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
         throw new Error(
           String(data.error || "Gagal mengambil batch yang dikembalikan."),
         );
-      const allBatches = Array.isArray(data.batches)
+      const rawBatches = Array.isArray(data.batches)
         ? (data.batches as OffApiBatch[])
         : [];
+      // Guard defensif: backend sudah memfilter, tapi pastikan SPV hanya melihat
+      // pengajuan miliknya walau respons API berubah. Role lain tidak difilter.
+      const allBatches =
+        offRole === "supervisor" && sessionUserId
+          ? rawBatches.filter((batch) => batch.createdBy === sessionUserId)
+          : rawBatches;
       setAllSupervisorBatches(allBatches);
       const returned = allBatches.filter(
         (batch) =>
@@ -3316,7 +3346,9 @@ function SupervisorDashboard({ offRole }: OffDashboardProps) {
       // Pindah ke panel input/Setup agar aksi (termasuk cetak PDF ter-gate) terlihat.
       setSupervisorMenu("pengajuan");
       setReturnNote(detailBatch.claimNote || detailBatch.smNote || "");
-      setSupervisorName(detailBatch.supervisorName || "Supervisor Area 1");
+      setSupervisorName(
+        detailBatch.supervisorName || resolvedSupervisorDisplayName || "Supervisor",
+      );
       setGelombangInput(detailBatch.gelombang || "001");
       setAutoNoPengajuan(detailBatch.noPengajuan || "");
       setEditingOriginalNumber({
@@ -5331,6 +5363,11 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
   const [completenessStatus, setCompletenessStatus] = useState("Lengkap");
   const [claimNote, setClaimNote] = useState("");
   const [finalClaimNote, setFinalClaimNote] = useState("");
+  // Ref ke kontainer detail/form validasi Claim — dipakai auto-scroll saat
+  // tombol "Proses" diklik (pola sama dengan smReviewDetailRef di SM Dashboard).
+  const claimDetailRef = useRef<HTMLDivElement | null>(null);
+  // Ref ke kontainer detail/form Final Claim (view "Validasi Setelah Keuangan").
+  const finalDetailRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const clmCode = getPrincipleCode(clmPrinciple);
@@ -5625,6 +5662,15 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           ? error.message
           : "Gagal mengambil detail Claim.",
       );
+    } finally {
+      // Setelah detail dimuat, gulir mulus ke kontainer form validasi Claim
+      // supaya user tidak perlu scroll manual mencari form-nya.
+      setTimeout(() => {
+        claimDetailRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 50);
     }
   };
 
@@ -5683,6 +5729,13 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           ? error.message
           : "Gagal mengambil detail final Claim.",
       );
+    } finally {
+      setTimeout(() => {
+        finalDetailRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 50);
     }
   };
 
@@ -6134,7 +6187,24 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               </CompactFilterToolbar>
             </div>
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1300px] text-left text-sm">
+              {/* table-fixed + colgroup: kolom mengikuti lebar kontainer (w-full)
+                  sehingga muat di PC normal tanpa scroll horizontal; teks panjang
+                  dipotong (truncate) / dibungkus, tombol Aksi selalu terlihat. */}
+              <table className="w-full min-w-[860px] table-fixed text-left text-sm">
+                <colgroup>
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[6%]" />
+                </colgroup>
                 <thead className="bg-black/50 text-xs uppercase tracking-wider text-slate-500">
                   <tr>
                     {[
@@ -6151,7 +6221,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       "Diperbarui",
                       "Aksi",
                     ].map((header) => (
-                      <th key={header} className="px-3 py-3 font-bold">
+                      <th key={header} className="px-2 py-3 font-bold">
                         {header}
                       </th>
                     ))}
@@ -6162,46 +6232,55 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                     const canProcess = isClaimInitialProcessableBatch(batch);
                     return (
                       <tr key={batch.id} className="hover:bg-white/[0.03]">
-                        <td className="px-3 py-3 font-mono text-slate-200">
+                        <td
+                          className="truncate px-2 py-3 font-mono text-slate-200"
+                          title={batch.noPengajuan}
+                        >
                           {batch.noPengajuan}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td
+                          className="truncate px-2 py-3 text-slate-300"
+                          title={batch.principleName}
+                        >
                           {batch.principleName}
                         </td>
-                        <td className="px-3 py-3 font-mono text-teal-300">
+                        <td className="truncate px-2 py-3 font-mono text-teal-300">
                           {batch.principleCode}
                         </td>
-                        <td className="px-3 py-3 text-right font-mono text-emerald-300">
+                        <td className="px-2 py-3 text-right font-mono text-emerald-300">
                           Rp{" "}
                           {Number(
                             batch.summary?.totalNominal || 0,
                           ).toLocaleString("id-ID")}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.claimStatus)}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.omStatus)}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.financeStatus)}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.finalStatus)}
                         </td>
-                        <td className="px-3 py-3 min-w-[130px]">
+                        <td className="px-2 py-3">
                           <ProgressBar value={computeUiBatchProgress(batch)} />
                         </td>
-                        <td className="px-3 py-3 text-slate-400">
+                        <td
+                          className="truncate px-2 py-3 text-slate-400"
+                          title={batch.claimNote || "-"}
+                        >
                           {batch.claimNote || "-"}
                         </td>
-                        <td className="px-3 py-3 text-slate-400">
+                        <td className="px-2 py-3 text-slate-400 break-words">
                           {formatDateDisplay(batch.updatedAt)}
                         </td>
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-3">
                           <button
                             onClick={() => selectClaimBatch(batch)}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${canProcess ? "border-teal-500 bg-teal-600 text-white hover:bg-teal-500" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
+                            className={`w-full rounded-lg border px-2 py-1.5 text-xs font-bold ${canProcess ? "border-teal-500 bg-teal-600 text-white hover:bg-teal-500" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
                           >
                             {canProcess ? "Proses" : "Lihat"}
                           </button>
@@ -6225,7 +6304,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           </Panel>
 
           {selectedBatch && (
-            <div className="space-y-6">
+            <div ref={claimDetailRef} className="scroll-mt-6 space-y-6">
               <div className="flex justify-end">
                 <button
                   onClick={() => {
@@ -6446,7 +6525,20 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
               </CompactFilterToolbar>
             </div>
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1200px] text-left text-sm">
+              {/* table-fixed + colgroup: muat di PC normal tanpa scroll horizontal. */}
+              <table className="w-full min-w-[920px] table-fixed text-left text-sm">
+                <colgroup>
+                  <col className="w-[11%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[17%]" />
+                </colgroup>
                 <thead className="bg-black/50 text-xs uppercase tracking-wider text-slate-500">
                   <tr>
                     {[
@@ -6461,7 +6553,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                       "Diperbarui",
                       "Aksi",
                     ].map((header) => (
-                      <th key={header} className="px-3 py-3 font-bold">
+                      <th key={header} className="px-2 py-3 font-bold">
                         {header}
                       </th>
                     ))}
@@ -6472,38 +6564,47 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
                     const canProcessFinal = isFinalClaimProcessable(batch);
                     return (
                       <tr key={batch.id} className="hover:bg-white/[0.03]">
-                        <td className="px-3 py-3 font-mono text-slate-200">
+                        <td
+                          className="truncate px-2 py-3 font-mono text-slate-200"
+                          title={batch.noPengajuan}
+                        >
                           {batch.noPengajuan}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td
+                          className="truncate px-2 py-3 text-slate-300"
+                          title={batch.principleName}
+                        >
                           {batch.principleName}
                         </td>
-                        <td className="px-3 py-3 font-mono text-teal-300">
+                        <td className="truncate px-2 py-3 font-mono text-teal-300">
                           {batch.principleCode}
                         </td>
-                        <td className="px-3 py-3 text-right font-mono text-emerald-300">
+                        <td className="px-2 py-3 text-right font-mono text-emerald-300">
                           Rp{" "}
                           {Number(
                             batch.summary?.totalNominal || 0,
                           ).toLocaleString("id-ID")}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.financeStatus)}
                         </td>
-                        <td className="px-3 py-3 text-slate-300">
+                        <td className="px-2 py-3 text-slate-300">
                           {displayStatusLabel(batch.finalStatus)}
                         </td>
-                        <td className="px-3 py-3 min-w-[130px]">
+                        <td className="px-2 py-3">
                           <ProgressBar value={computeUiBatchProgress(batch)} />
                         </td>
-                        <td className="px-3 py-3 text-slate-400">
+                        <td
+                          className="truncate px-2 py-3 text-slate-400"
+                          title={batch.finalClaimNote || "-"}
+                        >
                           {batch.finalClaimNote || "-"}
                         </td>
-                        <td className="px-3 py-3 text-slate-400">
+                        <td className="px-2 py-3 text-slate-400">
                           {formatDateDisplay(batch.updatedAt)}
                         </td>
-                        <td className="px-3 py-3">
-                          <div className="flex gap-2">
+                        <td className="px-2 py-3">
+                          <div className="flex flex-wrap gap-2">
                             <button
                               onClick={() => selectFinalBatch(batch)}
                               className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${canProcessFinal ? "border-teal-500 bg-teal-600 text-white hover:bg-teal-500" : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"}`}
@@ -6539,7 +6640,7 @@ function ClaimDashboard({ offRole }: OffDashboardProps) {
           </Panel>
 
           {selectedFinalBatch && (
-            <div className="space-y-6">
+            <div ref={finalDetailRef} className="scroll-mt-6 space-y-6">
               <div className="flex justify-end">
                 <button
                   onClick={() => {
@@ -10601,6 +10702,10 @@ function OverviewTab({
 
 export default function OffProgramControlPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  // Cegah hydration mismatch: role berasal dari authClient.useSession() (client-only),
+  // sehingga SSR (tanpa sesi) berbeda dgn render klien. Render shell stabil dulu,
+  // baru tampilkan UI berbasis role setelah mount.
+  const [mounted, setMounted] = useState(false);
   const [paidIncompleteCount, setPaidIncompleteCount] = useState(0);
   const [showAccessDetail, setShowAccessDetail] = useState(false);
   const [pendingBatchId, setPendingBatchId] = useState("");
@@ -10608,6 +10713,7 @@ export default function OffProgramControlPage() {
   const { data: session } = authClient.useSession();
   const sessionUser = session?.user as
     | {
+        id?: string | null;
         name?: string | null;
         email?: string | null;
         role?: unknown;
@@ -10637,6 +10743,7 @@ export default function OffProgramControlPage() {
     ? activeTab
     : accessibleTabs[0]?.key;
   const isAdminMode = offRole === "admin";
+  useEffect(() => setMounted(true), []);
   const mappingSummary = useMemo(
     () => `${PRINCIPLE_OPTIONS.length} mapping principle dimuat`,
     [],
@@ -10691,9 +10798,15 @@ export default function OffProgramControlPage() {
         });
         const data = await parseJsonResponse(response);
         if (!response.ok || !data.ok) return;
-        const rows = Array.isArray(data.batches)
+        const rawRows = Array.isArray(data.batches)
           ? (data.batches as OffApiBatch[])
           : [];
+        // Guard defensif: SPV hanya mendeteksi masalah dari pengajuan miliknya
+        // (backend sudah memfilter; ini lapis kedua). Role lain tidak difilter.
+        const rows =
+          offRole === "supervisor" && sessionUser?.id
+            ? rawRows.filter((batch) => batch.createdBy === sessionUser.id)
+            : rawRows;
 
         // Map ke format ProblemDetectionBatch
         const detectionBatches: ProblemDetectionBatch[] = rows.map((batch) => ({
@@ -10745,7 +10858,21 @@ export default function OffProgramControlPage() {
       isActive = false;
       window.clearInterval(interval);
     };
-  }, [offRole]);
+  }, [offRole, sessionUser?.id]);
+
+  // Shell stabil (SSR === render klien pertama) sampai sesi/role siap di klien.
+  if (!mounted) {
+    return (
+      <div className="max-w-[1800px] mx-auto pb-12">
+        <OffBreadcrumb />
+        <div className="mb-6">
+          <h1 className="text-3xl font-black text-white tracking-tight">
+            Program OFF — Pengelolaan Klaim
+          </h1>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1800px] mx-auto pb-12">
@@ -10917,7 +11044,13 @@ export default function OffProgramControlPage() {
             />
           )}
           {effectiveActiveTab === "supervisor" && (
-            <SupervisorDashboard offRole={offRole} />
+            <SupervisorDashboard
+              offRole={offRole}
+              supervisorDisplayName={
+                sessionUser?.name || sessionUser?.email || ""
+              }
+              sessionUserId={sessionUser?.id || ""}
+            />
           )}
           {effectiveActiveTab === "sales" && (
             <SalesManagerDashboard offRole={offRole} />

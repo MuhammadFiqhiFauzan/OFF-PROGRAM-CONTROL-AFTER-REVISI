@@ -92,17 +92,16 @@ export default async function DashboardLanding() {
     return (
         <div className="max-w-7xl mx-auto pb-12 pt-4 selection:bg-indigo-500/30">
             {/* Hero Section */}
-            <div className="relative rounded-[2rem] overflow-hidden bg-gradient-to-br from-[#fffaf0]/90 via-[#f8ead1]/78 to-[#ead2a5]/58 border border-white/10 p-8 md:p-14 mb-10 shadow-2xl">
+            <div className="relative rounded-[2rem] overflow-hidden bg-gradient-to-br from-[#fffaf0]/90 via-[#f8ead1]/78 to-[#ead2a5]/58 p-8 md:p-14 mb-10 shadow-2xl">
                 <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[100px] -mr-48 -mt-48 pointer-events-none"></div>
                 <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-emerald-500/10 rounded-full blur-[80px] -ml-32 -mb-32 pointer-events-none"></div>
-                <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#d3a64a]/60 to-transparent"></div>
                 
                 <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-10">
                     <div className="flex-1 space-y-6">
                         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-bold tracking-widest uppercase shadow-[0_10px_30px_rgba(199,154,63,0.14)]">
                             <ShieldCheck size={14} /> ERP Sistem Terpusat
                         </div>
-                        <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight leading-tight">
+                        <h1 className="text-4xl md:text-5xl font-black text-blue-600 tracking-tight leading-tight">
                             Portal Internal <br className="hidden md:block"/>
                             <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#b77a25] via-[#d6a948] to-[#7a4e20]">
                                 CV. Surya Perkasa
@@ -113,9 +112,9 @@ export default async function DashboardLanding() {
                         </p>
                     </div>
                     
-                    <div className="hidden lg:flex shrink-0 w-64 h-64 bg-black/40 border border-white/10 rounded-[1.75rem] shadow-xl items-center justify-center relative overflow-hidden group">
+                    <div className="hidden lg:flex shrink-0 w-64 h-64 bg-black/40 rounded-[1.75rem] shadow-xl items-center justify-center relative overflow-hidden group">
                         <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                        <div className="absolute inset-8 rounded-full border border-white/10"></div>
+                        <div className="absolute inset-8 rounded-full bg-white/5"></div>
                         <Cpu size={80} className="text-indigo-500/40 group-hover:text-indigo-400 transition-colors duration-500 group-hover:scale-110" />
                     </div>
                 </div>
@@ -145,7 +144,7 @@ export default async function DashboardLanding() {
                                         {mod.desc}
                                     </p>
                                 </div>
-                                <div className="mt-auto flex items-center justify-between border-t border-white/5 pt-4">
+                                <div className="mt-auto flex items-center justify-between pt-4">
                                     <span className={`text-[11px] font-bold uppercase tracking-wider ${mod.iconColor}`}>Akses Modul</span>
                                     <ArrowRight size={16} className={`${mod.iconColor} opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all`} />
                                 </div>
@@ -155,7 +154,7 @@ export default async function DashboardLanding() {
                 </div>
             </div>
             
-            <div className="text-center mt-12 py-6 border-t border-white/5">
+            <div className="text-center mt-12 py-6">
                 <p className="text-sm text-slate-500">V1.0.0 &copy; 2026 Core ERP Infrastructure - PT. Surya Perkasa</p>
             </div>
         </div>

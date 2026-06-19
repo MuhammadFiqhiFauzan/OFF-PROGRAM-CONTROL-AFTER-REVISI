@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { Trash2, Upload, Database, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { resolveApiBase } from "@/lib/apiBase";
 
 interface Principle {
     name: string;
@@ -18,7 +19,7 @@ interface Principle {
     created_at: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
+const API_BASE = resolveApiBase();
 const api = {
     get: async (url: string) => {
         const fetchUrl = url.startsWith("http") ? url : `${API_BASE}${url}`;

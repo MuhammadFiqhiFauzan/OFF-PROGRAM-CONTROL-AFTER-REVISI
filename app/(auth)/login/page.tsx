@@ -1,8 +1,8 @@
 /*
- * Tujuan: Halaman login internal Better Auth email/password bergaya warm luxury dengan pesan error yang membedakan origin dev dan verifikasi email.
+ * Tujuan: Halaman login internal Better Auth email/password bergaya portal CV. Surya Perkasa.
  * Caller: Route auth `/login`.
- * Dependensi: `authClient`, router Next.js, toast Sonner, link reset password.
- * Main Functions: `LoginPage`, `isEmailVerificationError`, form login glassmorphism.
+ * Dependensi: `authClient`, router Next.js, toast Sonner, lucide-react.
+ * Main Functions: `LoginPage`, `isEmailVerificationError`.
  * Side Effects: HTTP sign-in ke Better Auth dan navigasi browser setelah session berhasil.
  */
 "use client";
@@ -10,14 +10,25 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
-import { Lock, Mail } from "lucide-react";
-import Link from "next/link";
+import { AlertCircle, BarChart3, Eye, EyeOff, Lock, Mail, ShieldCheck, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 
 type LoginAuthError = {
     status?: number;
     message?: string;
     code?: string;
+};
+
+type FeatureItem = {
+    title: string;
+    description: string;
+    icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+};
+
+type LoginFieldErrors = {
+    email?: string;
+    password?: string;
+    general?: string;
 };
 
 function isEmailVerificationError(error: LoginAuthError) {
@@ -29,10 +40,31 @@ function isEmailVerificationError(error: LoginAuthError) {
     );
 }
 
+const BASE_FONT = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif";
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FEATURE_ITEMS: FeatureItem[] = [
+    {
+        title: "Pantau Operasional",
+        description: "Kelola aktivitas dan data operasional secara lebih terpusat.",
+        icon: BarChart3,
+    },
+    {
+        title: "Akses Internal Aman",
+        description: "Hanya pengguna terdaftar yang dapat masuk ke sistem.",
+        icon: ShieldCheck,
+    },
+    {
+        title: "Data Terintegrasi",
+        description: "Mendukung proses monitoring, pelaporan, dan pengambilan keputusan.",
+        icon: UsersRound,
+    },
+];
+
 export default function LoginPage() {
     const router = useRouter();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     // ponytail: ref guard prevents triple-submit when Enter fires before setLoading batches
     const submitting = useRef(false);
@@ -71,14 +103,8 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(circle_at_20%_12%,rgba(242,210,138,0.45),transparent_28rem),radial-gradient(circle_at_80%_85%,rgba(199,154,63,0.20),transparent_30rem),linear-gradient(135deg,#fff8ea,#f4ead9)]">
-            <div className="max-w-md w-full bg-[#fffaf0]/82 rounded-[2rem] shadow-[0_28px_90px_rgba(122,78,32,0.16),0_8px_28px_rgba(122,78,32,0.10)] overflow-hidden border border-[#c79a3f]/20 backdrop-blur-2xl">
-                <div className="relative bg-gradient-to-br from-[#fff3d1] via-[#e4ba62] to-[#9a6424] p-8 text-white text-center overflow-hidden">
-                    <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent"></div>
-                    <div className="absolute -right-16 -top-20 h-48 w-48 rounded-full bg-white/20 blur-3xl"></div>
-                    <h2 className="text-3xl font-extrabold tracking-tight">Portal CV. Surya Perkasa</h2>
-                    <p className="mt-2 text-[#4f3218]/80 text-sm font-medium">Masuk ke sistem kontrol</p>
-                </div>
+        <main className="login-portal-shell min-h-screen overflow-x-hidden" style={{ fontFamily: BASE_FONT }}>
+            <div className="grid min-h-screen md:grid-cols-[49%_51%]">
 
                 <div className="p-8 bg-[#fffaf0]/74">
                     <form onSubmit={handleLogin} className="space-y-6">
@@ -120,7 +146,41 @@ export default function LoginPage() {
                                     className="block w-full pl-10 pr-3 py-2.5 border border-[#c79a3f]/24 rounded-xl focus:ring-[#d6a948] focus:border-[#c79a3f] sm:text-sm shadow-sm transition-colors text-[#2d241b] bg-white/72"
                                     placeholder="••••••••"
                                 />
+                                <input
+                                    id="password"
+                                    type={showPassword ? "text" : "password"}
+                                    autoComplete="current-password"
+                                    value={password}
+                                    onChange={(e) => {
+                                        setPassword(e.target.value);
+                                        setErrors((current) => ({ ...current, password: undefined, general: undefined }));
+                                    }}
+                                    placeholder="Masukkan password"
+                                    disabled={loading}
+                                    aria-invalid={Boolean(errors.password)}
+                                    aria-describedby={errors.password ? "password-error" : undefined}
+                                    className={`login-portal-input h-12 w-full rounded-lg pl-12 pr-12 text-sm font-medium outline-none transition disabled:opacity-60 ${errors.password ? "login-portal-input-error" : ""}`}
+                                />
+                                <button
+                                    type="button"
+                                    disabled={loading}
+                                    aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                                    aria-pressed={showPassword}
+                                    onClick={() => setShowPassword((current) => !current)}
+                                    className="login-portal-password-toggle absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                                >
+                                    {showPassword ? (
+                                        <EyeOff aria-hidden="true" className="h-5 w-5" strokeWidth={1.9} />
+                                    ) : (
+                                        <Eye aria-hidden="true" className="h-5 w-5" strokeWidth={1.9} />
+                                    )}
+                                </button>
                             </div>
+                            {errors.password ? (
+                                <p id="password-error" className="login-portal-error mt-2 text-sm font-semibold">
+                                    {errors.password}
+                                </p>
+                            ) : null}
                         </div>
 
                         <button
@@ -131,18 +191,14 @@ export default function LoginPage() {
                         >
                             {loading ? "Memproses..." : "Masuk"}
                         </button>
-                    </form>
-                    
-                    <div className="mt-6 text-center">
-                        <p className="text-sm text-[#766753]">
-                            Akun dibuat oleh admin internal.
+
+                        <p className="login-portal-note mt-8 text-center text-sm font-medium">
+                            Belum memiliki akun? Hubungi admin internal perusahaan.
                         </p>
+                    </form>
                     </div>
-                </div>
-                <div className="bg-[#f7ead0]/72 px-8 py-4 border-t border-[#c79a3f]/14 text-center">
-                    <p className="text-xs text-[#927f66]">&copy; 2026 Muh. Ari Ramadhan</p>
-                </div>
+                </section>
             </div>
-        </div>
+        </main>
     );
 }

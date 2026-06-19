@@ -53,9 +53,8 @@ const REDIRECT_URI = process.env.NEXT_PUBLIC_ACCURATE_REDIRECT_URI || "http://lo
 
 export default function Home() {
 
-  const [apiKey, setApiKey] = useState("");
+  const [isAccurateConnected, setIsAccurateConnected] = useState(false);
   const [dbHost, setDbHost] = useState("");
-  const [dbSession, setDbSession] = useState("");
 
   const [isKeySaved, setIsKeySaved] = useState(false);
   const [isMounted, setIsMounted] = useState(false); // To prevent hydration mismatch
@@ -103,34 +102,13 @@ export default function Home() {
   useEffect(() => {
     setIsMounted(true); // Ensure client-side only rendering for heavy interactive parts
 
-    // Check if we came back from OAuth
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const tokenFromHash = hashParams.get("access_token");
-
-    if (tokenFromHash) {
-      sessionStorage.setItem("accurateApiKey", tokenFromHash);
-      setApiKey(tokenFromHash);
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("accurate") === "connected") {
       toast.success("Login Accurate Berhasil! Silakan pilih database.");
-      // Clear hash for cleanliness
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-      fetchDatabases(tokenFromHash);
-    } else {
-      // Normal Load
-      const storedKey = sessionStorage.getItem("accurateApiKey");
-      const storedHost = sessionStorage.getItem("accurateHost");
-      const storedSession = sessionStorage.getItem("accurateSession");
-
-      if (storedKey) setApiKey(storedKey);
-      if (storedHost && storedSession) {
-        setDbHost(storedHost);
-        setDbSession(storedSession);
-        setIsKeySaved(true);
-      } else if (storedKey) {
-        // Logged in but no DB selected
-        fetchDatabases(storedKey);
-      }
+      window.history.replaceState(null, "", window.location.pathname);
     }
 
+    loadAccurateSession();
     setPayloadStr(JSON.stringify(accurateRoutes[selectedRoute].samplePayload, null, 2));
   }, []);
 
@@ -144,22 +122,44 @@ export default function Home() {
     window.location.href = `https://account.accurate.id/oauth/authorize?${params.toString()}`;
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("accurateApiKey");
-    sessionStorage.removeItem("accurateHost");
-    sessionStorage.removeItem("accurateSession");
-    setApiKey("");
+  const loadAccurateSession = async () => {
+    try {
+      const res = await fetch("/api/auth/accurate-session");
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Gagal memuat sesi Accurate.");
+
+      setIsAccurateConnected(Boolean(data.connected));
+      setIsKeySaved(Boolean(data.databaseConnected));
+      setDbHost(data.sessionHost || "");
+
+      if (data.connected && !data.databaseConnected) {
+        fetchDatabases();
+      }
+    } catch (e: any) {
+      setIsAccurateConnected(false);
+      setIsKeySaved(false);
+      setDbHost("");
+      toast.error(e.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/accurate-session", { method: "DELETE" });
+    } catch {
+      // UI state is cleared even if server session has already expired.
+    }
+    setIsAccurateConnected(false);
     setDbHost("");
-    setDbSession("");
     setIsKeySaved(false);
     setDatabases([]);
     toast.info("Anda telah log out dari sesi aplikasi.");
   };
 
-  const fetchDatabases = async (token: string) => {
+  const fetchDatabases = async () => {
     setIsFetchingDbs(true);
     try {
-      const res = await fetch(`/api/auth/db-list?access_token=${token}`);
+      const res = await fetch("/api/auth/db-list");
       const data = await res.json();
       if (data.error || !data.d) throw new Error(data.error || "Gagal mengambil database.");
       setDatabases(data.d);
@@ -177,14 +177,16 @@ export default function Home() {
     }
     const tId = toast.loading("Membuka database...");
     try {
-      const res = await fetch(`/api/auth/open-db?access_token=${apiKey}&id=${selectedDb}`);
+      const dbMeta = databases.find((db) => String(db.id) === String(selectedDb));
+      const res = await fetch("/api/auth/open-db", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selectedDb, alias: dbMeta?.alias || null }),
+      });
       const data = await res.json();
       if (data.error || !data.host || !data.session) throw new Error(data.error || "Gagal membuka database.");
 
-      sessionStorage.setItem("accurateHost", data.host);
-      sessionStorage.setItem("accurateSession", data.session);
       setDbHost(data.host);
-      setDbSession(data.session);
       setIsKeySaved(true);
 
       toast.success("Database berhasil terhubung!", { id: tId });
@@ -2519,7 +2521,7 @@ export default function Home() {
                 {isKeySaved ? "Sesi Terhubung" : "Autentikasi Aplikasi"}
               </h2>
 
-              {!apiKey ? (
+              {!isAccurateConnected ? (
                 <div className="space-y-4 text-center">
                   <p className="text-sm text-white/50 mb-2">Aplikasi ini membutuhkan akses Secure OAuth ke Accurate Online Anda.</p>
                   <button

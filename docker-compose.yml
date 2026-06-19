@@ -15,6 +15,8 @@ services:
       APP_ENV: ${APP_ENV:-production}
       APP_DEBUG: ${APP_DEBUG:-0}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       AUTH_USERS_JSON: /app/python_backend/data/users.json
       AUDIT_LOG_PATH: /app/python_backend/data/audit_log.jsonl
       ERROR_LOG_PATH: /app/python_backend/data/error_log.jsonl

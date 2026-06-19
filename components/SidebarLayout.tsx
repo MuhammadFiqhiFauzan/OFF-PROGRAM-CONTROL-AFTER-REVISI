@@ -1,6 +1,6 @@
 // Tujuan: Shell navigasi utama dashboard Smart ERP dengan filtering navigasi berdasarkan RBAC dan satu pintu fitur Accurate.
 // Caller: `app/(dashboard)/layout.tsx`.
-// Dependensi: `authClient`, router Next.js, ikon `lucide-react`, helper RBAC, ThemeSwitcher.
+// Dependensi: `authClient`, pathname Next.js, ikon `lucide-react`, helper RBAC, ThemeSwitcher.
 // Main Functions: `SidebarLayout`, `handleSignOut`.
 // Side Effects: Sign-out Better Auth dan navigasi browser; tidak melakukan DB/file I/O langsung.
 "use client";
@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { Menu, Home, Users, Database, Server, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Settings2, FileText, Shield, ClipboardCheck, ReceiptText, Trophy, ClipboardList, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { canAccessPath, normalizeRole } from "@/lib/rbac";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 
@@ -16,7 +16,6 @@ export default function SidebarLayout({ children, role, permissions }: { childre
     // Desktop: sidebar collapse/expand. Mobile: drawer open/close (hamburger).
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileOpen, setIsMobileOpen] = useState(false);
-    const router = useRouter();
     const pathname = usePathname();
     const { data: session } = authClient.useSession();
     const userRole = normalizeRole(role || session?.user?.role);
@@ -79,9 +78,9 @@ export default function SidebarLayout({ children, role, permissions }: { childre
             <aside
                 className={`hidden md:flex transition-all duration-300 ease-in-out ${
                     isSidebarOpen ? "w-64" : "w-[60px]"
-                } bg-[#1a1c23]/80 backdrop-blur-xl border-r border-white/5 flex-col z-20`}
+                } bg-[#1a1c23]/80 backdrop-blur-xl border-r border-white/5 shadow-sm flex-col z-20`}
             >
-                <div className="h-16 flex items-center justify-between px-4 border-b border-white/5">
+                <div className="h-16 flex items-center justify-between px-4">
                     {isSidebarOpen && (
                         <div className="flex items-center gap-2 overflow-hidden">
                             <Server className="text-indigo-500" size={24} />
@@ -110,8 +109,8 @@ export default function SidebarLayout({ children, role, permissions }: { childre
                         onClick={() => setIsMobileOpen(false)}
                         aria-hidden="true"
                     />
-                    <aside className="absolute left-0 top-0 h-full w-64 bg-[#1a1c23] border-r border-white/10 flex flex-col">
-                        <div className="h-16 flex items-center justify-between px-4 border-b border-white/5">
+                    <aside className="absolute left-0 top-0 h-full w-64 bg-[#1a1c23] border-r border-white/5 flex flex-col shadow-xl">
+                        <div className="h-16 flex items-center justify-between px-4">
                             <div className="flex items-center gap-2 overflow-hidden">
                                 <Server className="text-indigo-500" size={24} />
                                 <span className="font-bold text-lg text-white truncate">Smart ERP</span>
@@ -134,16 +133,8 @@ export default function SidebarLayout({ children, role, permissions }: { childre
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col min-w-0 bg-black/20">
                 {/* Top Header */}
-                <header className="h-16 bg-[#1a1c23]/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 md:px-6 z-10 sticky top-0">
+                <header className="h-16 bg-[#1a1c23]/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 md:px-6 z-50 sticky top-0 shadow-sm">
                     <div className="flex items-center gap-3">
-                        {/* Hamburger hanya di desktop (md+); mobile pakai floating capsule */}
-                        <button
-                            onClick={() => setIsMobileOpen(true)}
-                            className="hidden md:block p-1.5 hover:bg-white/10 rounded-md transition-colors"
-                            aria-label="Buka menu"
-                        >
-                            <Menu size={20} className="text-slate-300" />
-                        </button>
                         <span className="text-sm font-medium text-slate-400 hidden sm:inline">Headless Accurate Frontend</span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -151,7 +142,7 @@ export default function SidebarLayout({ children, role, permissions }: { childre
                         <button onClick={handleSignOut} className="text-slate-400 hover:text-red-400 transition-colors" title="Log Out" aria-label="Log Out">
                             <LogOut size={20} />
                         </button>
-                        <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-300 border border-indigo-500/30 text-sm font-bold">
+                        <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-300 text-sm font-bold shadow-sm">
                             A
                         </div>
                     </div>
@@ -163,7 +154,7 @@ export default function SidebarLayout({ children, role, permissions }: { childre
                 </main>
 
                 {/* Mobile floating capsule nav (< md) — swipeable, semua item */}
-                <nav className="md:hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-32px)] max-w-sm rounded-2xl bg-[#1a1c23]/90 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+                <nav className="md:hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-32px)] max-w-sm rounded-2xl bg-[#1a1c23]/90 backdrop-blur-xl border border-white/5 shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
                     <div className="flex items-center h-14 px-2 overflow-x-auto gap-1" style={{ scrollbarWidth: "none" }}>
                         {navItems.map((item) => {
                             const Icon = item.icon;

@@ -105,7 +105,7 @@ export default function DatePickerField({
                 ref={panelRef}
                 data-accapi-date-picker-calendar="true"
                 className="fixed z-[9999] rounded-xl border p-3 shadow-2xl"
-                style={{ top: panelPosition.top, left: panelPosition.left, width: panelPosition.width, background: 'var(--surface)', borderColor: 'var(--border-strong)', boxShadow: 'var(--luxury-shadow)' }}
+                style={{ top: panelPosition.top, left: panelPosition.left, width: panelPosition.width, background: 'var(--surface)', borderColor: 'var(--control-border, var(--border-strong))', boxShadow: 'var(--luxury-shadow)' }}
             >
                 <div className="mb-3 flex items-center justify-between">
                     <button
@@ -113,7 +113,7 @@ export default function DatePickerField({
                         aria-label="Bulan sebelumnya"
                         onClick={() => setMonth((current) => subMonths(current, 1))}
                         className="rounded-lg p-1.5 transition-colors"
-                        style={{ border: '1px solid var(--border-strong)', color: 'var(--luxury-muted)', background: 'var(--surface-2)' }}
+                        style={{ border: '1px solid var(--control-border, var(--border-strong))', color: 'var(--luxury-muted)', background: 'var(--surface-2)' }}
                     >
                         <ChevronLeft size={16} />
                     </button>
@@ -125,7 +125,7 @@ export default function DatePickerField({
                         aria-label="Bulan berikutnya"
                         onClick={() => setMonth((current) => addMonths(current, 1))}
                         className="rounded-lg p-1.5 transition-colors"
-                        style={{ border: '1px solid var(--border-strong)', color: 'var(--luxury-muted)', background: 'var(--surface-2)' }}
+                        style={{ border: '1px solid var(--control-border, var(--border-strong))', color: 'var(--luxury-muted)', background: 'var(--surface-2)' }}
                     >
                         <ChevronRight size={16} />
                     </button>
@@ -159,12 +159,12 @@ export default function DatePickerField({
                             btnStyle = { borderColor: 'rgba(220, 38, 38, 0.25)', background: 'rgba(220, 38, 38, 0.06)', color: 'rgba(220, 38, 38, 0.55)' };
                             btnClass += " font-bold";
                         } else if (outside && !redDate) {
-                            btnStyle = { borderColor: 'var(--border-soft)', color: 'var(--luxury-subtle)' };
+                            btnStyle = { borderColor: 'var(--control-border, var(--border-soft))', color: 'var(--luxury-subtle)' };
                         } else if (redDate && !selected) {
                             btnStyle = { borderColor: 'rgba(220, 38, 38, 0.5)', background: 'rgba(220, 38, 38, 0.08)', color: '#dc2626' };
                             btnClass += " font-bold hover:opacity-80";
                         } else {
-                            btnStyle = { borderColor: 'var(--border-soft)', color: 'var(--luxury-text)' };
+                            btnStyle = { borderColor: 'var(--control-border, var(--border-soft))', color: 'var(--luxury-text)' };
                             btnClass += " hover:opacity-75";
                         }
 
@@ -249,7 +249,7 @@ export default function DatePickerField({
                     if (["Enter", " ", "ArrowDown"].includes(event.key)) openPicker();
                 }}
                 className={cn(
-                    "w-full cursor-pointer rounded-lg border border-white/10 bg-black/40 py-2 pl-8 pr-8 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-emerald-500/60 disabled:cursor-not-allowed disabled:opacity-50",
+                    "w-full cursor-pointer rounded-lg border border-white/5 bg-black/40 py-2 pl-8 pr-8 text-sm text-slate-200 shadow-sm outline-none placeholder:text-slate-600 focus:border-emerald-500/60 disabled:cursor-not-allowed disabled:opacity-50",
                     className
                 )}
             />

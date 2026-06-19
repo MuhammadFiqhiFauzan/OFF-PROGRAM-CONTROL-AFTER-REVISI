@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Trash2, Plus, Upload, Play, FileText, Download, ChevronLeft, CalendarCheck2 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { resolveApiBase } from "@/lib/apiBase";
 
 interface Principle {
     [id: string]: { name: string; filename: string };
@@ -34,7 +35,7 @@ interface RowData {
 }
 
 // Emulating Axios for backwards compatibility with legacy codebase
-const API_BASE = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://localhost:8000");
+const API_BASE = resolveApiBase();
 const api = {
     defaults: { baseURL: API_BASE },
     get: async (url: string, opts?: any) => {

@@ -32,7 +32,7 @@ from openpyxl.utils import get_column_letter
 import pandas as pd
 import io, os, re, uuid, json, math, base64, hashlib, hmac, time, zipfile, copy, mimetypes
 from dotenv import load_dotenv
-load_dotenv(override=True)
+load_dotenv(override=False)
 import traceback
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Tuple, Optional, Set, Any
@@ -210,9 +210,41 @@ BACKGROUND_JOBS: Dict[str, Dict[str, Any]] = {}
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# CORS allowlist — hanya origin frontend yang sah yang boleh memanggil API dengan
+# credentials. Mengganti pola lama `allow_origin_regex="^https?://.*$"` yang
+# mengizinkan SEMUA origin (celah pencurian data lintas-situs saat digabung
+# allow_credentials=True).
+# Sumber origin (prioritas): env CORS_ORIGINS (pisahkan koma) > NEXT_PUBLIC_APP_URL
+# > localhost dev. Origin lokal dikunci ke http://localhost:3000 agar cookie
+# auth tidak pecah karena campur localhost/127.0.0.1 atau port dev lain.
+_cors_env = str(os.getenv("CORS_ORIGINS", "")).strip()
+if _cors_env:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_env.split(",") if o.strip()]
+else:
+    CORS_ALLOWED_ORIGINS = [
+        o for o in [
+            str(os.getenv("NEXT_PUBLIC_APP_URL", "")).strip(),
+            "http://localhost:3000",
+        ] if o
+    ]
+
+def is_allowed_cors_origin(origin: str) -> bool:
+    try:
+        parsed = urlparse(origin)
+    except Exception:
+        return False
+    host = str(parsed.hostname or "").strip().lower()
+    is_local = host in {"localhost", "127.0.0.1", "0.0.0.0"}
+    return (not is_local) or origin == "http://localhost:3000"
+
+CORS_ALLOWED_ORIGINS = [o for o in CORS_ALLOWED_ORIGINS if is_allowed_cors_origin(o)]
+# Dedup sambil menjaga urutan.
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex="^https?://.*$",
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1244,17 +1276,12 @@ def is_same_origin_request(request: Request) -> bool:
         if src_host == host:
             continue
             
-        # Allow same-hostname cross-port requests (e.g., Next.js on 3000 calling FastAPI on 8000)
+        # Allow locked local frontend (localhost:3000) to call the local backend.
         src_hostname = src_host.split(":")[0] if ":" in src_host else src_host
         dst_hostname = host.split(":")[0] if ":" in host else host
-        if src_hostname == dst_hostname:
+        if src_host == "localhost:3000" and dst_hostname == "localhost":
             continue
-            
-        # Allow local cross-port requests (e.g., localhost:3000 vs 127.0.0.1:8000)
-        local_names = {"localhost", "127.0.0.1", "0.0.0.0"}
-        if src_hostname in local_names and dst_hostname in local_names:
-            continue
-            
+
         return False
     return True
 
@@ -1604,6 +1631,50 @@ def to_date_str(val) -> str:
     except Exception:
         return s(val)
 
+def parse_sppd_date_ddmmyyyy(value) -> str:
+    """Normalkan tanggal import Excel SPPD ke YYYY-MM-DD dengan asumsi urutan
+    DD/MM/YYYY untuk string. Tolak tanggal mustahil/rusak (raise ValueError).
+
+    - datetime/Timestamp asli (sel tanggal Excel) -> dipakai apa adanya (tak ambigu).
+    - "YYYY/MM/DD" (tahun 4-digit di depan); tukar ke YYYY/DD/MM hanya bila bulan>12.
+    - "DD/MM/YYYY" (tahun 4-digit di belakang); default day-first. Tukar ke MM/DD
+      hanya bila tak ambigu (bulan-slot >12 & hari-slot <=12).
+    - Ambigu (keduanya <=12) -> tetap DD/MM (tidak ditukar).
+    - Pemisah `-`, `/`, atau `.`. Format/komponen lain -> ValueError.
+    """
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    from datetime import datetime as _dt, date as _date
+    if isinstance(value, (_dt, _date)):
+        return value.strftime("%Y-%m-%d")
+    raw = s(value).strip()
+    if not raw:
+        return ""
+    m = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$", raw)
+    if m:
+        y, a, b = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        mo, da = a, b
+        if a > 12 and b <= 12:  # YYYY/DD/MM -> tukar
+            mo, da = b, a
+    else:
+        m = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$", raw)
+        if not m:
+            raise ValueError(f"'{raw}'")
+        a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        da, mo = a, b  # default DD/MM
+        if b > 12 and a <= 12:  # sebenarnya MM/DD -> tukar
+            da, mo = b, a
+    try:
+        parsed = _date(y, mo, da)
+    except ValueError:
+        raise ValueError(f"'{raw}'")
+    return parsed.strftime("%Y-%m-%d")
+
 def parse_lpb_upload(content: bytes) -> List[Dict[str, Any]]:
     df = pd.read_excel(io.BytesIO(content))
     cols = {c.strip().upper(): c for c in df.columns}
@@ -1613,31 +1684,59 @@ def parse_lpb_upload(content: bytes) -> List[Dict[str, Any]]:
         raise ValueError("Kolom wajib tidak lengkap: " + ", ".join(missing))
 
     out = []
-    for _, r in df.iterrows():
+    date_errors: List[str] = []
+
+    def parse_lpb_upload_date(row, excel_row: int, *names: str) -> str:
+        col = _col_lookup(cols, *names)
+        if col is None:
+            return ""
+        try:
+            return parse_sppd_date_ddmmyyyy(row[col])
+        except ValueError as de:
+            date_errors.append(f"kolom '{s(col)}' baris {excel_row} = {str(de)}")
+            return ""
+
+    for idx, (_, r) in enumerate(df.iterrows()):
+        excel_row = idx + 2
         no_lpb = s(r[cols["NO. LPB"]])
         if not no_lpb:
             continue
         nilai_win = parse_number_id(r[cols["NILAI WIN"]])
         nilai_invoice = parse_number_id(_row_value(r, cols, "Nilai Invoice", "NILAI INVOICE", default=0))
+        tgl_setor = parse_lpb_upload_date(r, excel_row, "TGL. SETOR")
+        tgl_win = parse_lpb_upload_date(r, excel_row, "TGL. WIN")
+        tgl_jtempo_win = parse_lpb_upload_date(r, excel_row, "TGL. J. TEMPO WIN")
+        tgl_terima_barang = parse_lpb_upload_date(r, excel_row, "TGL TERIMA BARANG")
+        tgl_invoice = parse_lpb_upload_date(r, excel_row, "Tgl Invoice", "TGL INVOICE", "TGL. INVOICE")
+        jt_invoice = parse_lpb_upload_date(r, excel_row, "J.T Invoice", "J.T INVOICE", "JT INVOICE", "JATUH TEMPO INVOICE")
+        actual_date = parse_lpb_upload_date(r, excel_row, "Actual Date", "ACTUAL DATE")
+        tgl_pembayaran = parse_lpb_upload_date(r, excel_row, "Tgl Pembayaran", "TGL PEMBAYARAN")
         out.append({
             "no_lpb": no_lpb,
-            "tgl_setor": to_date_str(r[cols["TGL. SETOR"]]),
-            "tgl_win": to_date_str(r[cols["TGL. WIN"]]),
-            "tgl_jtempo_win": to_date_str(r[cols["TGL. J. TEMPO WIN"]]),
+            "tgl_setor": tgl_setor,
+            "tgl_win": tgl_win,
+            "tgl_jtempo_win": tgl_jtempo_win,
             "principle": s(r[cols["PRINCIPLE"]]),
             "nilai_win": nilai_win,
-            "tgl_terima_barang": to_date_str(r[cols["TGL TERIMA BARANG"]]),
-            "tgl_invoice": to_date_str(_row_value(r, cols, "Tgl Invoice", "TGL INVOICE", "TGL. INVOICE")),
+            "tgl_terima_barang": tgl_terima_barang,
+            "tgl_invoice": tgl_invoice,
             "invoice_no": s(_row_value(r, cols, "No Invoice", "NO INVOICE", "NO. INVOICE")),
             "nilai_invoice": nilai_invoice if nilai_invoice > 0 else "",
-            "jt_invoice": to_date_str(_row_value(r, cols, "J.T Invoice", "J.T INVOICE", "JT INVOICE", "JATUH TEMPO INVOICE")),
-            "actual_date": to_date_str(_row_value(r, cols, "Actual Date", "ACTUAL DATE")),
-            "tgl_pembayaran": to_date_str(_row_value(r, cols, "Tgl Pembayaran", "TGL PEMBAYARAN")),
+            "jt_invoice": jt_invoice,
+            "actual_date": actual_date,
+            "tgl_pembayaran": tgl_pembayaran,
             "gap_nilai": (nilai_win - nilai_invoice) if nilai_invoice > 0 else 0.0,
             "jenis_dokumen": s(_row_value(r, cols, "Jenis Dokumen", "JENIS DOKUMEN")),
             "nomor_dokumen": s(_row_value(r, cols, "Nomor Dokumen", "NOMOR DOKUMEN")),
             "keterangan": s(_row_value(r, cols, "Keterangan", "KETERANGAN")),
         })
+    if date_errors:
+        shown = "; ".join(date_errors[:5])
+        extra = len(date_errors) - 5
+        suffix = f"; dan {extra} lainnya" if extra > 0 else ""
+        raise ValueError(
+            f"Tanggal tidak valid (harus DD/MM/YYYY): {shown}{suffix}. Upload dibatalkan."
+        )
     return out
 
 def _col_lookup(cols: Dict[str, Any], *names: str) -> Optional[Any]:
@@ -1682,7 +1781,20 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
         raise ValueError("Format backup PAYMENTS tidak valid.")
 
     rows: List[Tuple[str, Dict[str, Any]]] = []
-    for _, r in df.iterrows():
+    date_errors: List[str] = []
+
+    def parse_backup_date(r, excel_row: int, *names: str) -> str:
+        col = _col_lookup(cols, *names)
+        if col is None:
+            return ""
+        try:
+            return parse_sppd_date_ddmmyyyy(r[col])
+        except ValueError as de:
+            date_errors.append(f"kolom '{s(col)}' baris {excel_row} = {str(de)}")
+            return ""
+
+    for idx, (_, r) in enumerate(df.iterrows()):
+        excel_row = idx + 2
         raw_key = s(_row_value(r, cols, "Record ID"))
         tipe = normalize_pengajuan_type(_row_value(r, cols, "Tipe Pengajuan", default="LPB"))
         no_lpb = s(_row_value(r, cols, "No LPB"))
@@ -1704,16 +1816,16 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
             "record_id": key,
             "tipe_pengajuan": tipe,
             "no_lpb": no_lpb,
-            "tgl_setor": to_date_str(_row_value(r, cols, "Tgl Setor", "TGL. SETOR")),
-            "tgl_win": to_date_str(_row_value(r, cols, "Tgl Win", "TGL. WIN")),
-            "tgl_jtempo_win": to_date_str(_row_value(r, cols, "Tgl J.Tempo Win", "TGL. J. TEMPO WIN")),
+            "tgl_setor": parse_backup_date(r, excel_row, "Tgl Setor", "TGL. SETOR"),
+            "tgl_win": parse_backup_date(r, excel_row, "Tgl Win", "TGL. WIN"),
+            "tgl_jtempo_win": parse_backup_date(r, excel_row, "Tgl J.Tempo Win", "TGL. J. TEMPO WIN"),
             "principle": principle,
             "nilai_win": nilai_win,
-            "tgl_terima_barang": to_date_str(_row_value(r, cols, "Tgl Terima Barang", "TGL TERIMA BARANG")),
-            "tgl_invoice": to_date_str(_row_value(r, cols, "Tgl Invoice")),
-            "jt_invoice": to_date_str(_row_value(r, cols, "J.T Invoice")),
-            "tgl_pembayaran": to_date_str(_row_value(r, cols, "Tgl Pembayaran")),
-            "actual_date": to_date_str(_row_value(r, cols, "Actual Date")),
+            "tgl_terima_barang": parse_backup_date(r, excel_row, "Tgl Terima Barang", "TGL TERIMA BARANG"),
+            "tgl_invoice": parse_backup_date(r, excel_row, "Tgl Invoice"),
+            "jt_invoice": parse_backup_date(r, excel_row, "J.T Invoice"),
+            "tgl_pembayaran": parse_backup_date(r, excel_row, "Tgl Pembayaran"),
+            "actual_date": parse_backup_date(r, excel_row, "Actual Date"),
             "nilai_invoice": nilai_invoice,
             "gap_nilai": gap_nilai,
             "invoice_no": invoice_no,
@@ -1725,7 +1837,7 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
             "draft_id": s(_row_value(r, cols, "Draft ID")),
             "potongan": potongan,
             "nilai_pembayaran": nilai_pembayaran,
-            "target_payment_date": to_date_str(_row_value(r, cols, "Tanggal Pengajuan Pembayaran")),
+            "target_payment_date": parse_backup_date(r, excel_row, "Tanggal Pengajuan Pembayaran"),
             "jenis_pembayaran": s(_row_value(r, cols, "Jenis Pembayaran")),
             "jenis_dokumen": jenis_dokumen,
             "nomor_dokumen": nomor_dokumen,
@@ -1735,6 +1847,13 @@ def parse_payments_backup_upload(content: bytes) -> List[Tuple[str, Dict[str, An
             "created_by": s(_row_value(r, cols, "Created By")),
         }
         rows.append((key, rec))
+    if date_errors:
+        shown = "; ".join(date_errors[:5])
+        extra = len(date_errors) - 5
+        suffix = f"; dan {extra} lainnya" if extra > 0 else ""
+        raise ValueError(
+            f"Tanggal tidak valid (harus DD/MM/YYYY): {shown}{suffix}. Restore backup dibatalkan."
+        )
     return rows
 
 def max_sppd_sequence_from_records(records: List[Dict[str, Any]]) -> int:
@@ -6128,7 +6247,7 @@ def normalize_sppd_excel_value(field: str, value: Any) -> Any:
     if field in SPPD_EXCEL_NUMERIC_FIELDS:
         return parse_number_id(value)
     if field in SPPD_EXCEL_DATE_FIELDS:
-        return to_date_str(value)
+        return parse_sppd_date_ddmmyyyy(value)
     if field == "tipe_pengajuan":
         return normalize_pengajuan_type(value)
     return s(value)
@@ -6151,15 +6270,28 @@ def parse_sppd_excel_rows(content: bytes) -> Tuple[List[Dict[str, Any]], List[st
         elif normalized:
             ignored_columns.append(s(col))
     rows: List[Dict[str, Any]] = []
-    for _, row in df.iterrows():
+    date_errors: List[str] = []
+    for idx, (_, row) in enumerate(df.iterrows()):
+        excel_row = idx + 2  # header di baris 1
         item: Dict[str, Any] = {}
         for col, field in columns.items():
-            value = normalize_sppd_excel_value(field, row.get(col))
+            try:
+                value = normalize_sppd_excel_value(field, row.get(col))
+            except ValueError as de:
+                date_errors.append(f"kolom '{s(col)}' baris {excel_row} = {str(de)}")
+                continue
             if value is None or s(value) == "":
                 continue
             item[field] = value
         if item:
             rows.append(item)
+    if date_errors:
+        shown = "; ".join(date_errors[:5])
+        extra = len(date_errors) - 5
+        suffix = f"; dan {extra} lainnya" if extra > 0 else ""
+        raise ValueError(
+            f"Tanggal tidak valid (harus DD/MM/YYYY): {shown}{suffix}. Upload dibatalkan."
+        )
     return rows, ignored_columns, blocked_columns
 
 @app.post("/payments/sppd/upload")
