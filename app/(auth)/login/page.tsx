@@ -220,6 +220,34 @@ export default function LoginPage() {
                 <section
                     className="login-portal-form-side flex min-h-[calc(100vh-6rem)] items-center justify-center px-5 py-10 sm:px-10 md:min-h-screen"
                 >
+                    <div className="login-portal-form-wrap flex w-full max-w-[430px] flex-col items-center">
+                        <div
+                            className="login-portal-mobile-logo login-portal-logo-stack mb-6 inline-grid w-fit items-center md:hidden"
+                            role="img"
+                            aria-label="CV. Surya Perkasa Distribution Company"
+                        >
+                            <Image
+                                src="/brand/logo_SP_horizontal.png"
+                                alt=""
+                                aria-hidden="true"
+                                width={305}
+                                height={95}
+                                priority
+                                unoptimized
+                                className="login-portal-logo-mark login-portal-logo-mark-blue col-start-1 row-start-1 h-auto"
+                            />
+                            <Image
+                                src="/brand/logo_SP_horizontal_white.png"
+                                alt=""
+                                aria-hidden="true"
+                                width={305}
+                                height={95}
+                                priority
+                                unoptimized
+                                className="login-portal-logo-mark login-portal-logo-mark-white col-start-1 row-start-1 h-auto"
+                            />
+                        </div>
+
                     <form
                         onSubmit={handleLogin}
                         noValidate
@@ -346,6 +374,7 @@ export default function LoginPage() {
                             Belum memiliki akun? Hubungi admin internal perusahaan.
                         </p>
                     </form>
+                    </div>
                 </section>
             </div>
         </main>

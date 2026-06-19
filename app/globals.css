@@ -1819,25 +1819,89 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
 /* Mobile: brand section is a compact header strip only */
 @media (max-width: 767px) {
   .login-portal-brand {
-    min-height: 0;
-    padding-top: 1.5rem;
-    padding-bottom: 1.25rem;
-  }
-
-  .login-portal-brand .login-portal-logo-mark {
-    width: min(68vw, 13.5rem) !important;
+    display: none;
   }
 
   .login-portal-form-side {
-    min-height: 0;
-    padding: 2rem 1rem 2.5rem;
+    align-items: center;
+    min-height: 100svh;
+    padding: 2rem 1rem 2.25rem;
     box-shadow: none;
   }
 
+  .login-portal-form-wrap {
+    max-width: 420px;
+  }
+
+  .login-portal-mobile-logo .login-portal-logo-mark {
+    width: min(58vw, 13rem) !important;
+  }
+
+  .login-portal-mobile-logo .login-portal-logo-mark-blue {
+    display: block;
+  }
+
+  .login-portal-mobile-logo .login-portal-logo-mark-white {
+    display: none;
+  }
+
   .login-portal-card {
+    width: 100%;
     max-width: 100%;
     border-radius: 1rem;
+    padding: 2rem 1.5rem;
     box-shadow: 0 16px 38px rgba(0, 31, 65, 0.08);
+  }
+
+  .login-portal-card-title {
+    font-size: 1.5rem;
+    line-height: 1.2;
+  }
+
+  .login-portal-card-subtitle,
+  .login-portal-note {
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+
+  .login-portal-label,
+  .login-portal-forgot {
+    font-size: 0.875rem;
+  }
+
+  .login-portal-input {
+    height: 3.25rem !important;
+    font-size: 1rem !important;
+    line-height: 1.5rem;
+  }
+
+  .login-portal-button {
+    height: 3.5rem !important;
+    font-size: 1rem;
+  }
+
+  .login-portal-password-toggle {
+    height: 2.75rem;
+    width: 2.75rem;
+    right: 0.5rem;
+  }
+
+  .login-portal-input-icon {
+    left: 1rem;
+  }
+}
+
+@media (max-width: 374px) {
+  .login-portal-form-side {
+    padding-inline: 0.875rem;
+  }
+
+  .login-portal-card {
+    padding-inline: 1.25rem;
+  }
+
+  .login-portal-mobile-logo .login-portal-logo-mark {
+    width: min(62vw, 12rem) !important;
   }
 }
 
@@ -2372,6 +2436,16 @@ html[data-theme="ios"] .login-portal-button {
 
 html[data-theme="ios"] .login-portal-button:hover:not(:disabled) {
   background: #25396f;
+}
+
+@media (max-width: 767px) {
+  html[data-theme="ios"] .login-portal-mobile-logo .login-portal-logo-mark-blue {
+    display: block;
+  }
+
+  html[data-theme="ios"] .login-portal-mobile-logo .login-portal-logo-mark-white {
+    display: none;
+  }
 }
 
 /* ============================================
