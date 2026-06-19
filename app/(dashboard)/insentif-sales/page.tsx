@@ -1018,7 +1018,18 @@ function FinanceView({ apiRows, month, year }: { apiRows: ApiRow[]; month: numbe
     const [saving, setSaving] = useState(false);
     const [checked, setChecked] = useState<Record<string, boolean>>({});
 
-    // Fetch 12-month payment summary
+    // Fetch 12-month payment summary. Manual callback for refresh button + post-save reload.
+    const fetchPayments = useCallback(async () => {
+        try {
+            const res = await fetch(`/api/insentif-sales/payments?year=${year}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            setPayments(data.rows ?? []);
+        } catch { /* silent — fallback ke empty */ }
+    }, [year]);
+
+    // Inline fetch on year change — kept separate from fetchPayments to avoid
+    // the set-state-in-effect lint rule that fires when an effect calls a setState-bearing callback.
     useEffect(() => {
         (async () => {
             try {

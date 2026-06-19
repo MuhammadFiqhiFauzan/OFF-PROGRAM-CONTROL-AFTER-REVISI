@@ -23,9 +23,9 @@ export function generateTargetTemplate() {
 export function parseTargetExcel(arrayBuffer: ArrayBuffer): Array<Record<string, unknown>> {
     const workbook = XLSX.read(arrayBuffer, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(sheet);
+    const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
 
-    return data.map((row: Record<string, unknown>) => ({
+    return data.map((row) => ({
         salesCode: String(row["Kode Salesman"] || "").trim(),
         salesName: String(row["Nama Salesman"] || "").trim(),
         principle: String(row["Principal"] || "NESTLE").trim(),

@@ -20,7 +20,8 @@ type RouteKey = keyof typeof accurateRoutes;
 type LogState = {
   status: "success" | "error";
   message?: string;
-  data?: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data?: any;
 };
 
 type DuplicateConflictReason = "DUPLICATE_IN_UPLOAD" | "ALREADY_SUCCESS" | "STILL_PROCESSING" | "ACCURATE_HISTORY";
@@ -2358,7 +2359,7 @@ export default function Home() {
       toast.error(`Selesai dengan peringatan (${errorCount} Tahap Gagal).`, { id: 'exec' });
 
       if (errorLogForExcel.length > 0) {
-        setTimeout(() => {
+        setTimeout(async () => {
           toast("Mengunduh Excel Log Error...", { icon: "📥" });
           try {
             const XLSX = await import("xlsx");

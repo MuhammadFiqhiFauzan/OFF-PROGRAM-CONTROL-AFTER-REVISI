@@ -28,12 +28,9 @@ export default function FormKontrolPage() {
     }, []);
 
     const visibleTabs = scope ? TABS.filter(t => t.roles.includes(scope.role)) : [];
-
-    useEffect(() => {
-        if (visibleTabs.length > 0 && !visibleTabs.find(t => t.key === activeTab)) {
-            setActiveTab(visibleTabs[0].key);
-        }
-    }, [activeTab, visibleTabs]);
+    // Derive effective tab during render — avoids setState-in-effect cascade.
+    // Falls back to first visible tab when the selected one isn't allowed for this scope.
+    const effectiveTab = visibleTabs.some(t => t.key === activeTab) ? activeTab : visibleTabs[0]?.key;
 
     if (scopeLoading) {
         return (
@@ -79,7 +76,7 @@ export default function FormKontrolPage() {
                         const Icon = tab.icon;
                         return (
                             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${activeTab === tab.key ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-white hover:bg-white/5"}`}>
+                                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${effectiveTab === tab.key ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-white hover:bg-white/5"}`}>
                                 <Icon size={13} />
                                 {tab.label}
                             </button>
@@ -90,14 +87,14 @@ export default function FormKontrolPage() {
 
             {/* Active tab content */}
             <div className="bg-[#1a1c23]/40 border border-white/10 rounded-xl p-4 md:p-6">
-                {activeTab === "jks"           && <TabJks scope={scope!} />}
-                {activeTab === "ao"            && <TabAo scope={scope!} />}
-                {activeTab === "no-order"      && <TabNoOrder scope={scope!} />}
-                {activeTab === "merchandising" && <TabMerchandising scope={scope!} />}
-                {activeTab === "laporan"       && <TabLaporan scope={scope!} />}
-                {activeTab === "briefing"      && <TabBriefing scope={scope!} />}
-                {activeTab === "sm-control"    && <TabSmControl scope={scope!} />}
-                {activeTab === "frekuensi"     && <TabFrekuensi scope={scope!} />}
+                {effectiveTab === "jks"           && <TabJks scope={scope!} />}
+                {effectiveTab === "ao"            && <TabAo scope={scope!} />}
+                {effectiveTab === "no-order"      && <TabNoOrder scope={scope!} />}
+                {effectiveTab === "merchandising" && <TabMerchandising scope={scope!} />}
+                {effectiveTab === "laporan"       && <TabLaporan scope={scope!} />}
+                {effectiveTab === "briefing"      && <TabBriefing scope={scope!} />}
+                {effectiveTab === "sm-control"    && <TabSmControl scope={scope!} />}
+                {effectiveTab === "frekuensi"     && <TabFrekuensi scope={scope!} />}
             </div>
         </div>
     );
