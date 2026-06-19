@@ -89,12 +89,12 @@ export default function LoginPage() {
     };
 
     return (
-        <main className="login-portal-shell min-h-screen overflow-hidden md:h-screen" style={{ fontFamily: BASE_FONT }}>
-            <div className="grid min-h-screen md:h-screen md:grid-cols-[49%_51%] md:overflow-hidden">
+        <main className="login-portal-shell min-h-screen overflow-x-hidden" style={{ fontFamily: BASE_FONT }}>
+            <div className="grid min-h-screen md:grid-cols-[49%_51%]">
 
                 {/* Brand section: compact strip on mobile, full panel on md+ */}
                 <section
-                    className="login-portal-brand relative flex overflow-hidden px-6 py-7 sm:px-10 sm:py-9 md:h-screen md:px-10 md:py-11 lg:px-11 lg:py-12"
+                    className="login-portal-brand relative flex overflow-hidden px-6 py-7 sm:px-10 sm:py-9 md:min-h-screen md:px-10 md:py-8 lg:px-11 lg:py-10"
                 >
                     <div
                         aria-hidden="true"
@@ -124,43 +124,44 @@ export default function LoginPage() {
 
                     <div className="relative z-10 flex w-full max-w-[520px] flex-col">
                         {/* Logo brand */}
-                        <div className="login-portal-logo-chip inline-flex w-fit items-center rounded-xl px-4 py-3">
+                        <div className="inline-flex w-fit items-center">
                             <Image
-                                src="/brand/surya-perkasa-logo-horizontal.png"
+                                src="/brand/logo_SP_horizontal_white.png"
                                 alt="CV. Surya Perkasa Distribution Company"
-                                width={790}
-                                height={285}
+                                width={305}
+                                height={95}
                                 priority
-                                className="h-auto w-[min(72vw,20rem)] sm:w-[21rem] md:w-[19rem] lg:w-[21.25rem]"
+                                unoptimized
+                                className="login-portal-logo-mark h-auto w-[min(64vw,15.5rem)] sm:w-[16rem] md:w-[14.5rem] lg:w-[16rem]"
                             />
                         </div>
 
                         {/* Hero text + feature list — hidden on mobile, shown md+ */}
                         <div className="hidden md:block">
-                            <div className="mt-20 lg:mt-28">
+                            <div className="mt-12 lg:mt-16">
                                 <h1
-                                    className="login-portal-hero-title max-w-[440px] text-5xl font-extrabold leading-[1.03] tracking-[-0.04em] lg:text-7xl"
+                                    className="login-portal-hero-title max-w-[430px] text-[clamp(2.75rem,4.6vw,4.6rem)] font-extrabold leading-[1.04] tracking-[-0.04em]"
                                 >
                                     Portal<br />CV. Surya Perkasa
                                 </h1>
-                                <p className="login-portal-hero-subtitle mt-5 text-xl font-medium">
+                                <p className="login-portal-hero-subtitle mt-4 text-lg font-medium lg:text-xl">
                                     Masuk ke sistem kontrol
                                 </p>
                             </div>
 
-                            <div className="mt-7 space-y-4 lg:mt-12 lg:space-y-7">
+                            <div className="mt-6 space-y-4 lg:mt-8 lg:space-y-5">
                                 {FEATURE_ITEMS.map((item) => {
                                     const Icon = item.icon;
                                     return (
-                                        <div key={item.title} className="flex items-start gap-5">
-                                            <div className="login-portal-feature-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-full lg:h-14 lg:w-14">
-                                                <Icon aria-hidden="true" className="h-6 w-6 lg:h-7 lg:w-7" strokeWidth={2.2} />
+                                        <div key={item.title} className="flex items-start gap-4">
+                                            <div className="login-portal-feature-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-full lg:h-12 lg:w-12">
+                                                <Icon aria-hidden="true" className="h-5 w-5 lg:h-6 lg:w-6" strokeWidth={2.2} />
                                             </div>
                                             <div>
-                                                <h2 className="login-portal-feature-title text-base font-bold lg:text-lg">
+                                                <h2 className="login-portal-feature-title text-base font-bold">
                                                     {item.title}
                                                 </h2>
-                                                <p className="login-portal-feature-copy mt-1 max-w-[310px] text-sm leading-[1.55] lg:leading-6">
+                                                <p className="login-portal-feature-copy mt-1 max-w-[310px] text-sm leading-[1.5]">
                                                     {item.description}
                                                 </p>
                                             </div>
@@ -174,7 +175,7 @@ export default function LoginPage() {
 
                 {/* Form section */}
                 <section
-                    className="login-portal-form-side flex min-h-[calc(100vh-6rem)] items-center justify-center px-5 py-10 sm:px-10 md:h-screen md:min-h-0 md:overflow-hidden"
+                    className="login-portal-form-side flex min-h-[calc(100vh-6rem)] items-center justify-center px-5 py-10 sm:px-10 md:min-h-screen"
                 >
                     <form
                         onSubmit={handleLogin}
