@@ -179,15 +179,6 @@ function toAccurateDate(ymd: string) {
     return `${day}/${month}/${year}`;
 }
 
-function hasAccurateSession() {
-    if (typeof window === "undefined") return false;
-    return Boolean(
-        sessionStorage.getItem("accurateApiKey") &&
-        sessionStorage.getItem("accurateHost") &&
-        sessionStorage.getItem("accurateSession")
-    );
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
     return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
@@ -414,7 +405,9 @@ export default function FinancePage() {
             toast.error("Mapping Vendor No dan Bank No Accurate wajib lengkap.");
             return;
         }
-        if (!hasAccurateSession()) {
+        const sessionRes = await fetch("/api/auth/accurate-session");
+        const sessionData = await sessionRes.json().catch(() => ({}));
+        if (!sessionRes.ok || !sessionData.databaseConnected) {
             toast.error("Login dan open database Accurate dulu sebelum posting purchase-payment.");
             return;
         }

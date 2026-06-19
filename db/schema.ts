@@ -101,6 +101,17 @@ export const idempotencyLog = sqliteTable("idempotency_log", {
     updatedAt: integer('updatedAt', { mode: 'timestamp' })
 });
 
+export const accurateOAuthSession = sqliteTable("accurate_oauth_session", {
+    userId: text("user_id").primaryKey().references(() => user.id),
+    accessToken: text("access_token").notNull(),
+    sessionHost: text("session_host"),
+    sessionId: text("session_id"),
+    databaseId: text("database_id"),
+    databaseAlias: text("database_alias"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 // --- OFF Program Control --- //
 
 export const offBatch = sqliteTable("off_batch", {

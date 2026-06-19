@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import { upsertAccurateSession } from '@/lib/accurate-session';
 
 export async function GET(request: Request) {
+    const appSession = await auth.api.getSession({ headers: request.headers });
+    if (!appSession) {
+        return NextResponse.redirect(new URL('/login?error=Accurate+login+requires+app+session', request.url));
+    }
+
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');
 
@@ -43,10 +50,16 @@ export async function GET(request: Request) {
         const tokenData = await tokenResponse.json();
         const accessToken = tokenData.access_token;
 
-        // 2. Redirect kembali ke frontend dengan access token sebagai hash/fragment URL
-        // Frontend (app/api-wrapper/page.tsx) akan memproses token ini lalu menghapusnya dari URL demi keamanan
+        await upsertAccurateSession(String(appSession.user.id), {
+            accessToken,
+            sessionHost: null,
+            sessionId: null,
+            databaseId: null,
+            databaseAlias: null,
+        });
+
         const redirectUrl = new URL('/api-wrapper', request.url);
-        redirectUrl.hash = `access_token=${accessToken}`;
+        redirectUrl.searchParams.set("accurate", "connected");
 
         return NextResponse.redirect(redirectUrl);
 

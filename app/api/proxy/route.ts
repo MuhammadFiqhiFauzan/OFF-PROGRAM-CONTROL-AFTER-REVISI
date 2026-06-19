@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAllowedAccurateHost, requireApiSession } from "@/lib/api-security";
+import { getAccurateSession } from "@/lib/accurate-session";
 
 export async function POST(req: NextRequest) {
     try {
@@ -7,10 +8,14 @@ export async function POST(req: NextRequest) {
         if (authCheck.response) return authCheck.response;
 
         const body = await req.json();
-        const { endpointPath, method, payload, sessionHost, sessionId, apiKey } = body;
+        const { endpointPath, method, payload } = body;
+        const accurateSession = await getAccurateSession(String(authCheck.session.user.id));
+        const sessionHost = accurateSession?.sessionHost;
+        const sessionId = accurateSession?.sessionId;
+        const apiKey = accurateSession?.accessToken;
 
         if (!endpointPath || !method || !sessionHost || !sessionId || !apiKey) {
-            return NextResponse.json({ error: "Missing required parameters for proxy" }, { status: 400 });
+            return NextResponse.json({ error: "Sesi Accurate belum lengkap. Login dan pilih database terlebih dahulu." }, { status: 400 });
         }
         if (!isAllowedAccurateHost(sessionHost)) {
             return NextResponse.json({ error: "Session host Accurate tidak diizinkan" }, { status: 400 });

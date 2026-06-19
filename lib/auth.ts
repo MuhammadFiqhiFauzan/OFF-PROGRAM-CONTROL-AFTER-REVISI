@@ -27,8 +27,8 @@ const baseURL = process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL |
 function isAllowedTrustedOrigin(origin: string) {
     try {
         const parsed = new URL(origin);
-        const isLocal = ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsed.hostname);
-        return !isLocal || origin === "http://localhost:3000";
+        const isLocal = ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(parsed.hostname);
+        return !isLocal || parsed.protocol === "http:" || parsed.protocol === "https:";
     } catch {
         return false;
     }
@@ -38,6 +38,9 @@ const trustedOrigins = Array.from(new Set([
     baseURL,
     process.env.NEXT_PUBLIC_APP_URL,
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
 ].filter((origin): origin is string => typeof origin === "string" && isAllowedTrustedOrigin(origin))));
 
 export const auth = betterAuth({

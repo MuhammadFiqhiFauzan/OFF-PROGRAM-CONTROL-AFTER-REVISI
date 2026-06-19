@@ -57,6 +57,12 @@ test.describe("security guardrails for sensitive utility routes", () => {
       },
     });
     expect(proxy.status()).toBe(401);
+
+    const dbList = await request.get("/api/auth/db-list?access_token=fake-browser-token");
+    expect(dbList.status()).toBe(401);
+
+    const openDb = await request.get("/api/auth/open-db?access_token=fake-browser-token&id=1");
+    expect(openDb.status()).toBe(401);
   });
 
   test("allows authenticated idempotency preview requests", async ({ request, baseURL }) => {
@@ -98,7 +104,7 @@ test.describe("security guardrails for sensitive utility routes", () => {
     });
     expect(proxy.status()).toBe(400);
     await expect(await proxy.json()).toMatchObject({
-      error: "Session host Accurate tidak diizinkan",
+      error: "Sesi Accurate belum lengkap. Login dan pilih database terlebih dahulu.",
     });
   });
 

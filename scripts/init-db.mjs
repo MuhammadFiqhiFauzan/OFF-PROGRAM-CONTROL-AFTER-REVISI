@@ -125,6 +125,17 @@ const statements = [
     createdAt INTEGER,
     updatedAt INTEGER
   );`,
+  `CREATE TABLE IF NOT EXISTS accurate_oauth_session (
+    user_id TEXT PRIMARY KEY NOT NULL,
+    access_token TEXT NOT NULL,
+    session_host TEXT,
+    session_id TEXT,
+    database_id TEXT,
+    database_alias TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES user(id)
+  );`,
   `CREATE TABLE IF NOT EXISTS off_batch (
     id TEXT PRIMARY KEY,
     no_pengajuan TEXT NOT NULL UNIQUE,

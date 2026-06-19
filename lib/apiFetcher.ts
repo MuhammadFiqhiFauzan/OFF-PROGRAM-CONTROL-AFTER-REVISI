@@ -1,6 +1,6 @@
 /**
  * Universal Fetcher for Accurate API
- * Retrieves API key directly from sessionStorage to avoid keeping it in .env
+ * Proxies Accurate requests through the server-side Accurate session.
  */
 export class AccurateError extends Error {
     rawDetails?: any[];
@@ -18,14 +18,6 @@ export async function accurateFetch(endpointPath: string, method: string, payloa
         throw new Error("accurateFetch hanya bisa dijalankan di client-side.");
     }
 
-    const apiKey = sessionStorage.getItem("accurateApiKey");
-    const sessionHost = sessionStorage.getItem("accurateHost");
-    const sessionId = sessionStorage.getItem("accurateSession");
-
-    if (!apiKey || !sessionHost || !sessionId) {
-        throw new Error("Kredensial tidak lengkap. Pastikan Anda sudah login dan memilih Database Accurate.");
-    }
-
     try {
         const response = await fetch("/api/proxy", {
             method: "POST",
@@ -36,9 +28,6 @@ export async function accurateFetch(endpointPath: string, method: string, payloa
                 endpointPath,
                 method: method.toUpperCase(),
                 payload: payload || null,
-                sessionHost,
-                sessionId,
-                apiKey
             }),
         });
 
