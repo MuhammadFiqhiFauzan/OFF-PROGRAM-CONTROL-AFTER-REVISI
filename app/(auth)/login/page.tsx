@@ -7,7 +7,7 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Lock, Mail } from "lucide-react";
@@ -34,32 +34,39 @@ export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
-
+    // ponytail: ref guard prevents triple-submit when Enter fires before setLoading batches
+    const submitting = useRef(false);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (submitting.current) return;
+        submitting.current = true;
         setLoading(true);
 
-        const { error } = await authClient.signIn.email({
-            email,
-            password
-        });
+        try {
+            const { error } = await authClient.signIn.email({ email, password });
 
-        if (error) {
-            if (isEmailVerificationError(error)) {
-                toast.error("Email belum diverifikasi.", {
-                    description: "Silakan periksa kotak masuk email Anda dan klik tautan verifikasi."
-                });
+            if (error) {
+                if (isEmailVerificationError(error)) {
+                    toast.error("Email belum diverifikasi.", {
+                        description: "Silakan periksa kotak masuk email Anda dan klik tautan verifikasi."
+                    });
+                } else {
+                    toast.error(error.message || "Gagal masuk. Periksa kembali email dan kata sandi Anda.", {
+                        description: error.status === 403 ? "Akses login ditolak oleh konfigurasi auth server." : undefined,
+                    });
+                }
             } else {
-                toast.error(error.message || "Gagal masuk. Periksa kembali email dan kata sandi Anda.", {
-                    description: error.status === 403 ? "Akses login ditolak oleh konfigurasi auth server." : undefined,
-                });
+                toast.success("Login berhasil.");
+                router.push("/");
+                router.refresh();
+                return; // keep loading=true while navigating; middleware handles redirect
             }
+        } catch {
+            toast.error("Terjadi kesalahan jaringan. Coba lagi.");
+        } finally {
+            submitting.current = false;
             setLoading(false);
-        } else {
-            toast.success("Login berhasil.");
-            router.push("/");
-            router.refresh();
         }
     };
 
@@ -76,12 +83,13 @@ export default function LoginPage() {
                 <div className="p-8 bg-[#fffaf0]/74">
                     <form onSubmit={handleLogin} className="space-y-6">
                         <div>
-                            <label className="block text-sm font-semibold text-[#574839] mb-1">Email</label>
+                            <label htmlFor="email" className="block text-sm font-semibold text-[#574839] mb-1">Email</label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                     <Mail className="h-5 w-5 text-[#9a7a45]" />
                                 </div>
                                 <input
+                                    id="email"
                                     type="email"
                                     required
                                     value={email}
@@ -94,8 +102,8 @@ export default function LoginPage() {
 
                         <div>
                             <div className="flex items-center justify-between mb-1">
-                                <label className="block text-sm font-semibold text-[#574839]">Password</label>
-                                <Link href="/forgot-password" className="text-xs font-semibold text-[#9a6424] hover:text-[#7a4e20]">
+                                <label htmlFor="password" className="block text-sm font-semibold text-[#574839]">Password</label>
+                                <Link href="/forgot-password" prefetch={false} className="text-xs font-semibold text-[#9a6424] hover:text-[#7a4e20]">
                                     Lupa Password?
                                 </Link>
                             </div>
@@ -104,6 +112,7 @@ export default function LoginPage() {
                                     <Lock className="h-5 w-5 text-[#9a7a45]" />
                                 </div>
                                 <input
+                                    id="password"
                                     type="password"
                                     required
                                     value={password}
@@ -117,6 +126,7 @@ export default function LoginPage() {
                         <button
                             type="submit"
                             disabled={loading}
+                            aria-busy={loading}
                             className="w-full flex justify-center py-3 px-4 border border-[#f2d28a]/60 rounded-xl shadow-[0_14px_32px_rgba(199,154,63,0.28)] text-sm font-semibold text-[#3d2814] bg-gradient-to-r from-[#f2d28a] via-[#d6a948] to-[#b77a25] hover:shadow-[0_18px_40px_rgba(199,154,63,0.34)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#d6a948] transition-all disabled:opacity-50"
                         >
                             {loading ? "Memproses..." : "Masuk"}
