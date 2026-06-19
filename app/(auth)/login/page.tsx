@@ -8,6 +8,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
@@ -122,21 +123,16 @@ export default function LoginPage() {
                     />
 
                     <div className="relative z-10 flex w-full max-w-[520px] flex-col">
-                        {/* Logo + brand name — always visible */}
-                        <div className="flex items-center gap-3">
-                            <div className="login-portal-logo relative flex h-11 w-11 items-center justify-center rounded-full">
-                                <div className="login-portal-logo-ring h-7 w-7 rounded-full border-[5px]" />
-                                <div className="login-portal-logo-bar absolute h-3.5 w-9 rotate-[-28deg] rounded-full" />
-                                <div className="login-portal-logo-cut absolute h-2.5 w-7 rotate-[-28deg] rounded-full" />
-                            </div>
-                            <div>
-                                <p className="login-portal-brand-title text-xl font-extrabold uppercase leading-tight tracking-tight">
-                                    CV. Surya Perkasa
-                                </p>
-                                <p className="login-portal-brand-subtitle text-sm font-medium">
-                                    Solusi Distribusi &amp; Logistik
-                                </p>
-                            </div>
+                        {/* Logo brand */}
+                        <div className="login-portal-logo-chip inline-flex w-fit items-center rounded-xl px-4 py-3">
+                            <Image
+                                src="/brand/surya-perkasa-logo-horizontal.png"
+                                alt="CV. Surya Perkasa Distribution Company"
+                                width={790}
+                                height={285}
+                                priority
+                                className="h-auto w-[min(72vw,20rem)] sm:w-[21rem] md:w-[19rem] lg:w-[21.25rem]"
+                            />
                         </div>
 
                         {/* Hero text + feature list — hidden on mobile, shown md+ */}

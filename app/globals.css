@@ -1852,21 +1852,12 @@ html[data-theme="ios"] .text-\[\#9a7a45\] {
   border: 1px solid rgba(130, 83, 31, 0.14);
 }
 
-.login-portal-logo {
-  background: #fffcf4;
-  box-shadow: 0 10px 30px rgba(130, 83, 31, 0.18);
-}
-
-.login-portal-logo-ring {
-  border-color: #c89432;
-}
-
-.login-portal-logo-bar {
-  background: #c89432;
-}
-
-.login-portal-logo-cut {
-  background: #fffcf4;
+.login-portal-logo-chip {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  box-shadow: 0 14px 34px rgba(130, 83, 31, 0.16);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
 }
 
 .login-portal-brand-title,
@@ -1990,21 +1981,10 @@ html[data-theme="office-calm"] .login-portal-ring {
   border-color: rgba(130, 83, 31, 0.14);
 }
 
-html[data-theme="office-calm"] .login-portal-logo {
-  background: #fffcf4;
-  box-shadow: 0 10px 30px rgba(130, 83, 31, 0.18);
-}
-
-html[data-theme="office-calm"] .login-portal-logo-ring {
-  border-color: #c89432;
-}
-
-html[data-theme="office-calm"] .login-portal-logo-bar {
-  background: #c89432;
-}
-
-html[data-theme="office-calm"] .login-portal-logo-cut {
-  background: #fffcf4;
+html[data-theme="office-calm"] .login-portal-logo-chip {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 14px 34px rgba(130, 83, 31, 0.16);
 }
 
 html[data-theme="office-calm"] .login-portal-brand-title,
@@ -2102,23 +2082,10 @@ html[data-theme="neon"] .login-portal-ring {
   box-shadow: 0 0 28px rgba(31, 143, 255, 0.12);
 }
 
-html[data-theme="neon"] .login-portal-logo {
-  background: #041125;
-  border: 1px solid rgba(62, 208, 255, 0.45);
-  box-shadow: 0 0 22px rgba(62, 208, 255, 0.28);
-}
-
-html[data-theme="neon"] .login-portal-logo-ring {
-  border-color: #3ed0ff;
-}
-
-html[data-theme="neon"] .login-portal-logo-bar {
-  background: #3ed0ff;
-  box-shadow: 0 0 14px rgba(62, 208, 255, 0.7);
-}
-
-html[data-theme="neon"] .login-portal-logo-cut {
-  background: #041125;
+html[data-theme="neon"] .login-portal-logo-chip {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(62, 208, 255, 0.24);
+  box-shadow: 0 0 22px rgba(62, 208, 255, 0.24), 0 18px 38px rgba(0, 0, 0, 0.28);
 }
 
 html[data-theme="neon"] .login-portal-brand-title,
@@ -2223,24 +2190,12 @@ html[data-theme="ios"] .login-portal-pattern {
     linear-gradient(0deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
 }
 
-html[data-theme="ios"] .login-portal-logo {
+html[data-theme="ios"] .login-portal-logo-chip {
   background: rgba(255, 255, 255, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.62);
   box-shadow: 0 12px 34px rgba(37, 57, 111, 0.24);
   backdrop-filter: blur(18px) saturate(180%);
   -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-
-html[data-theme="ios"] .login-portal-logo-ring {
-  border-color: #435ebe;
-}
-
-html[data-theme="ios"] .login-portal-logo-bar {
-  background: #435ebe;
-}
-
-html[data-theme="ios"] .login-portal-logo-cut {
-  background: rgba(255, 255, 255, 0.92);
 }
 
 html[data-theme="ios"] .login-portal-brand-title,
