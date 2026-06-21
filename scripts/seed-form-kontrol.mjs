@@ -1,244 +1,234 @@
 /**
- * seed-form-kontrol.mjs
- * Seeds realistic dummy data for Form Kontrol SUPER.
- * Run: node scripts/seed-form-kontrol.mjs
+ * Seed script: isi DB dengan demo data Form Kontrol.
+ * Jalankan lokal:  node scripts/seed-form-kontrol.mjs
+ * Jalankan VPS:    docker exec <frontend-container> node scripts/seed-form-kontrol.mjs
  *
- * Produces:
- *   - 3 salesmen × 4 principals × ~15 stores = ~180 jks_master rows
- *   - ao_control_daily for today + past 6 days (~1,260 rows)
- *   - merchandising_check for visited stores (~400 rows)
- *   - salesman_daily_report for past 7 days (21 rows)
+ * Isi:
+ *   - jks_master       : ~30 toko per salesman × 6 salesman
+ *   - ao_control_daily : kunjungan Juni 2026 minggu 1-3 (mix ordered/not_order/not_visited)
+ *
+ * Tab Frekuensi tidak punya tabel sendiri — dihitung dari dua tabel di atas.
+ * Salesmen selaras dengan seed-insentif-sales.mjs (SLS-001..SLS-006).
  */
 
-import Database from "better-sqlite3";
-import path from "path";
-import { fileURLToPath } from "url";
-import { randomUUID } from "crypto";
+import { createClient } from "@libsql/client";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.resolve(__dirname, "../sqlite.db");
-const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = OFF");
-console.log("📦 DB:", DB_PATH);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// ── Salesmen ────────────────────────────────────────────────────────────────
-const SALESMEN = [
-  { code: "S001", name: "Budi Santoso",   spv: "SPV Joko",  sm: "SM Arif" },
-  { code: "S002", name: "Wati Rahayu",    spv: "SPV Joko",  sm: "SM Arif" },
-  { code: "S003", name: "Deni Kurniawan", spv: "SPV Siti",  sm: "SM Arif" },
-];
-
-const PRINCIPLES = ["GODREJ", "MONTISS", "MUSTIKA RATU", "SOFTEX"];
-const HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-const POLA = ["all", "ganjil", "genap"];
-const FREQ = [1, 1, 1, 2, 2, 4]; // weighted: 1x most common
-const MARKETS = ["Toko Kelontong", "Minimarket", "Supermarket", "Warung", "Apotek"];
-const KOTAS = ["Bandung", "Cimahi", "Garut", "Sumedang"];
-const AREAS = ["Area Barat", "Area Timur", "Area Selatan", "Area Utara"];
-const RAYONS = ["Rayon 01", "Rayon 02", "Rayon 03", "Rayon 04", "Rayon 05"];
-
-const STORE_PREFIXES = [
-  "Toko Maju", "Warung Jaya", "Mini Mart", "Toko Barokah", "Warung Berkah",
-  "Toko Makmur", "Kios Sejahtera", "Toko Harapan", "Warung Ceria", "Toko Indah",
-  "Mart Pratama", "Toko Mandiri", "Warung Rezeki", "Toko Abadi", "Minimart Segar",
-];
-
-function randOf(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-function randInt(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
-
-// ── Generate stores per salesman × principle ─────────────────────────────────
-const stores = [];
-const usedCustCodes = new Set();
-
-let storeSeq = 1;
-for (const sm of SALESMEN) {
-  for (const principle of PRINCIPLES) {
-    const count = randInt(12, 18);
-    for (let i = 0; i < count; i++) {
-      let custCode;
-      do { custCode = `C${String(storeSeq++).padStart(4, "0")}`; } while (usedCustCodes.has(custCode + principle));
-      usedCustCodes.add(custCode + principle);
-
-      const prefix = STORE_PREFIXES[(storeSeq - 1) % STORE_PREFIXES.length];
-      stores.push({
-        id: randomUUID(),
-        salesCode: sm.code,
-        salesName: sm.name,
-        custCode,
-        custName: `${prefix} ${custCode.slice(1)}`,
-        market: randOf(MARKETS),
-        alamat: `Jl. Raya No.${randInt(1, 200)}`,
-        kota: randOf(KOTAS),
-        hariKunjungan: randOf(HARI),
-        mingguPattern: randOf(POLA),
-        area: randOf(AREAS),
-        rayon: randOf(RAYONS),
-        principle,
-        visitFrequency: randOf(FREQ),
-        isActive: 1,
-      });
+function loadEnvFile() {
+    const envPath = resolve(process.cwd(), ".env");
+    if (!existsSync(envPath)) return;
+    for (const rawLine of readFileSync(envPath, "utf8").split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#")) continue;
+        const eq = line.indexOf("=");
+        if (eq <= 0) continue;
+        const key = line.slice(0, eq).trim();
+        let value = line.slice(eq + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+        }
+        if (!(key in process.env)) process.env[key] = value;
     }
-  }
+}
+loadEnvFile();
+
+const databaseUrl = process.env.DATABASE_URL || `file:${resolve(__dirname, "../sqlite.db")}`;
+const db = createClient({ url: databaseUrl });
+const NOW_ISO = new Date().toISOString();
+
+// ── Salesmen — selaras dengan seed-insentif-sales.mjs ───────────────────────
+const SALESMEN = [
+    { code: "SLS-001", name: "Andi Pratama",   principle: "NESTLE",   branch: "BANDUNG",  channel: "TT" },
+    { code: "SLS-002", name: "Siti Rahmawati", principle: "NESTLE",   branch: "BANDUNG",  channel: "MT" },
+    { code: "SLS-003", name: "Rudi Hartono",   principle: "UNILEVER", branch: "CIMAHI",   channel: "TT" },
+    { code: "SLS-004", name: "Maya Anggraini", principle: "UNILEVER", branch: "CIMAHI",   channel: "MT" },
+    { code: "SLS-005", name: "Fajar Nugroho",  principle: "INDOFOOD", branch: "SUMEDANG", channel: "TT" },
+    { code: "SLS-006", name: "Lina Marlina",   principle: "INDOFOOD", branch: "SUMEDANG", channel: "MT" },
+];
+
+const HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"];
+const STORE_NAMES = [
+    "Toko Maju", "Warung Jaya", "Minimart Berkah", "Toko Makmur", "Warung Sejahtera",
+    "Toko Barokah", "Kios Mandiri", "Toko Harapan", "Warung Rezeki", "Toko Abadi",
+];
+const KOTA_MAP  = { BANDUNG: "Bandung", CIMAHI: "Cimahi", SUMEDANG: "Sumedang" };
+const RAYON_MAP = { BANDUNG: ["Rayon A", "Rayon B"], CIMAHI: ["Rayon C"], SUMEDANG: ["Rayon D"] };
+
+// ── Build toko per salesman ──────────────────────────────────────────────────
+// 5 toko/hari × 5 hari = 25 toko pattern "all" 4x/bulan
+// + 3 toko Senin ganjil + 2 toko Senin genap (2x/bulan) → kandidat over-visit
+function buildJksRows(s) {
+    const rows = [];
+    let idx = 1;
+    for (const hari of HARI) {
+        for (let i = 0; i < 5; i++, idx++) {
+            rows.push({
+                custCode:      `${s.code}-T${String(idx).padStart(3, "0")}`,
+                custName:      `${STORE_NAMES[idx % STORE_NAMES.length]} ${idx}`,
+                market:        idx % 4 === 0 ? "MT" : "TT",
+                alamat:        `Jl. Demo No.${idx * 7}, ${KOTA_MAP[s.branch]}`,
+                kota:          KOTA_MAP[s.branch],
+                hariKunjungan: hari,
+                mingguPattern: "all",
+                area:          s.branch,
+                rayon:         RAYON_MAP[s.branch][idx % RAYON_MAP[s.branch].length],
+                visitFrequency: 4,
+            });
+        }
+    }
+    // Toko 2x/bulan — ganjil
+    for (let i = 0; i < 3; i++, idx++) {
+        rows.push({
+            custCode: `${s.code}-T${String(idx).padStart(3, "0")}`,
+            custName: `${STORE_NAMES[idx % STORE_NAMES.length]} ${idx}`,
+            market: "TT", alamat: `Jl. Demo No.${idx * 7}, ${KOTA_MAP[s.branch]}`,
+            kota: KOTA_MAP[s.branch], hariKunjungan: "Senin",
+            mingguPattern: "ganjil", area: s.branch,
+            rayon: RAYON_MAP[s.branch][0], visitFrequency: 2,
+        });
+    }
+    // Toko 2x/bulan — genap
+    for (let i = 0; i < 2; i++, idx++) {
+        rows.push({
+            custCode: `${s.code}-T${String(idx).padStart(3, "0")}`,
+            custName: `${STORE_NAMES[idx % STORE_NAMES.length]} ${idx}`,
+            market: "TT", alamat: `Jl. Demo No.${idx * 7}, ${KOTA_MAP[s.branch]}`,
+            kota: KOTA_MAP[s.branch], hariKunjungan: "Senin",
+            mingguPattern: "genap", area: s.branch,
+            rayon: RAYON_MAP[s.branch][0], visitFrequency: 2,
+        });
+    }
+    return rows;
 }
 
-console.log(`\n📋 Inserting ${stores.length} jks_master rows...`);
-const insertJks = db.prepare(`
-  INSERT OR IGNORE INTO jks_master
-    (id, sales_code, sales_name, cust_code, cust_name, market, alamat, kota,
-     hari_kunjungan, minggu_pattern, area, rayon, principle, channel,
-     visit_frequency, is_active, created_at, updated_at)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'TT',?,?,?,?)
-`);
-const now = Date.now();
-db.transaction(() => {
-  for (const s of stores) {
-    insertJks.run(
-      s.id, s.salesCode, s.salesName, s.custCode, s.custName,
-      s.market, s.alamat, s.kota, s.hariKunjungan, s.mingguPattern,
-      s.area, s.rayon, s.principle, s.visitFrequency, s.isActive,
-      now, now
-    );
-  }
-})();
-console.log(`  ✅ jks_master: ${stores.length} rows`);
+// ── Hari kerja Juni 2026 minggu 1-3 ─────────────────────────────────────────
+const JUNI_WORKDAYS = [
+    { date: "2026-06-02", hari: "Senin",  parity: "genap"  },
+    { date: "2026-06-03", hari: "Selasa", parity: "genap"  },
+    { date: "2026-06-04", hari: "Rabu",   parity: "genap"  },
+    { date: "2026-06-05", hari: "Kamis",  parity: "genap"  },
+    { date: "2026-06-06", hari: "Jumat",  parity: "genap"  },
+    { date: "2026-06-09", hari: "Senin",  parity: "ganjil" },
+    { date: "2026-06-10", hari: "Selasa", parity: "ganjil" },
+    { date: "2026-06-11", hari: "Rabu",   parity: "ganjil" },
+    { date: "2026-06-12", hari: "Kamis",  parity: "ganjil" },
+    { date: "2026-06-13", hari: "Jumat",  parity: "ganjil" },
+    { date: "2026-06-16", hari: "Senin",  parity: "genap"  },
+    { date: "2026-06-17", hari: "Selasa", parity: "genap"  },
+    { date: "2026-06-18", hari: "Rabu",   parity: "genap"  },
+    { date: "2026-06-19", hari: "Kamis",  parity: "genap"  },
+    { date: "2026-06-20", hari: "Jumat",  parity: "genap"  },
+];
 
-// ── Generate AO control for past 7 days ─────────────────────────────────────
-const today = new Date();
-const STATUSES = ["ordered","ordered","ordered","ordered","active","not_order","not_order","not_visited"];
-const REASON_CODES = ["R01","R02","R03","R05","R07","R08","R14"];
+const STATUSES         = ["ordered","ordered","ordered","active","not_order","not_order","not_visited"];
+const NO_ORDER_REASONS = ["HRGA001", "HRGA002", "STOK001", "KOMP001", null];
 
-const insertAo = db.prepare(`
-  INSERT OR IGNORE INTO ao_control_daily
-    (id, sales_code, cust_code, principle, date, period_month, period_year,
-     status, order_value_dpp, is_visited, no_order_reason_code, no_order_note,
-     auto_matched, source, created_at, updated_at)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,'manual',?,?)
-`);
-
-let aoCount = 0;
-db.transaction(() => {
-  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - dayOffset);
-    const dateStr = d.toISOString().slice(0, 10);
-    const month = d.getMonth() + 1;
-    const year = d.getFullYear();
-    const dayOfWeek = d.getDay();
-
-    for (const store of stores) {
-      if (dayOfWeek === 0) continue; // skip Sunday
-      if (Math.random() < 0.30) continue; // ~30% skip per day
-
-      const status = randOf(STATUSES);
-      const isVisited = status !== "not_visited" ? 1 : 0;
-      const orderValue = (status === "ordered" || status === "active")
-        ? randInt(150_000, 5_000_000)
-        : 0;
-      const reasonCode = status === "not_order" ? randOf(REASON_CODES) : null;
-      const reasonNote = reasonCode && Math.random() > 0.6
-        ? "Toko minta kunjungan ulang minggu depan"
-        : null;
-
-      insertAo.run(
-        randomUUID(),
-        store.salesCode, store.custCode, store.principle,
-        dateStr, month, year,
-        status, orderValue, isVisited,
-        reasonCode, reasonNote,
-        now, now
-      );
-      aoCount++;
+async function seedJks() {
+    let inserted = 0, updated = 0;
+    for (const s of SALESMEN) {
+        for (const t of buildJksRows(s)) {
+            const ex = await db.execute({
+                sql: "SELECT id FROM jks_master WHERE sales_code=? AND cust_code=? AND principle=?",
+                args: [s.code, t.custCode, s.principle],
+            });
+            if (ex.rows.length) {
+                await db.execute({
+                    sql: `UPDATE jks_master SET sales_name=?, cust_name=?, market=?, alamat=?, kota=?,
+                            hari_kunjungan=?, minggu_pattern=?, area=?, rayon=?, visit_frequency=?,
+                            is_active=1, updated_at=? WHERE id=?`,
+                    args: [s.name, t.custName, t.market, t.alamat, t.kota,
+                           t.hariKunjungan, t.mingguPattern, t.area, t.rayon,
+                           t.visitFrequency, NOW_ISO, ex.rows[0].id],
+                });
+                updated++;
+            } else {
+                await db.execute({
+                    sql: `INSERT INTO jks_master
+                            (id, sales_code, sales_name, cust_code, cust_name, market, alamat, kota,
+                             hari_kunjungan, minggu_pattern, area, rayon, principle, channel,
+                             visit_frequency, is_active, created_at, updated_at)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+                    args: [randomUUID(), s.code, s.name, t.custCode, t.custName,
+                           t.market, t.alamat, t.kota, t.hariKunjungan, t.mingguPattern,
+                           t.area, t.rayon, s.principle, s.channel,
+                           t.visitFrequency, NOW_ISO, NOW_ISO],
+                });
+                inserted++;
+            }
+        }
     }
-  }
-})();
-console.log(`  ✅ ao_control_daily: ${aoCount} rows`);
+    return { inserted, updated };
+}
 
-// ── Merchandising checks for visited stores today ────────────────────────────
-const todayStr = today.toISOString().slice(0, 10);
-const visitedToday = db.prepare(
-  `SELECT sales_code, cust_code, principle FROM ao_control_daily WHERE date=? AND is_visited=1`
-).all(todayStr);
+async function seedAo() {
+    let inserted = 0, skipped = 0;
+    for (const s of SALESMEN) {
+        const allToko = buildJksRows(s);
+        for (let di = 0; di < JUNI_WORKDAYS.length; di++) {
+            const { date, hari, parity } = JUNI_WORKDAYS[di];
+            const tokoHariIni = allToko.filter(t =>
+                t.hariKunjungan === hari &&
+                (t.mingguPattern === "all" || t.mingguPattern === parity)
+            );
+            for (let i = 0; i < tokoHariIni.length; i++) {
+                const t = tokoHariIni[i];
+                const ex = await db.execute({
+                    sql: "SELECT id FROM ao_control_daily WHERE sales_code=? AND cust_code=? AND principle=? AND date=?",
+                    args: [s.code, t.custCode, s.principle, date],
+                });
+                if (ex.rows.length) { skipped++; continue; }
 
-const insertMerch = db.prepare(`
-  INSERT OR IGNORE INTO merchandising_check
-    (id, sales_code, cust_code, principle, date,
-     produk_jelas, display_rapi, dibersihkan, ditataulang, posisi_mudah, semua_sku,
-     note, created_at)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-`);
+                const status = STATUSES[(di + i) % STATUSES.length];
+                const reason = status === "not_order"
+                    ? NO_ORDER_REASONS[i % NO_ORDER_REASONS.length]
+                    : null;
+                const isVisited = status !== "not_visited" ? 1 : 0;
 
-let merchCount = 0;
-db.transaction(() => {
-  for (const row of visitedToday) {
-    if (Math.random() < 0.4) continue; // ~60% fill in merch
-    const checks = Array.from({ length: 6 }, () => Math.random() > 0.3 ? 1 : 0);
-    const note = checks.filter(Boolean).length < 4 ? "Display perlu diperbaiki" : null;
-    insertMerch.run(
-      randomUUID(),
-      row.sales_code, row.cust_code, row.principle, todayStr,
-      ...checks, note, now
-    );
-    merchCount++;
-  }
-})();
-console.log(`  ✅ merchandising_check: ${merchCount} rows (today)`);
-
-// ── Daily reports per salesman × 7 days ─────────────────────────────────────
-const insertReport = db.prepare(`
-  INSERT OR IGNORE INTO salesman_daily_report
-    (id, sales_code, date, period_month, period_year,
-     total_toko_jks, total_order, total_active, total_not_order, total_not_visited,
-     reason_summary, tindak_lanjut, submitted_at, spv_ack)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-`);
-
-let reportCount = 0;
-db.transaction(() => {
-  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - dayOffset);
-    if (d.getDay() === 0) continue; // skip Sunday
-    const dateStr = d.toISOString().slice(0, 10);
-    const month = d.getMonth() + 1;
-    const year = d.getFullYear();
-
-    for (const sm of SALESMEN) {
-      const rows = db.prepare(
-        `SELECT status FROM ao_control_daily WHERE sales_code=? AND date=?`
-      ).all(sm.code, dateStr);
-
-      const totalJks = rows.length || randInt(18, 25);
-      const order    = rows.filter(r => r.status === "ordered").length   || randInt(8, 14);
-      const active   = rows.filter(r => r.status === "active").length    || randInt(2, 5);
-      const notOrder = rows.filter(r => r.status === "not_order").length || randInt(2, 6);
-      const notVisit = rows.filter(r => r.status === "not_visited").length || randInt(0, 3);
-
-      const tindakLanjut = [
-        `${notOrder} toko tidak order akan difollow-up besok pagi.`,
-        `Toko dengan stok cukup dijadwalkan ulang minggu depan.`,
-        `Koordinasi dengan SPV untuk toko yang butuh visit khusus.`,
-      ].join(" ");
-
-      insertReport.run(
-        randomUUID(),
-        sm.code, dateStr, month, year,
-        totalJks, order, active, notOrder, notVisit,
-        JSON.stringify({ R01: notOrder > 0 ? 1 : 0 }),
-        tindakLanjut,
-        now + randInt(0, 3_600_000)
-      );
-      reportCount++;
+                await db.execute({
+                    sql: `INSERT INTO ao_control_daily
+                            (id, sales_code, cust_code, principle, date, period_month, period_year,
+                             status, is_visited, no_order_reason_code, no_order_note,
+                             checkin_at, checkout_at, checkin_photo_url, checkout_photo_url,
+                             auto_matched, source, created_at, updated_at)
+                          VALUES (?,?,?,?,?,6,2026,?,?,?,?,?,?,null,null,0,'seed',?,?)`,
+                    args: [
+                        randomUUID(), s.code, t.custCode, s.principle, date,
+                        status, isVisited,
+                        reason, reason ? "Demo data" : null,
+                        isVisited ? `${date}T08:30:00.000Z` : null,
+                        (status === "ordered" || status === "active") ? `${date}T09:00:00.000Z` : null,
+                        NOW_ISO, NOW_ISO,
+                    ],
+                });
+                inserted++;
+            }
+        }
     }
-  }
-})();
-console.log(`  ✅ salesman_daily_report: ${reportCount} rows`);
+    return { inserted, skipped };
+}
 
-// ── Summary ──────────────────────────────────────────────────────────────────
-const tables = ["jks_master","ao_control_daily","merchandising_check","salesman_daily_report","no_order_reason"];
-const counts = tables.map(t => `${t}: ${db.prepare(`SELECT COUNT(*) as c FROM ${t}`).get().c}`).join("\n  ");
-console.log(`\n📊 Final counts:\n  ${counts}`);
+async function count(table) {
+    const r = await db.execute(`SELECT COUNT(*) as c FROM ${table}`);
+    return r.rows[0].c;
+}
 
-db.pragma("foreign_keys = ON");
-db.close();
-console.log("\n✅ Seed done.");
+console.log(`\nSeeding Form Kontrol\nDB: ${databaseUrl}\n`);
+
+process.stdout.write("jks_master        ... ");
+const jks = await seedJks();
+console.log(`inserted=${jks.inserted}, updated=${jks.updated}`);
+
+process.stdout.write("ao_control_daily  ... ");
+const ao = await seedAo();
+console.log(`inserted=${ao.inserted}, skipped=${ao.skipped}`);
+
+console.log(`\nDB state: jks_master=${await count("jks_master")}, ao_control_daily=${await count("ao_control_daily")}`);
+console.log("\nTab coverage:");
+console.log("  JKS        — filter principle/hari/salesCode aktif");
+console.log("  AO Harian  — Juni 2026 minggu 1-3, mix ordered/not_order/not_visited");
+console.log("  Frekuensi  — computed dari jks+ao, Senin 2x/bln ada potensi over-visit");
