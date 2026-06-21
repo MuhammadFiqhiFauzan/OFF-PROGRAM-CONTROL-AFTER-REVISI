@@ -815,4 +815,172 @@ for (const sql of insentifStatements) {
   }
 }
 
+// --- Form Kontrol tables ---
+const formKontrolStatements = [
+  `CREATE TABLE IF NOT EXISTS jks_master (
+    id TEXT PRIMARY KEY NOT NULL,
+    sales_code TEXT NOT NULL,
+    sales_name TEXT NOT NULL,
+    cust_code TEXT NOT NULL,
+    cust_name TEXT NOT NULL,
+    market TEXT,
+    alamat TEXT,
+    kota TEXT,
+    hari_kunjungan TEXT,
+    minggu_pattern TEXT NOT NULL DEFAULT 'all',
+    area TEXT,
+    rayon TEXT,
+    principle TEXT NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'TT',
+    visit_frequency INTEGER NOT NULL DEFAULT 1,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(sales_code, cust_code, principle)
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_jks_sales_principle ON jks_master(sales_code, principle);`,
+  `CREATE INDEX IF NOT EXISTS idx_jks_cust_code ON jks_master(cust_code);`,
+  `CREATE INDEX IF NOT EXISTS idx_jks_principle_hari ON jks_master(principle, hari_kunjungan);`,
+  `CREATE TABLE IF NOT EXISTS ao_control_daily (
+    id TEXT PRIMARY KEY NOT NULL,
+    sales_code TEXT NOT NULL,
+    cust_code TEXT NOT NULL,
+    principle TEXT NOT NULL,
+    date TEXT NOT NULL,
+    period_month INTEGER NOT NULL,
+    period_year INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'not_visited',
+    order_value_dpp REAL,
+    invoice_number TEXT,
+    is_visited INTEGER,
+    no_order_reason_code TEXT,
+    no_order_note TEXT,
+    checkin_at TEXT,
+    checkin_photo_url TEXT,
+    checkout_at TEXT,
+    checkout_photo_url TEXT,
+    auto_matched INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(sales_code, cust_code, principle, date)
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_ao_sales_date ON ao_control_daily(sales_code, date);`,
+  `CREATE INDEX IF NOT EXISTS idx_ao_cust_period ON ao_control_daily(cust_code, period_month, period_year);`,
+  `CREATE INDEX IF NOT EXISTS idx_ao_status ON ao_control_daily(status);`,
+  `CREATE TABLE IF NOT EXISTS no_order_reason (
+    id TEXT PRIMARY KEY NOT NULL,
+    reason_code TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    category TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1
+  );`,
+  `CREATE TABLE IF NOT EXISTS merchandising_check (
+    id TEXT PRIMARY KEY NOT NULL,
+    sales_code TEXT NOT NULL,
+    cust_code TEXT NOT NULL,
+    principle TEXT NOT NULL,
+    date TEXT NOT NULL,
+    produk_jelas INTEGER NOT NULL DEFAULT 0,
+    display_rapi INTEGER NOT NULL DEFAULT 0,
+    dibersihkan INTEGER NOT NULL DEFAULT 0,
+    ditataulang INTEGER NOT NULL DEFAULT 0,
+    posisi_mudah INTEGER NOT NULL DEFAULT 0,
+    semua_sku INTEGER NOT NULL DEFAULT 0,
+    photo_url TEXT,
+    step_photos TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_merch_sales_date ON merchandising_check(sales_code, date);`,
+  `CREATE TABLE IF NOT EXISTS salesman_daily_report (
+    id TEXT PRIMARY KEY NOT NULL,
+    sales_code TEXT NOT NULL,
+    date TEXT NOT NULL,
+    period_month INTEGER NOT NULL,
+    period_year INTEGER NOT NULL,
+    total_toko_jks INTEGER NOT NULL DEFAULT 0,
+    total_order INTEGER NOT NULL DEFAULT 0,
+    total_active INTEGER NOT NULL DEFAULT 0,
+    total_not_order INTEGER NOT NULL DEFAULT 0,
+    total_not_visited INTEGER NOT NULL DEFAULT 0,
+    reason_summary TEXT,
+    tindak_lanjut TEXT,
+    submitted_at TEXT,
+    spv_ack INTEGER NOT NULL DEFAULT 0,
+    spv_ack_by TEXT,
+    spv_ack_at TEXT
+  );`,
+  `CREATE TABLE IF NOT EXISTS spv_briefing (
+    id TEXT PRIMARY KEY NOT NULL,
+    spv_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    session TEXT NOT NULL DEFAULT 'pagi',
+    agenda TEXT,
+    toko_dialas TEXT,
+    penyebab TEXT,
+    solusi TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS sm_control (
+    id TEXT PRIMARY KEY NOT NULL,
+    sm_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    spv_checked TEXT,
+    jks_checked INTEGER NOT NULL DEFAULT 0,
+    foto_checked INTEGER NOT NULL DEFAULT 0,
+    coaching_note TEXT,
+    deviations TEXT,
+    follow_up TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS kontrol_audit_log (
+    id TEXT PRIMARY KEY NOT NULL,
+    entity TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    actor_id TEXT,
+    actor_name TEXT,
+    payload TEXT,
+    created_at TEXT NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS sales_profile (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL UNIQUE,
+    sales_code TEXT NOT NULL,
+    sales_name TEXT NOT NULL,
+    spv_name TEXT,
+    sm_name TEXT,
+    principle TEXT,
+    branch TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS sales_outlet_txn (
+    id TEXT PRIMARY KEY NOT NULL,
+    sales_code TEXT NOT NULL,
+    cust_code TEXT NOT NULL,
+    principle TEXT NOT NULL,
+    date TEXT NOT NULL,
+    period_month INTEGER NOT NULL,
+    period_year INTEGER NOT NULL,
+    invoice_number TEXT,
+    value_dpp REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );`,
+];
+
+for (const sql of formKontrolStatements) {
+  try {
+    await db.execute(sql);
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (!/already exists/i.test(message)) throw error;
+  }
+}
+
 console.log("SQLite tables are ready");
