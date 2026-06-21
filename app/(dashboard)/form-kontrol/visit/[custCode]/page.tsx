@@ -1,12 +1,14 @@
 "use client";
 
 import { useParams, useSearchParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     ArrowLeft, Camera, CheckCircle2, XCircle, AlertTriangle,
     Loader2, MapPin, Package, Star, Clock, Image as ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import CameraCapture from "@/components/form-kontrol/camera-capture";
+import { getCurrentCoords, type GeoCoords } from "@/lib/form-kontrol/location";
 
 interface StoreInfo {
     id: string; salesCode: string; salesName: string;
@@ -35,33 +37,45 @@ const MERCH_STEPS: { key: keyof MerchInfo; label: string }[] = [
     { key: "posisiMudah", label: "Posisi mudah ditemukan konsumen" },
     { key: "semuaSku",    label: "Seluruh SKU terpajang" },
 ];
-const PHOTO_MAX_SIZE_LABEL = "Maksimal ukuran foto 5MB.";
-
-async function uploadPhoto(file: File): Promise<string> {
+async function uploadPhoto(file: File, meta: {
+    salesName?: string; custName?: string; coords?: GeoCoords | null;
+}): Promise<string> {
     const fd = new FormData();
     fd.append("file", file);
+    if (meta.salesName) fd.append("salesName", meta.salesName);
+    if (meta.custName)  fd.append("custName", meta.custName);
+    if (meta.coords) {
+        fd.append("lat", String(meta.coords.lat));
+        fd.append("lng", String(meta.coords.lng));
+    }
     const res = await fetch("/api/upload/form-kontrol", { method: "POST", body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Upload gagal");
     return data.url as string;
 }
 
-function PhotoInput({ onUploaded, existingUrl, label = "Upload Foto", size = "md" }: {
-    onUploaded: (url: string) => void;
+function PhotoInput({ onUploaded, existingUrl, label = "Upload Foto", size = "md", salesName, custName }: {
+    onUploaded: (url: string, coords: GeoCoords | null) => void;
     existingUrl?: string | null;
     label?: string;
     size?: "sm" | "md" | "lg";
+    salesName?: string;
+    custName?: string;
 }) {
     const [uploading, setUploading] = useState(false);
-    const ref = useRef<HTMLInputElement>(null);
+    const [camOpen, setCamOpen]     = useState(false);
 
-    async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-        const file = e.target.files?.[0];
-        if (!file) return;
+    async function handleCapture(blob: Blob) {
         setUploading(true);
-        try { const url = await uploadPhoto(file); onUploaded(url); toast.success("Foto berhasil diupload"); }
-        catch { toast.error("Gagal upload foto"); }
-        finally { setUploading(false); e.target.value = ""; }
+        try {
+            // ponytail: tangkap GPS bersamaan dengan foto — di-stamp server-side + di-FLAG kalau mencurigakan.
+            const coords = await getCurrentCoords();
+            const file = new File([blob], "kunjungan.jpg", { type: "image/jpeg" });
+            const url = await uploadPhoto(file, { salesName, custName, coords });
+            onUploaded(url, coords);
+            toast.success(coords ? "Foto + lokasi tercatat" : "Foto tercatat (lokasi tidak terdeteksi)");
+        } catch { toast.error("Gagal upload foto"); }
+        finally { setUploading(false); }
     }
 
     const sz = size === "lg" ? "px-6 py-4 text-base" : size === "sm" ? "px-3 py-2 text-xs" : "px-4 py-3 text-sm";
@@ -76,7 +90,7 @@ function PhotoInput({ onUploaded, existingUrl, label = "Upload Foto", size = "md
                     </div>
                 </div>
             )}
-            <button type="button" onClick={() => ref.current?.click()} disabled={uploading}
+            <button type="button" onClick={() => setCamOpen(true)} disabled={uploading}
                 className={`w-full flex items-center justify-center gap-2 rounded-xl font-semibold transition-colors ${sz} ${
                     existingUrl ? "bg-slate-700 hover:bg-slate-600 text-slate-300 border border-white/10"
                                 : "bg-indigo-600 hover:bg-indigo-500 text-white"
@@ -84,8 +98,8 @@ function PhotoInput({ onUploaded, existingUrl, label = "Upload Foto", size = "md
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
                 {uploading ? "Mengupload..." : existingUrl ? "Ganti Foto" : label}
             </button>
-            <p className="text-xs text-slate-500 text-center">{PHOTO_MAX_SIZE_LABEL}</p>
-            <input ref={ref} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleChange} />
+            <p className="text-xs text-slate-500 text-center">Foto langsung dari kamera · lokasi & waktu otomatis tercatat</p>
+            <CameraCapture open={camOpen} onClose={() => setCamOpen(false)} onCapture={handleCapture} />
         </div>
     );
 }
@@ -127,6 +141,9 @@ export default function VisitWizardPage() {
     const [stepPhotos, setStepPhotos]     = useState<Record<string, string>>({});
     const [checkoutPhoto, setCheckoutPhoto] = useState<string | null>(null);
     const [saving, setSaving]             = useState(false);
+    // ponytail: status WAJIB dikonfirmasi tiap kunjungan, walau toko sudah transaksi bulan ini.
+    // Tidak auto-skip dari ao.status lama — true hanya jika dikonfirmasi sesi ini / visit sudah checkout.
+    const [statusConfirmed, setStatusConfirmed] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -164,8 +181,10 @@ export default function VisitWizardPage() {
 
     const allMerchDone = MERCH_STEPS.every(s => merch[s.key]);
     const checkinDone  = !!(checkinPhoto || ao?.checkinPhotoUrl);
-    const statusDone   = !!(orderStatus || (ao?.status && ao.status !== "not_visited"));
     const checkoutDone = !!(checkoutPhoto || ao?.checkoutPhotoUrl);
+    // status selesai HANYA jika dikonfirmasi sesi ini, atau visit sudah checkout penuh (resume).
+    // ao.status lama (transaksi bulan ini) TIDAK dihitung → sales tetap wajib isi order/tidak.
+    const statusDone   = checkoutDone || statusConfirmed;
 
     function currentStep(): 0|1|2|3|4 {
         if (checkoutDone) return 4;
@@ -176,12 +195,13 @@ export default function VisitWizardPage() {
     }
     const step = loading ? -1 : currentStep();
 
-    async function doCheckin(url: string) {
+    async function doCheckin(url: string, coords: GeoCoords | null) {
         setSaving(true);
         try {
             const res = await fetch("/api/form-kontrol/checkin", {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ salesCode, custCode, principle, date, photoUrl: url }),
+                body: JSON.stringify({ salesCode, custCode, principle, date, photoUrl: url,
+                    lat: coords?.lat ?? null, lng: coords?.lng ?? null, accuracy: coords?.accuracy ?? null }),
             });
             if (!res.ok) throw new Error("Gagal check-in");
             setCheckinPhoto(url); toast.success("Check-in berhasil!");
@@ -201,6 +221,7 @@ export default function VisitWizardPage() {
                     noOrderNote: orderStatus === "not_order" ? reasonNote : null }),
             });
             if (!res.ok) throw new Error("Gagal simpan status");
+            setStatusConfirmed(true);
             toast.success("Status tersimpan — lanjut merchandising");
         } catch (e) { toast.error(e instanceof Error ? e.message : "Gagal"); }
         finally { setSaving(false); }
@@ -293,7 +314,8 @@ export default function VisitWizardPage() {
                         <p className="text-xs text-slate-400">Foto di depan toko sebagai bukti check-in wajib</p>
                     </div>
                     <PhotoInput label="Ambil Foto Check-in" size="lg" existingUrl={checkinPhoto}
-                        onUploaded={(url) => doCheckin(url)} />
+                        salesName={store.salesName} custName={store.custName}
+                        onUploaded={(url, coords) => doCheckin(url, coords)} />
                     {saving && <p className="text-xs text-center text-slate-400 flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" />Menyimpan check-in...</p>}
                 </div>
             )}
@@ -371,6 +393,7 @@ export default function VisitWizardPage() {
                             </label>
                             <div className="ml-8">
                                 <PhotoInput label="Foto Bukti" size="sm" existingUrl={stepPhotos[key]}
+                                    salesName={store.salesName} custName={store.custName}
                                     onUploaded={(url) => setStepPhotos(p => ({ ...p, [key]: url }))} />
                             </div>
                         </div>
@@ -409,6 +432,7 @@ export default function VisitWizardPage() {
                             <p className="text-xs text-slate-400">Foto bukti selesai kunjungan</p>
                         </div>
                         <PhotoInput label="Ambil Foto Check-out" size="lg" existingUrl={checkoutPhoto}
+                            salesName={store.salesName} custName={store.custName}
                             onUploaded={(url) => doCheckout(url)} />
                         {saving && <p className="text-xs text-center text-slate-400 flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" />Menyimpan...</p>}
                     </div>

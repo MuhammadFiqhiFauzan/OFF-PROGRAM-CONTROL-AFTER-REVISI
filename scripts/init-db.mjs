@@ -600,6 +600,11 @@ const migrations = [
   `ALTER TABLE claim_payment ADD COLUMN claim_submission_id TEXT;`,
   `ALTER TABLE claim_audit_log ADD COLUMN claim_submission_id TEXT;`,
   `ALTER TABLE claim_audit_log ADD COLUMN audit_scope TEXT;`,
+  // Form-kontrol — GPS check-in + anti-fraud flag (additive, legacy-safe)
+  `ALTER TABLE ao_control_daily ADD COLUMN checkin_lat REAL;`,
+  `ALTER TABLE ao_control_daily ADD COLUMN checkin_lng REAL;`,
+  `ALTER TABLE ao_control_daily ADD COLUMN checkin_accuracy REAL;`,
+  `ALTER TABLE ao_control_daily ADD COLUMN gps_flag TEXT;`,
 ];
 
 for (const sql of migrations) {
@@ -861,6 +866,10 @@ const formKontrolStatements = [
     checkin_photo_url TEXT,
     checkout_at INTEGER,
     checkout_photo_url TEXT,
+    checkin_lat REAL,
+    checkin_lng REAL,
+    checkin_accuracy REAL,
+    gps_flag TEXT,
     auto_matched INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT 'manual',
     created_by TEXT,

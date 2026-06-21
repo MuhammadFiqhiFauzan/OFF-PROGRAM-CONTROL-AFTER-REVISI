@@ -7,12 +7,35 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+interface VisitRow {
+    custCode: string; custName: string; status: string;
+    checkinAt: string | null; checkoutAt: string | null;
+    durationMinutes: number | null;
+    gpsFlag: string | null; durFlag: string | null;
+}
 interface SalesmanRow {
     salesCode: string; salesName: string;
     totalRoute: number; ordered: number; notOrder: number; notVisited: number;
     checkedIn: number; checkedOut: number;
     submittedAt: string | null; tindakLanjut: string | null;
+    visits?: VisitRow[]; totalFieldMinutes?: number;
 }
+
+function hhmm(iso: string | null) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+}
+function fieldTimeLabel(min?: number) {
+    if (!min) return "0m";
+    const h = Math.floor(min / 60), m = min % 60;
+    return h > 0 ? `${h}j ${m}m` : `${m}m`;
+}
+const FLAG_LABEL: Record<string, string> = {
+    akurasi_rendah: "Akurasi GPS rendah",
+    tanpa_lokasi: "Tanpa lokasi",
+    durasi_singkat: "Durasi < 5 mnt",
+    durasi_lama: "Durasi > 2 jam",
+};
 
 function Bar({ value, total, color }: { value: number; total: number; color: string }) {
     const pct = total > 0 ? Math.round((value / total) * 100) : 0;
@@ -188,6 +211,51 @@ export default function SpvDashboardPage() {
                                     <div className="bg-black/20 rounded-lg px-3 py-2">
                                         <p className="text-xs text-slate-500 flex items-center gap-1 mb-1"><FileText size={10} /> Tindak Lanjut</p>
                                         <p className="text-xs text-slate-300 leading-relaxed">{r.tindakLanjut}</p>
+                                    </div>
+                                )}
+
+                                {/* P5: detail kunjungan per toko — durasi + flag anti-fraud */}
+                                {r.visits && r.visits.length > 0 && (
+                                    <div className="bg-black/20 rounded-lg p-2 space-y-1">
+                                        <div className="flex items-center justify-between mb-1">
+                                            <p className="text-xs text-slate-500 flex items-center gap-1"><Clock size={10} /> Detail Kunjungan</p>
+                                            <span className="text-xs text-slate-400">Waktu lapangan: <span className="text-white font-semibold">{fieldTimeLabel(r.totalFieldMinutes)}</span></span>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-xs">
+                                                <thead>
+                                                    <tr className="text-slate-500 text-left">
+                                                        <th className="font-medium py-1 pr-2">Toko</th>
+                                                        <th className="font-medium py-1 px-1">Masuk</th>
+                                                        <th className="font-medium py-1 px-1">Keluar</th>
+                                                        <th className="font-medium py-1 px-1">Durasi</th>
+                                                        <th className="font-medium py-1 pl-1">Flag</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {r.visits.map(v => {
+                                                        const flags = [v.gpsFlag, v.durFlag].filter(Boolean).join(",").split(",").filter(Boolean);
+                                                        return (
+                                                            <tr key={v.custCode} className="border-t border-white/5">
+                                                                <td className="py-1 pr-2 text-slate-300 truncate max-w-[140px]">{v.custName}</td>
+                                                                <td className="py-1 px-1 text-slate-400 whitespace-nowrap">{hhmm(v.checkinAt)}</td>
+                                                                <td className="py-1 px-1 text-slate-400 whitespace-nowrap">{hhmm(v.checkoutAt)}</td>
+                                                                <td className="py-1 px-1 whitespace-nowrap text-slate-300">{v.durationMinutes !== null ? `${v.durationMinutes}m` : "—"}</td>
+                                                                <td className="py-1 pl-1">
+                                                                    {flags.length === 0 ? (
+                                                                        <span className="text-emerald-500/80 inline-flex items-center gap-0.5"><CheckCircle2 size={11} /> OK</span>
+                                                                    ) : (
+                                                                        <span className="text-amber-400 inline-flex items-center gap-0.5" title={flags.map(f => FLAG_LABEL[f] ?? f).join(", ")}>
+                                                                            <AlertTriangle size={11} /> {flags.map(f => FLAG_LABEL[f] ?? f).join(", ")}
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 )}
                             </div>

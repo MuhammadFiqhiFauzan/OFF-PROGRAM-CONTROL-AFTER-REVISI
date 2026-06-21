@@ -472,13 +472,26 @@ export async function getScopeForUser(userId: string) {
 
 // ── Check-in / Check-out ──────────────────────────────────────────────────────
 
+// ponytail: heuristik fake-GPS sederhana, FLAG saja (tidak memblok kunjungan).
+// accuracy>1000m terdeteksi sekarang. Jarak-dari-toko & GPS-vs-IP butuh koordinat toko / lookup IP
+// yang belum tersedia — tambah kalau jksMaster sudah punya lat/lng atau ada provider IP geo.
+function computeGpsFlag(lat: number | null, lng: number | null, accuracy: number | null): string | null {
+    const flags: string[] = [];
+    if (lat === null || lng === null) flags.push("tanpa_lokasi");
+    if (accuracy !== null && accuracy > 1000) flags.push("akurasi_rendah");
+    return flags.length ? flags.join(",") : null;
+}
+
 export async function saveCheckin(data: {
     salesCode: string; custCode: string; principle: string; date: string;
     photoUrl: string; createdBy?: string;
+    lat?: number | null; lng?: number | null; accuracy?: number | null;
 }) {
     const now = new Date();
     const periodYear = parseInt(data.date.split("-")[0], 10);
     const periodMonth = parseInt(data.date.split("-")[1], 10);
+    const lat = data.lat ?? null, lng = data.lng ?? null, accuracy = data.accuracy ?? null;
+    const gpsFlag = computeGpsFlag(lat, lng, accuracy);
 
     const existing = await db.select({ id: aoControlDaily.id })
         .from(aoControlDaily)
@@ -492,6 +505,7 @@ export async function saveCheckin(data: {
     if (existing.length > 0) {
         await db.update(aoControlDaily).set({
             checkinAt: now, checkinPhotoUrl: data.photoUrl,
+            checkinLat: lat, checkinLng: lng, checkinAccuracy: accuracy, gpsFlag,
             isVisited: true, updatedAt: now,
         }).where(eq(aoControlDaily.id, existing[0].id));
         return existing[0].id;
@@ -504,6 +518,7 @@ export async function saveCheckin(data: {
         periodMonth, periodYear,
         status: "not_visited", isVisited: true,
         checkinAt: now, checkinPhotoUrl: data.photoUrl,
+        checkinLat: lat, checkinLng: lng, checkinAccuracy: accuracy, gpsFlag,
         noOrderReasonCode: null, noOrderNote: null,
         checkoutAt: null, checkoutPhotoUrl: null,
         autoMatched: false, source: "manual",
@@ -578,12 +593,14 @@ export async function getSpvDashboard(spvName: string, dateStr: string) {
     const periodYear  = parseInt(dateStr.split("-")[0], 10);
     const periodMonth = parseInt(dateStr.split("-")[1], 10);
 
-    const [aoRows, reportRows] = await Promise.all([
+    const [aoRows, reportRows, jksRows] = await Promise.all([
         db.select({
             salesCode: aoControlDaily.salesCode,
+            custCode: aoControlDaily.custCode,
             status: aoControlDaily.status,
             checkinAt: aoControlDaily.checkinAt,
             checkoutAt: aoControlDaily.checkoutAt,
+            gpsFlag: aoControlDaily.gpsFlag,
         }).from(aoControlDaily).where(
             and(
                 eq(aoControlDaily.date, dateStr),
@@ -596,9 +613,12 @@ export async function getSpvDashboard(spvName: string, dateStr: string) {
                 inArray(salesmanDailyReport.salesCode, salesCodes),
             )
         ),
+        db.select({ custCode: jksMaster.custCode, custName: jksMaster.custName })
+            .from(jksMaster).where(inArray(jksMaster.salesCode, salesCodes)),
     ]);
 
     const reportMap = new Map(reportRows.map(r => [r.salesCode, r]));
+    const custNameMap = new Map(jksRows.map(j => [j.custCode, j.custName]));
 
     return profiles.map(p => {
         const rows = aoRows.filter(r => r.salesCode === p.salesCode);
@@ -612,6 +632,31 @@ export async function getSpvDashboard(spvName: string, dateStr: string) {
         const checkedIn  = rows.filter(r => r.checkinAt !== null).length;
         const checkedOut = rows.filter(r => r.checkoutAt !== null).length;
 
+        // P4/P5: durasi per toko (on-the-fly, tanpa kolom baru) + flag durasi & GPS untuk review SPV.
+        const visits = rows
+            .filter(r => r.checkinAt !== null)
+            .map(r => {
+                const ci = r.checkinAt ? r.checkinAt.getTime() : null;
+                const co = r.checkoutAt ? r.checkoutAt.getTime() : null;
+                const durationMinutes = (ci !== null && co !== null) ? Math.max(0, Math.round((co - ci) / 60000)) : null;
+                const durFlag = durationMinutes === null ? null
+                    : durationMinutes < 5 ? "durasi_singkat"
+                    : durationMinutes > 120 ? "durasi_lama" : null;
+                return {
+                    custCode: r.custCode,
+                    custName: custNameMap.get(r.custCode) ?? r.custCode,
+                    status: r.status,
+                    checkinAt: r.checkinAt ? r.checkinAt.toISOString() : null,
+                    checkoutAt: r.checkoutAt ? r.checkoutAt.toISOString() : null,
+                    durationMinutes,
+                    gpsFlag: r.gpsFlag ?? null,
+                    durFlag,
+                };
+            })
+            .sort((a, b) => (a.checkinAt ?? "").localeCompare(b.checkinAt ?? ""));
+
+        const totalFieldMinutes = visits.reduce((a, v) => a + (v.durationMinutes ?? 0), 0);
+
         return {
             salesCode: p.salesCode,
             salesName: p.salesName,
@@ -623,6 +668,8 @@ export async function getSpvDashboard(spvName: string, dateStr: string) {
             checkedOut,
             submittedAt: report?.submittedAt ?? null,
             tindakLanjut: report?.tindakLanjut ?? null,
+            visits,
+            totalFieldMinutes,
             // Additional month context
             periodMonth,
             periodYear,

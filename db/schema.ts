@@ -741,6 +741,10 @@ export const aoControlDaily = sqliteTable("ao_control_daily", {
     checkinPhotoUrl: text("checkin_photo_url"),
     checkoutAt: integer("checkout_at", { mode: "timestamp" }),
     checkoutPhotoUrl: text("checkout_photo_url"),
+    checkinLat: real("checkin_lat"),
+    checkinLng: real("checkin_lng"),
+    checkinAccuracy: real("checkin_accuracy"),
+    gpsFlag: text("gps_flag"), // null = OK; comma-joined flags utk review SPV
     autoMatched: integer("auto_matched", { mode: "boolean" }).notNull().default(false),
     source: text("source").notNull().default("manual"),
     createdBy: text("created_by"),
