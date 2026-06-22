@@ -3,12 +3,12 @@
  * Caller: app/(dashboard)/form-kontrol/visit/[custCode]/page.tsx (PhotoInput).
  * Dependensi: getUserMedia native browser (zero dependency), lucide-react ikon.
  * Main Functions: CameraCapture (default export).
- * Side Effects: Membuka stream kamera (facingMode environment); stream dihentikan saat modal ditutup.
+ * Side Effects: Membuka stream kamera (facingMode belakang/depan, bisa diganti); stream dihentikan saat modal ditutup.
  */
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, X, RotateCcw, Check, Loader2, ImageUp } from "lucide-react";
+import { Camera, X, RotateCcw, Check, Loader2, ImageUp, SwitchCamera } from "lucide-react";
 
 export default function CameraCapture({ open, onClose, onCapture }: {
     open: boolean;
@@ -22,6 +22,7 @@ export default function CameraCapture({ open, onClose, onCapture }: {
     const [preview, setPreview] = useState<string | null>(null); // object URL hasil capture
     const [blob, setBlob]       = useState<Blob | null>(null);
     const [starting, setStarting] = useState(false);
+    const [facing, setFacing]   = useState<"environment" | "user">("environment"); // belakang default
 
     const stopStream = useCallback(() => {
         streamRef.current?.getTracks().forEach(t => t.stop());
@@ -32,7 +33,7 @@ export default function CameraCapture({ open, onClose, onCapture }: {
         setError(null); setStarting(true);
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: "environment" } }, audio: false,
+                video: { facingMode: { ideal: facing } }, audio: false,
             });
             streamRef.current = stream;
             if (videoRef.current) {
@@ -43,7 +44,7 @@ export default function CameraCapture({ open, onClose, onCapture }: {
             // ponytail: kamera gagal (izin ditolak / tak ada device) → fallback file input, jangan blok.
             setError("Kamera tidak tersedia. Gunakan pilih file foto.");
         } finally { setStarting(false); }
-    }, []);
+    }, [facing]); // ganti kamera → identitas berubah → effect restart stream dgn facingMode baru
 
     useEffect(() => {
         if (!open) return;
@@ -113,13 +114,14 @@ export default function CameraCapture({ open, onClose, onCapture }: {
                     </div>
                 ) : (
                     <>
-                        <video ref={videoRef} playsInline muted className="max-h-full max-w-full object-contain" />
+                        <video ref={videoRef} playsInline muted className="max-h-full max-w-full object-contain"
+                            style={{ transform: facing === "user" ? "scaleX(-1)" : undefined }} />
                         {starting && <Loader2 size={28} className="absolute animate-spin text-white/70" />}
                     </>
                 )}
             </div>
 
-            <div className="px-4 py-5 flex items-center justify-center gap-6">
+            <div className="relative px-4 py-5 flex items-center justify-center gap-6">
                 {preview ? (
                     <>
                         <button onClick={retake} className="flex flex-col items-center gap-1 text-slate-300">
@@ -132,10 +134,18 @@ export default function CameraCapture({ open, onClose, onCapture }: {
                         </button>
                     </>
                 ) : !error && (
-                    <button onClick={capture} disabled={starting}
-                        className="rounded-full border-4 border-white/80 p-1 disabled:opacity-40">
-                        <span className="block rounded-full bg-white" style={{ width: 56, height: 56 }} />
-                    </button>
+                    <>
+                        <button onClick={capture} disabled={starting}
+                            className="rounded-full border-4 border-white/80 p-1 disabled:opacity-40">
+                            <span className="block rounded-full bg-white" style={{ width: 56, height: 56 }} />
+                        </button>
+                        <button onClick={() => setFacing(f => f === "environment" ? "user" : "environment")}
+                            disabled={starting}
+                            className="absolute right-6 flex flex-col items-center gap-1 text-slate-300 disabled:opacity-40">
+                            <span className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center"><SwitchCamera size={20} /></span>
+                            <span className="text-xs">{facing === "environment" ? "Depan" : "Belakang"}</span>
+                        </button>
+                    </>
                 )}
             </div>
 
