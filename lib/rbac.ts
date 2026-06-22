@@ -248,7 +248,11 @@ export function isAppRole(value: string): value is AppRole {
     return appRoles.includes(value as AppRole);
 }
 
+// ponytail: synthetic roles (spv/salesman/sm) disimpan di DB tapi bukan AppRole —
+// map ke AppRole terdekat agar dashboard auth guard tidak loop.
+const syntheticRoleMap: Record<string, AppRole> = { salesman: "staff", spv: "staff", sm: "manager" };
 export function normalizeRole(value?: string | null): AppRole {
+    if (value && syntheticRoleMap[value]) return syntheticRoleMap[value];
     return value && isAppRole(value) ? value : defaultRole;
 }
 
