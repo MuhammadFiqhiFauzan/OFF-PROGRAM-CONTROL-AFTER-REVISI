@@ -105,28 +105,40 @@ export default function TabJks({ scope }: { scope: Scope }) {
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
+                        <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b border-white/10 bg-black/20">
-                                    {["Kode", "Nama Toko", "Market", "Kota", "Hari", "Pola", "Area", "Rayon", "Principle", "Freq", "Status"].map(h => (
-                                        <th key={h} className="text-left px-3 py-2.5 text-slate-400 font-semibold whitespace-nowrap">{h}</th>
-                                    ))}
+                                    <th className="text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Kode</th>
+                                    <th className="text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Nama Toko</th>
+                                    <th className="hidden sm:table-cell text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Market</th>
+                                    <th className="hidden sm:table-cell text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Kota</th>
+                                    <th className="text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Hari</th>
+                                    <th className="text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Pola</th>
+                                    <th className="hidden sm:table-cell text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Area</th>
+                                    <th className="hidden sm:table-cell text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Rayon</th>
+                                    <th className="text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Principle</th>
+                                    <th className="text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Freq</th>
+                                    <th className="text-left px-3 py-3 text-slate-400 font-semibold whitespace-nowrap">Status</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {rows.map(r => (
                                     <tr key={r.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                                        <td className="px-3 py-2 text-slate-300 font-mono">{r.custCode}</td>
-                                        <td className="px-3 py-2 text-white font-medium">{r.custName}</td>
-                                        <td className="px-3 py-2 text-slate-400">{r.market}</td>
-                                        <td className="px-3 py-2 text-slate-400">{r.kota}</td>
-                                        <td className="px-3 py-2 text-slate-300">{r.hariKunjungan || <span className="text-amber-400">—</span>}</td>
-                                        <td className="px-3 py-2 text-slate-400 capitalize">{r.mingguPattern}</td>
-                                        <td className="px-3 py-2 text-slate-400">{r.area}</td>
-                                        <td className="px-3 py-2 text-slate-400">{r.rayon}</td>
-                                        <td className="px-3 py-2 text-slate-300">{r.principle}</td>
-                                        <td className="px-3 py-2 text-slate-400">{r.visitFrequency}×</td>
-                                        <td className="px-3 py-2">
+                                        <td className="px-3 py-3 text-slate-300 font-mono">{r.custCode}</td>
+                                        <td className="px-3 py-3 text-white font-medium">{r.custName}</td>
+                                        <td className="hidden sm:table-cell px-3 py-3 text-slate-400">{r.market}</td>
+                                        <td className="hidden sm:table-cell px-3 py-3 text-slate-400">{r.kota}</td>
+                                        <td className="px-3 py-3 text-slate-300">
+                                            {r.hariKunjungan ? r.hariKunjungan : (
+                                                <span className="inline-flex px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">Belum</span>
+                                            )}
+                                        </td>
+                                        <td className="px-3 py-3 text-slate-400 capitalize">{r.mingguPattern}</td>
+                                        <td className="hidden sm:table-cell px-3 py-3 text-slate-400">{r.area}</td>
+                                        <td className="hidden sm:table-cell px-3 py-3 text-slate-400">{r.rayon}</td>
+                                        <td className="px-3 py-3 text-slate-300">{r.principle}</td>
+                                        <td className="px-3 py-3 text-slate-400">{r.visitFrequency}×</td>
+                                        <td className="px-3 py-3">
                                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${r.isActive ? "bg-emerald-500/15 text-emerald-400" : "bg-slate-500/15 text-slate-400"}`}>
                                                 {r.isActive ? "Aktif" : "Nonaktif"}
                                             </span>

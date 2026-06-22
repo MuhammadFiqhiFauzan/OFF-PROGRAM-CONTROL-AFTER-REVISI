@@ -1,5 +1,8 @@
 "use client";
 
+// Merchandising Wajib — checkbox label text-sm + w-5 h-5 tap target.
+// Photo/note/save: note full-width di atas, photo+save sebaris di bawah.
+
 import { useCallback, useEffect, useState } from "react";
 import { ShoppingBag, Filter, Loader2, RefreshCw, Save, CheckCircle2, Camera } from "lucide-react";
 import { toast } from "sonner";
@@ -18,17 +21,14 @@ export default function TabMerchandising({ scope }: { scope: Scope }) {
         try {
             const p = new URLSearchParams({ date: selectedDate, principle: selectedPrinciple });
             if (selectedSalesCode) p.set("salesCode", selectedSalesCode);
-
             const [routeRes, merchRes] = await Promise.all([
                 fetch(`/api/form-kontrol/ao-control?${p}`),
                 fetch(`/api/form-kontrol/merchandising?${p}`),
             ]);
             const [routeData, merchData] = await Promise.all([routeRes.json(), merchRes.json()]);
-
             const existingMap = new Map(
                 (merchData.rows ?? []).map((r: Record<string, unknown>) => [r.custCode as string, r])
             );
-
             const newItems: MerchItem[] = (routeData.rows ?? []).map((r: Record<string, unknown>) => {
                 const ex = existingMap.get(r.custCode as string) as Record<string, unknown> | undefined;
                 return {
@@ -130,39 +130,41 @@ export default function TabMerchandising({ scope }: { scope: Scope }) {
                             <div key={item.custCode} className="bg-[#1a1c23]/60 border border-white/10 rounded-xl p-4 space-y-3">
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-sm font-semibold text-white">{item.custName}</p>
+                                        <p className="text-base font-semibold text-white">{item.custName}</p>
                                         <p className="text-xs text-slate-500 font-mono">{item.custCode}</p>
                                     </div>
-                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-md border ${badgeColor}`}>{count}/6</span>
+                                    <span className={`text-sm font-bold px-2.5 py-1 rounded-md border ${badgeColor}`}>{count}/6</span>
                                 </div>
                                 <div className="h-1.5 bg-black/40 rounded-full overflow-hidden">
                                     <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${(count / 6) * 100}%` }} />
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                {/* Checklist: text-sm, w-5 h-5, min-h-[40px] */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     {MERCH_KEYS.map(({ key, label }) => (
-                                        <label key={key} className="flex items-center gap-2 cursor-pointer group">
+                                        <label key={key} className="flex items-center gap-2.5 cursor-pointer group min-h-[40px]">
                                             <button type="button" onClick={() => toggleCheck(item.custCode, key)}
-                                                className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${item[key] ? "bg-emerald-500 border-emerald-500" : "bg-black/30 border-white/20 group-hover:border-white/40"}`}>
-                                                {item[key] && <CheckCircle2 size={10} className="text-white" />}
+                                                className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${item[key] ? "bg-emerald-500 border-emerald-500" : "bg-black/30 border-white/20 group-hover:border-white/40"}`}>
+                                                {item[key] && <CheckCircle2 size={11} className="text-white" />}
                                             </button>
-                                            <span className={`text-xs ${item[key] ? "text-emerald-400" : "text-slate-400"}`}>{label}</span>
+                                            <span className={`text-sm ${item[key] ? "text-emerald-400" : "text-slate-300"}`}>{label}</span>
                                         </label>
                                     ))}
                                 </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <label className="flex items-center gap-1.5 text-xs bg-black/30 border border-white/10 hover:border-white/20 text-slate-300 px-3 py-1.5 rounded-lg cursor-pointer">
-                                        <Camera size={12} /> Upload Foto
+                                {/* Note full-width, lalu photo + save sebaris */}
+                                <input
+                                    value={item.catatan}
+                                    onChange={e => setItems(prev => prev.map(i => i.custCode === item.custCode ? { ...i, catatan: e.target.value } : i))}
+                                    placeholder="Catatan merchandising..."
+                                    className="w-full bg-black/30 border border-white/10 rounded-lg text-sm text-white px-3 py-2.5 placeholder-slate-500"
+                                />
+                                <div className="flex gap-2">
+                                    <label className="flex items-center gap-1.5 text-sm bg-black/30 border border-white/10 hover:border-white/20 text-slate-300 px-3 py-2 rounded-lg cursor-pointer min-h-[44px]">
+                                        <Camera size={14} /> Upload Foto
                                         <input type="file" accept="image/*" capture="environment" className="hidden" />
                                     </label>
-                                    <input
-                                        value={item.catatan}
-                                        onChange={e => setItems(prev => prev.map(i => i.custCode === item.custCode ? { ...i, catatan: e.target.value } : i))}
-                                        placeholder="Catatan merchandising..."
-                                        className="flex-1 min-w-[200px] bg-black/30 border border-white/10 rounded-lg text-xs text-white px-2 py-1.5"
-                                    />
                                     <button onClick={() => handleSave(item.custCode)} disabled={saving === item.custCode}
-                                        className="flex items-center gap-1 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg font-semibold">
-                                        {saving === item.custCode ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Simpan
+                                        className="flex-1 flex items-center justify-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-2 rounded-lg font-semibold min-h-[44px]">
+                                        {saving === item.custCode ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Simpan
                                     </button>
                                 </div>
                             </div>

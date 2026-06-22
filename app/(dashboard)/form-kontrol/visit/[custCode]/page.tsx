@@ -107,14 +107,14 @@ function PhotoInput({ onUploaded, existingUrl, label = "Upload Foto", size = "md
 function StepDot({ n, label, done, active }: { n: number; label: string; done: boolean; active: boolean }) {
     return (
         <div className={`flex flex-col items-center gap-1 ${active ? "opacity-100" : done ? "opacity-70" : "opacity-30"}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 ${
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold border-2 ${
                 done ? "bg-emerald-500 border-emerald-500 text-white" :
                 active ? "bg-indigo-600 border-indigo-400 text-white" :
                 "bg-black/30 border-white/20 text-slate-400"
             }`}>
                 {done ? <CheckCircle2 size={14} /> : n}
             </div>
-            <span className="text-[10px] text-slate-400 whitespace-nowrap">{label}</span>
+            <span className="text-xs text-slate-400 whitespace-nowrap">{label}</span>
         </div>
     );
 }
@@ -287,7 +287,7 @@ export default function VisitWizardPage() {
             </div>
 
             {/* Store info */}
-            <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl p-3 mb-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+            <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl p-3 mb-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-400">
                 {store.market && <span className="flex items-center gap-1"><Package size={11} />{store.market}</span>}
                 {store.alamat && <span className="flex items-center gap-1"><MapPin size={11} />{store.alamat}{store.kota ? `, ${store.kota}` : ""}</span>}
                 <span className="flex items-center gap-1"><Star size={11} />{store.visitFrequency}×/bulan</span>
@@ -391,7 +391,7 @@ export default function VisitWizardPage() {
                                 </button>
                                 <span className={`text-sm ${merch[key] ? "text-emerald-400" : "text-slate-300"}`}>{label}</span>
                             </label>
-                            <div className="ml-8">
+                            <div className="pl-4">
                                 <PhotoInput label="Foto Bukti" size="sm" existingUrl={stepPhotos[key]}
                                     salesName={store.salesName} custName={store.custName}
                                     onUploaded={(url) => {

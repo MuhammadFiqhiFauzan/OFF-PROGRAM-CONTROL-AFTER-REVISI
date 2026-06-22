@@ -1,5 +1,9 @@
 "use client";
 
+// Kontrol Toko Tidak Order — kartu mobile-first konsisten dengan TabAo.
+// Setiap toko = kartu dengan border-l-rose-500, form alasan di-stack vertikal,
+// tap target min-h-[44px] pada select/input/button.
+
 import { useCallback, useEffect, useState } from "react";
 import { XCircle, Filter, AlertTriangle, Loader2, RefreshCw, Save, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
@@ -109,53 +113,63 @@ export default function TabNoOrder({ scope }: { scope: Scope }) {
                 </div>
             )}
 
-            <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl overflow-hidden">
-                {loading ? (
-                    <div className="flex items-center justify-center py-12 text-slate-400 gap-2">
-                        <Loader2 size={18} className="animate-spin" /> Memuat...
-                    </div>
-                ) : rows.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-slate-500 gap-2">
-                        <CheckCircle2 size={32} className="opacity-30 text-emerald-500" />
-                        <p className="text-sm">Semua toko sudah order hari ini!</p>
-                    </div>
-                ) : (
-                    <div className="divide-y divide-white/5">
-                        {rows.map(r => (
-                            <div key={r.custCode} className="px-4 py-3 space-y-2">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <XCircle size={14} className="text-rose-400 shrink-0" />
-                                    <span className="text-sm font-medium text-white">{r.custName}</span>
-                                    <span className="text-xs text-slate-500 font-mono">{r.custCode}</span>
-                                    <span className="text-xs text-slate-400 ml-auto">{r.principle}</span>
+            {loading ? (
+                <div className="flex items-center justify-center py-12 text-slate-400 gap-2">
+                    <Loader2 size={18} className="animate-spin" /> Memuat...
+                </div>
+            ) : rows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-500 gap-2 bg-[#1a1c23]/60 border border-white/10 rounded-xl">
+                    <CheckCircle2 size={32} className="opacity-30 text-emerald-500" />
+                    <p className="text-sm">Semua toko sudah order hari ini!</p>
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {rows.map(r => {
+                        const saved = !!edits[r.custCode]?.reasonCode;
+                        return (
+                            <div key={r.custCode}
+                                className="rounded-xl border border-white/10 border-l-4 border-l-rose-500 bg-[#1a1c23]/60 px-4 py-3 space-y-3">
+                                {/* Toko header */}
+                                <div className="flex items-start gap-2">
+                                    <XCircle size={15} className="text-rose-400 shrink-0 mt-0.5" />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-base font-semibold text-white truncate">{r.custName}</p>
+                                        <p className="text-xs font-mono text-slate-500">{r.custCode} · {r.principle}</p>
+                                    </div>
+                                    {saved && (
+                                        <span className="shrink-0 text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                                            Tersimpan
+                                        </span>
+                                    )}
                                 </div>
-                                <div className="flex flex-wrap gap-2 ml-5">
-                                    <select
-                                        value={edits[r.custCode]?.reasonCode ?? ""}
-                                        onChange={e => setEdits(prev => ({ ...prev, [r.custCode]: { ...prev[r.custCode], reasonCode: e.target.value } }))}
-                                        className={`bg-black/40 border rounded-lg text-xs text-white px-2 py-1.5 flex-1 min-w-[180px] ${!edits[r.custCode]?.reasonCode ? "border-rose-500/50" : "border-white/10"}`}
-                                    >
-                                        <option value="">— Pilih Alasan (Wajib) —</option>
-                                        {reasons.map(reason => (
-                                            <option key={reason.reasonCode} value={reason.reasonCode}>[{reason.category}] {reason.label}</option>
-                                        ))}
-                                    </select>
-                                    <input
-                                        value={edits[r.custCode]?.note ?? ""}
-                                        onChange={e => setEdits(prev => ({ ...prev, [r.custCode]: { ...prev[r.custCode], note: e.target.value } }))}
-                                        placeholder="Catatan tambahan..."
-                                        className="bg-black/40 border border-white/10 rounded-lg text-xs text-white px-2 py-1.5 flex-1 min-w-[160px]"
-                                    />
+                                {/* Form stacked */}
+                                <select
+                                    value={edits[r.custCode]?.reasonCode ?? ""}
+                                    onChange={e => setEdits(prev => ({ ...prev, [r.custCode]: { ...prev[r.custCode], reasonCode: e.target.value } }))}
+                                    className={`w-full bg-black/40 border rounded-lg text-sm text-white px-3 py-2.5 min-h-[44px] ${!edits[r.custCode]?.reasonCode ? "border-rose-500/50" : "border-white/10"}`}
+                                >
+                                    <option value="">— Pilih Alasan (Wajib) —</option>
+                                    {reasons.map(reason => (
+                                        <option key={reason.reasonCode} value={reason.reasonCode}>[{reason.category}] {reason.label}</option>
+                                    ))}
+                                </select>
+                                <input
+                                    value={edits[r.custCode]?.note ?? ""}
+                                    onChange={e => setEdits(prev => ({ ...prev, [r.custCode]: { ...prev[r.custCode], note: e.target.value } }))}
+                                    placeholder="Catatan tambahan..."
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg text-sm text-white px-3 py-2.5 min-h-[44px] placeholder-slate-500"
+                                />
+                                <div className="flex justify-end">
                                     <button onClick={() => handleSave(r.custCode)} disabled={saving === r.custCode}
-                                        className="flex items-center gap-1 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap">
-                                        {saving === r.custCode ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Simpan
+                                        className="flex items-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg font-semibold min-h-[44px]">
+                                        {saving === r.custCode ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Simpan
                                     </button>
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                )}
-            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }

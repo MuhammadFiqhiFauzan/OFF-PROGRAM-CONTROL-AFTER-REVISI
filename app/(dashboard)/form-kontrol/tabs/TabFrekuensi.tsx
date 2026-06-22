@@ -1,5 +1,9 @@
 "use client";
 
+// Kontrol Frekuensi Kunjungan — dual layout:
+// mobile (<sm): kartu per toko; desktop (sm+): tabel dengan overflow-x-auto.
+// Font tabel text-sm, padding py-3 untuk tap target yang cukup.
+
 import { useCallback, useEffect, useState } from "react";
 import { RotateCcw, Filter, AlertTriangle, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
@@ -48,14 +52,14 @@ export default function TabFrekuensi({ scope }: { scope: Scope }) {
                 <SummaryCard label="Over-Visit" value={overVisitCount} color={overVisitCount > 0 ? "text-amber-400" : "text-emerald-400"} />
             </div>
 
-            <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl p-3 text-xs text-slate-400 space-y-1">
+            <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl p-3 text-sm text-slate-400 space-y-1">
                 <p>
                     Simulasi: <span className="text-white">{totalSlots} slot ÷ 1×/bulan = {simulation?.capacity1x ?? totalSlots} toko</span>
                     {" · "}<span className="text-white">÷ 2× = {simulation?.capacity2x ?? Math.floor(totalSlots / 2)} toko</span>
                     {" · "}<span className="text-white">÷ 4× = {simulation?.capacity4x ?? Math.floor(totalSlots / 4)} toko</span>
                 </p>
                 <p className="text-amber-400 flex items-center gap-1">
-                    <AlertTriangle size={11} /> Toko 1×/bulan yang dikunjungi 2× = over-visit — coverage toko lain berkurang
+                    <AlertTriangle size={12} /> Toko 1×/bulan yang dikunjungi 2× = over-visit — coverage toko lain berkurang
                 </p>
             </div>
 
@@ -81,52 +85,84 @@ export default function TabFrekuensi({ scope }: { scope: Scope }) {
                 </button>
             </div>
 
-            <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl overflow-hidden">
-                {loading ? (
-                    <div className="flex items-center justify-center py-12 text-slate-400 gap-2">
-                        <Loader2 size={18} className="animate-spin" /> Memuat...
+            {loading ? (
+                <div className="flex items-center justify-center py-12 text-slate-400 gap-2">
+                    <Loader2 size={18} className="animate-spin" /> Memuat...
+                </div>
+            ) : rows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-500 gap-2 bg-[#1a1c23]/60 border border-white/10 rounded-xl">
+                    <RotateCcw size={32} className="opacity-30" />
+                    <p className="text-sm">Belum ada data. Pastikan JKS sudah diimport dan sales code diisi.</p>
+                </div>
+            ) : (
+                <>
+                    {/* Mobile (<sm): kartu per toko */}
+                    <div className="sm:hidden space-y-2">
+                        {rows.map(r => (
+                            <div key={r.custCode}
+                                className={`rounded-xl border bg-[#1a1c23]/60 px-4 py-3 ${r.overVisit ? "border-amber-500/30 border-l-4 border-l-amber-500" : "border-white/10"}`}>
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                        <p className="text-base font-semibold text-white truncate">{r.custName}</p>
+                                        <p className="text-xs font-mono text-slate-500">{r.custCode}</p>
+                                    </div>
+                                    {r.overVisit ? (
+                                        <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                            <AlertTriangle size={11} /> Over-visit
+                                        </span>
+                                    ) : (
+                                        <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                            <CheckCircle2 size={11} /> Normal
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="text-sm text-slate-400 mt-1.5">
+                                    Pola: <span className="text-slate-300 capitalize">{r.mingguPattern}</span>
+                                    {" · "}Freq: <span className={r.overVisit ? "text-amber-400 font-semibold" : "text-slate-300"}>{r.actualVisits}×</span>
+                                    {" / "}<span className="text-slate-500">{r.visitFrequency}×/bulan</span>
+                                </p>
+                            </div>
+                        ))}
                     </div>
-                ) : rows.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-slate-500 gap-2">
-                        <RotateCcw size={32} className="opacity-30" />
-                        <p className="text-sm">Belum ada data. Pastikan JKS sudah diimport dan sales code diisi.</p>
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                            <thead>
-                                <tr className="border-b border-white/10 bg-black/20">
-                                    {["Kode", "Nama Toko", "Pola Minggu", "Frekuensi", "Aktual", "Status"].map(h => (
-                                        <th key={h} className="text-left px-3 py-2.5 text-slate-400 font-semibold whitespace-nowrap">{h}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows.map(r => (
-                                    <tr key={r.custCode} className={`border-b border-white/5 transition-colors ${r.overVisit ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-white/5"}`}>
-                                        <td className="px-3 py-2 text-slate-300 font-mono">{r.custCode}</td>
-                                        <td className="px-3 py-2 text-white">{r.custName}</td>
-                                        <td className="px-3 py-2 text-slate-400 capitalize">{r.mingguPattern}</td>
-                                        <td className="px-3 py-2 text-slate-300">{r.visitFrequency}×/bulan</td>
-                                        <td className={`px-3 py-2 font-semibold ${r.overVisit ? "text-amber-400" : "text-white"}`}>{r.actualVisits}×</td>
-                                        <td className="px-3 py-2">
-                                            {r.overVisit ? (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                                                    <AlertTriangle size={10} /> Over-visit
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                                                    <CheckCircle2 size={10} /> Normal
-                                                </span>
-                                            )}
-                                        </td>
+
+                    {/* Desktop (sm+): tabel */}
+                    <div className="hidden sm:block bg-[#1a1c23]/60 border border-white/10 rounded-xl overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-white/10 bg-black/20">
+                                        {["Kode", "Nama Toko", "Pola Minggu", "Frekuensi", "Aktual", "Status"].map(h => (
+                                            <th key={h} className="text-left px-4 py-3 text-slate-400 font-semibold whitespace-nowrap">{h}</th>
+                                        ))}
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {rows.map(r => (
+                                        <tr key={r.custCode} className={`border-b border-white/5 transition-colors ${r.overVisit ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-white/5"}`}>
+                                            <td className="px-4 py-3 text-slate-300 font-mono">{r.custCode}</td>
+                                            <td className="px-4 py-3 text-white">{r.custName}</td>
+                                            <td className="px-4 py-3 text-slate-400 capitalize">{r.mingguPattern}</td>
+                                            <td className="px-4 py-3 text-slate-300">{r.visitFrequency}×/bulan</td>
+                                            <td className={`px-4 py-3 font-semibold ${r.overVisit ? "text-amber-400" : "text-white"}`}>{r.actualVisits}×</td>
+                                            <td className="px-4 py-3">
+                                                {r.overVisit ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                                        <AlertTriangle size={11} /> Over-visit
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                                        <CheckCircle2 size={11} /> Normal
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                )}
-            </div>
+                </>
+            )}
         </div>
     );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+// Laporan Wajib Salesman — SummaryCard grid responsif grid-cols-2 sm:grid-cols-3 lg:grid-cols-5.
+
 import { useEffect, useState } from "react";
 import { FileText, AlertTriangle, Loader2, Save, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
@@ -30,7 +32,6 @@ export default function TabLaporan({ scope }: { scope: Scope }) {
                         notVisited: (row.totalNotVisited as number) ?? 0,
                     });
                     setTindakLanjut((row.tindakLanjut as string) ?? "");
-                    // hanya "submitted" bila benar2 sudah disubmit (submittedAt terisi); baris live = belum
                     setSubmitted(!!row.submittedAt);
                 } else {
                     setSubmitted(false);
@@ -84,7 +85,7 @@ export default function TabLaporan({ scope }: { scope: Scope }) {
                 desc="Ringkasan sore — angka terisi otomatis & live dari Form AO, lengkapi tindak lanjut" />
 
             <div className="flex items-center gap-2 bg-[#1a1c23]/60 border border-white/10 rounded-xl px-4 py-3">
-                <span className="text-xs text-slate-400">Tanggal laporan</span>
+                <span className="text-sm text-slate-400">Tanggal laporan</span>
                 <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
                     className="bg-black/40 border border-white/10 rounded-lg text-xs text-white px-2 py-1.5" />
             </div>
@@ -101,7 +102,8 @@ export default function TabLaporan({ scope }: { scope: Scope }) {
                 </div>
             )}
 
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {/* 5 kartu ringkasan — 2 kolom mobile, 3 tablet, 5 desktop */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 <SummaryCard label="Total Toko JKS" value={summary.totalJks} />
                 <SummaryCard label="Order" value={summary.order} color="text-emerald-400" />
                 <SummaryCard label="Aktif" value={summary.aktif} color="text-blue-400" />

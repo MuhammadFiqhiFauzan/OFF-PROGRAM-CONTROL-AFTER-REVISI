@@ -181,7 +181,7 @@ export default function SpvDashboardPage() {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-4 gap-2 text-center">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                                     {[
                                         { label: "Rute", val: r.totalRoute, color: "text-white" },
                                         { label: "Order", val: r.ordered, color: "text-emerald-400" },
@@ -190,7 +190,7 @@ export default function SpvDashboardPage() {
                                     ].map(s => (
                                         <div key={s.label} className="bg-black/20 rounded-lg p-2">
                                             <p className={`text-lg font-bold ${s.color}`}>{s.val}</p>
-                                            <p className="text-[10px] text-slate-500">{s.label}</p>
+                                            <p className="text-xs text-slate-500">{s.label}</p>
                                         </div>
                                     ))}
                                 </div>
@@ -214,48 +214,33 @@ export default function SpvDashboardPage() {
                                     </div>
                                 )}
 
-                                {/* P5: detail kunjungan per toko — durasi + flag anti-fraud */}
+                                {/* Detail kunjungan per toko — satu baris per kunjungan, tanpa overflow-x-auto */}
                                 {r.visits && r.visits.length > 0 && (
-                                    <div className="bg-black/20 rounded-lg p-2 space-y-1">
-                                        <div className="flex items-center justify-between mb-1">
+                                    <div className="bg-black/20 rounded-lg p-2 space-y-0">
+                                        <div className="flex items-center justify-between pb-2">
                                             <p className="text-xs text-slate-500 flex items-center gap-1"><Clock size={10} /> Detail Kunjungan</p>
-                                            <span className="text-xs text-slate-400">Waktu lapangan: <span className="text-white font-semibold">{fieldTimeLabel(r.totalFieldMinutes)}</span></span>
+                                            <span className="text-xs text-slate-400">Lapangan: <span className="text-white font-semibold">{fieldTimeLabel(r.totalFieldMinutes)}</span></span>
                                         </div>
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full text-xs">
-                                                <thead>
-                                                    <tr className="text-slate-500 text-left">
-                                                        <th className="font-medium py-1 pr-2">Toko</th>
-                                                        <th className="font-medium py-1 px-1">Masuk</th>
-                                                        <th className="font-medium py-1 px-1">Keluar</th>
-                                                        <th className="font-medium py-1 px-1">Durasi</th>
-                                                        <th className="font-medium py-1 pl-1">Flag</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {r.visits.map(v => {
-                                                        const flags = [v.gpsFlag, v.durFlag].filter(Boolean).join(",").split(",").filter(Boolean);
-                                                        return (
-                                                            <tr key={v.custCode} className="border-t border-white/5">
-                                                                <td className="py-1 pr-2 text-slate-300 truncate max-w-[140px]">{v.custName}</td>
-                                                                <td className="py-1 px-1 text-slate-400 whitespace-nowrap">{hhmm(v.checkinAt)}</td>
-                                                                <td className="py-1 px-1 text-slate-400 whitespace-nowrap">{hhmm(v.checkoutAt)}</td>
-                                                                <td className="py-1 px-1 whitespace-nowrap text-slate-300">{v.durationMinutes !== null ? `${v.durationMinutes}m` : "—"}</td>
-                                                                <td className="py-1 pl-1">
-                                                                    {flags.length === 0 ? (
-                                                                        <span className="text-emerald-500/80 inline-flex items-center gap-0.5"><CheckCircle2 size={11} /> OK</span>
-                                                                    ) : (
-                                                                        <span className="text-amber-400 inline-flex items-center gap-0.5" title={flags.map(f => FLAG_LABEL[f] ?? f).join(", ")}>
-                                                                            <AlertTriangle size={11} /> {flags.map(f => FLAG_LABEL[f] ?? f).join(", ")}
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                        {r.visits.map(v => {
+                                            const flags = [v.gpsFlag, v.durFlag].filter(Boolean).join(",").split(",").filter(Boolean);
+                                            return (
+                                                <div key={v.custCode} className="flex items-center gap-2 border-t border-white/5 py-1.5">
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm text-slate-300 truncate">{v.custName}</p>
+                                                        <p className="text-xs text-slate-500">{hhmm(v.checkinAt)} – {hhmm(v.checkoutAt)} · {v.durationMinutes !== null ? `${v.durationMinutes}m` : "—"}</p>
+                                                    </div>
+                                                    <div className="shrink-0">
+                                                        {flags.length === 0 ? (
+                                                            <span className="text-emerald-500/80 inline-flex items-center gap-0.5 text-xs"><CheckCircle2 size={11} /> OK</span>
+                                                        ) : (
+                                                            <span className="text-amber-400 inline-flex items-center gap-0.5 text-xs" title={flags.map(f => FLAG_LABEL[f] ?? f).join(", ")}>
+                                                                <AlertTriangle size={11} /> {flags.map(f => FLAG_LABEL[f] ?? f)[0]}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>

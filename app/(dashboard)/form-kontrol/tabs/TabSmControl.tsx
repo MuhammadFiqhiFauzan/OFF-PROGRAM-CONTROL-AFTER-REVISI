@@ -1,5 +1,8 @@
 "use client";
 
+// Kontrol Wajib SM — coaching notes: label di atas input (bukan w-20 inline).
+// Deviasi: grid 2-kolom (SPV | catatan) + tombol hapus, input min-h-[44px].
+
 import { useState } from "react";
 import { BarChart3, Loader2, Save, CheckCircle2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -51,17 +54,17 @@ export default function TabSmControl({ scope }: { scope: Scope }) {
 
             <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-white">Kontrol Harian</h3>
-                <div className="flex flex-wrap gap-4">
+                <div className="flex flex-col gap-3">
                     {[
                         { label: "JKS sudah dicek hari ini", value: jksChecked, set: setJksChecked },
                         { label: "Foto kunjungan sudah dimonitor", value: fotoChecked, set: setFotoChecked },
                     ].map((item, i) => (
-                        <label key={i} className="flex items-center gap-2 cursor-pointer">
+                        <label key={i} className="flex items-center gap-3 cursor-pointer min-h-[40px]">
                             <button type="button" onClick={() => item.set(!item.value)}
-                                className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${item.value ? "bg-emerald-500 border-emerald-500" : "bg-black/30 border-white/20"}`}>
+                                className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${item.value ? "bg-emerald-500 border-emerald-500" : "bg-black/30 border-white/20"}`}>
                                 {item.value && <CheckCircle2 size={12} className="text-white" />}
                             </button>
-                            <span className="text-sm text-slate-300">{item.label}</span>
+                            <span className="text-sm text-slate-200">{item.label}</span>
                         </label>
                     ))}
                 </div>
@@ -69,14 +72,14 @@ export default function TabSmControl({ scope }: { scope: Scope }) {
 
             <div className="bg-[#1a1c23]/60 border border-white/10 rounded-xl p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-white">Catatan Coaching per SPV</h3>
-                <div className="space-y-2">
+                <div className="space-y-3">
                     {spvList.map((spv, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                            <span className="text-sm text-slate-400 w-20 shrink-0">{spv.name}</span>
+                        <div key={i} className="space-y-1">
+                            <p className="text-xs text-slate-400 font-medium">{spv.name}</p>
                             <input value={spv.note}
                                 onChange={e => setSpvList(prev => prev.map((s, j) => j === i ? { ...s, note: e.target.value } : s))}
                                 placeholder="Catatan coaching (kosongkan jika tidak ada)..."
-                                className="flex-1 bg-black/30 border border-white/10 rounded-lg text-xs text-white px-2 py-1.5 placeholder-slate-500" />
+                                className="w-full bg-black/30 border border-white/10 rounded-lg text-sm text-white px-3 py-2.5 min-h-[44px] placeholder-slate-500" />
                         </div>
                     ))}
                 </div>
@@ -86,23 +89,28 @@ export default function TabSmControl({ scope }: { scope: Scope }) {
                 <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-white">Penyimpangan & Keterlambatan</h3>
                     <button onClick={() => setDeviasi(prev => [...prev, { spv: "", catatan: "" }])}
-                        className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+                        className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1">
                         <Plus size={12} /> Tambah
                     </button>
                 </div>
                 {deviasi.length === 0 ? (
-                    <p className="text-xs text-slate-500">Belum ada penyimpangan dicatat.</p>
+                    <p className="text-sm text-slate-500">Belum ada penyimpangan dicatat.</p>
                 ) : (
                     <div className="space-y-2">
                         {deviasi.map((d, i) => (
-                            <div key={i} className="flex gap-2 items-center">
-                                <input value={d.spv} onChange={e => setDeviasi(prev => prev.map((x, j) => j === i ? { ...x, spv: e.target.value } : x))}
-                                    placeholder="SPV" className="w-24 bg-black/30 border border-white/10 rounded-lg text-xs text-white px-2 py-1.5" />
-                                <input value={d.catatan} onChange={e => setDeviasi(prev => prev.map((x, j) => j === i ? { ...x, catatan: e.target.value } : x))}
+                            <div key={i} className="grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
+                                <input value={d.spv}
+                                    onChange={e => setDeviasi(prev => prev.map((x, j) => j === i ? { ...x, spv: e.target.value } : x))}
+                                    placeholder="SPV"
+                                    className="bg-black/30 border border-white/10 rounded-lg text-sm text-white px-3 py-2.5 min-h-[44px] placeholder-slate-500" />
+                                <input value={d.catatan}
+                                    onChange={e => setDeviasi(prev => prev.map((x, j) => j === i ? { ...x, catatan: e.target.value } : x))}
                                     placeholder="Catatan penyimpangan / keterlambatan..."
-                                    className="flex-1 bg-black/30 border border-white/10 rounded-lg text-xs text-white px-2 py-1.5" />
+                                    className="bg-black/30 border border-white/10 rounded-lg text-sm text-white px-3 py-2.5 min-h-[44px] placeholder-slate-500" />
                                 <button onClick={() => setDeviasi(prev => prev.filter((_, j) => j !== i))}
-                                    className="text-rose-400 hover:text-rose-300"><Trash2 size={14} /></button>
+                                    className="p-2.5 text-rose-400 hover:text-rose-300 min-h-[44px] flex items-center">
+                                    <Trash2 size={16} />
+                                </button>
                             </div>
                         ))}
                     </div>

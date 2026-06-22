@@ -49,6 +49,8 @@ export interface AoRow {
     noOrderNote?: string;
     monthlyOrderCount: number;
     needsAttention: boolean;
+    checkinAt?: string | null;   // ISO — null = belum check-in hari ini
+    checkoutAt?: string | null;  // ISO — non-null = kunjungan selesai
 }
 
 export interface Reason {
@@ -137,6 +139,37 @@ export function StatusBadge({ status }: { status: AoRow["status"] }) {
     };
     const { label, cls } = map[status];
     return <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold border ${cls}`}>{label}</span>;
+}
+
+// ── Route card logic (mobile JKS visit list) ────────────────────────────────
+// ponytail: state/sort/filter dipisah dari komponen (SRP) — kartu cuma render.
+
+export type RouteState = "belum_order" | "perhatian" | "selesai" | "sudah_order" | "normal";
+
+export function routeState(r: AoRow): RouteState {
+    if (r.status === "not_order") return "belum_order";
+    if (r.checkoutAt) return "selesai";
+    if (r.status === "ordered" || r.status === "active") return "sudah_order";
+    if (r.isPriority || r.needsAttention) return "perhatian";
+    return "normal";
+}
+
+// urgent-first: belum order naik ke atas, selesai turun ke bawah
+export function routeRank(r: AoRow): number {
+    if (r.checkoutAt) return 4;
+    if (r.status === "not_order") return 0;
+    if (r.isPriority || r.needsAttention) return 1;
+    if (r.status === "ordered" || r.status === "active") return 2;
+    return 3;
+}
+
+export function compareRoute(a: AoRow, b: AoRow): number {
+    return routeRank(a) - routeRank(b) || a.custName.localeCompare(b.custName);
+}
+
+export function visitDurationMin(r: AoRow): number | null {
+    if (!r.checkinAt || !r.checkoutAt) return null;
+    return Math.max(0, Math.round((new Date(r.checkoutAt).getTime() - new Date(r.checkinAt).getTime()) / 60000));
 }
 
 export function SectionTitle({ icon: Icon, no, title, desc }: { icon: typeof ClipboardList; no: number; title: string; desc?: string }) {

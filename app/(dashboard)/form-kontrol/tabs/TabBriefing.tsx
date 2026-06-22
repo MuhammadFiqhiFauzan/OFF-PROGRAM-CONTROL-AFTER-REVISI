@@ -1,5 +1,8 @@
 "use client";
 
+// Briefing Wajib SPV — agenda item selesai: text-slate-400 line-through
+// (lebih terbaca daripada emerald + opacity-60). Tap target min-h-[40px].
+
 import { useEffect, useState } from "react";
 import { Users, Loader2, Save, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
@@ -60,13 +63,14 @@ export default function TabBriefing({ scope }: { scope: Scope }) {
                 <h3 className="text-sm font-semibold text-white">Agenda Briefing {briefingSession === "pagi" ? "Pagi" : "Sore"}</h3>
                 <div className="space-y-2">
                     {BRIEFING_AGENDA[briefingSession].map((item, i) => (
-                        <label key={i} className="flex items-center gap-2.5 cursor-pointer group">
+                        <label key={i} className="flex items-center gap-2.5 cursor-pointer group min-h-[40px]">
                             <button type="button"
                                 onClick={() => setAgenda(prev => prev.map((v, j) => j === i ? !v : v))}
-                                className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${agenda[i] ? "bg-emerald-500 border-emerald-500" : "bg-black/30 border-white/20 group-hover:border-white/40"}`}>
-                                {agenda[i] && <CheckCircle2 size={10} className="text-white" />}
+                                className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${agenda[i] ? "bg-emerald-500 border-emerald-500" : "bg-black/30 border-white/20 group-hover:border-white/40"}`}>
+                                {agenda[i] && <CheckCircle2 size={11} className="text-white" />}
                             </button>
-                            <span className={`text-sm ${agenda[i] ? "text-emerald-400 line-through opacity-60" : "text-slate-300"}`}>{item}</span>
+                            {/* done: slate-400 line-through — lebih terbaca dari emerald + opacity-60 */}
+                            <span className={`text-sm ${agenda[i] ? "text-slate-400 line-through" : "text-slate-200"}`}>{item}</span>
                         </label>
                     ))}
                 </div>
