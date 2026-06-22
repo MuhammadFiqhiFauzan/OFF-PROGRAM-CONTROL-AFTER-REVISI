@@ -93,26 +93,32 @@ export default function LoginPage() {
         setErrors({});
         setLoading(true);
 
-        const { error } = await authClient.signIn.email({
-            email: trimmedEmail,
-            password,
-        });
+        try {
+            const { error } = await authClient.signIn.email({
+                email: trimmedEmail,
+                password,
+            });
 
-        if (error) {
-            if (isEmailVerificationError(error)) {
-                setErrors({ general: "Email belum diverifikasi." });
-                toast.error("Email belum diverifikasi.", {
-                    description: "Silakan periksa kotak masuk email Anda dan klik tautan verifikasi.",
-                });
+            if (error) {
+                if (isEmailVerificationError(error)) {
+                    setErrors({ general: "Email belum diverifikasi." });
+                    toast.error("Email belum diverifikasi.", {
+                        description: "Silakan periksa kotak masuk email Anda dan klik tautan verifikasi.",
+                    });
+                } else {
+                    setErrors({ general: "Email atau password tidak sesuai." });
+                    toast.error("Email atau password tidak sesuai.");
+                }
+                setLoading(false);
             } else {
-                setErrors({ general: "Email atau password tidak sesuai." });
-                toast.error("Email atau password tidak sesuai.");
+                toast.success("Login berhasil.");
+                router.push("/");
+                router.refresh();
             }
+        } catch {
+            setErrors({ general: "Terjadi kesalahan. Coba lagi." });
+            toast.error("Terjadi kesalahan saat login.");
             setLoading(false);
-        } else {
-            toast.success("Login berhasil.");
-            router.push("/");
-            router.refresh();
         }
     };
 
