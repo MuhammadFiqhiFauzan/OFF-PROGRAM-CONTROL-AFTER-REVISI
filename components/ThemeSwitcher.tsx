@@ -31,7 +31,9 @@ export const applyStoredThemeScript = `(function(){try{var t=localStorage.getIte
 export default function ThemeSwitcher() {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement | null>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
+  const menuId = "theme-switcher-menu";
   const toggleOpen = () => {
     setOpen((v) => {
       const next = !v;
@@ -56,6 +58,26 @@ export default function ThemeSwitcher() {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (!open) return;
+    const selectedIndex = OFF_THEMES.findIndex((option) => option.key === theme);
+    window.setTimeout(() => optionRefs.current[Math.max(selectedIndex, 0)]?.focus(), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        btnRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, theme]);
+
+  const closeMenu = () => {
+    setOpen(false);
+    window.setTimeout(() => btnRef.current?.focus(), 0);
+  };
+
   const selectTheme = (next: OffThemeKey) => {
     setTheme(next);
     try {
@@ -63,7 +85,7 @@ export default function ThemeSwitcher() {
     } catch {
       // localStorage tidak tersedia; tema tetap berlaku untuk sesi ini.
     }
-    setOpen(false);
+    closeMenu();
   };
 
   return (
@@ -74,8 +96,9 @@ export default function ThemeSwitcher() {
         onClick={toggleOpen}
         className="flex items-center gap-2 rounded-lg bg-black/30 px-2.5 py-1.5 text-xs font-medium text-slate-300 shadow-sm transition-colors hover:bg-white/10"
         title="Ganti tema"
-        aria-haspopup="menu"
+        aria-label="Ganti tema"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
       >
         <Palette size={16} />
         <span className="hidden sm:inline">Tema</span>
@@ -84,21 +107,25 @@ export default function ThemeSwitcher() {
       {open && coords &&
         createPortal(
           <>
-            <div className="fixed inset-0 z-[2147483646]" onClick={() => setOpen(false)} aria-hidden="true" />
+            <div className="fixed inset-0 z-[2147483646]" onClick={closeMenu} aria-hidden="true" />
             <div
+              id={menuId}
               className="fixed z-[2147483647] w-60 overflow-hidden rounded-xl border border-white/5 bg-[#1a1c23] shadow-2xl"
               style={{ top: coords.top, right: coords.right }}
-              role="menu"
+              role="group"
+              aria-label="Tema tampilan"
             >
             <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Tema Tampilan
             </div>
-            {OFF_THEMES.map((option) => (
+            {OFF_THEMES.map((option, index) => (
               <button
                 key={option.key}
+                ref={(element) => {
+                  optionRefs.current[index] = element;
+                }}
                 type="button"
-                role="menuitemradio"
-                aria-checked={theme === option.key}
+                aria-pressed={theme === option.key}
                 onClick={() => selectTheme(option.key)}
                 className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/5"
               >

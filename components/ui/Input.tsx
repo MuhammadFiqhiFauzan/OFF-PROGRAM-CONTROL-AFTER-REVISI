@@ -1,4 +1,4 @@
-import React, { forwardRef } from "react";
+import React, { forwardRef, useId } from "react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -13,17 +13,26 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-    ({ className, type = "text", label, error, helperText, ...props }, ref) => {
+    ({ className, type = "text", label, error, helperText, id, "aria-describedby": ariaDescribedBy, ...props }, ref) => {
+        const generatedId = useId();
+        const inputId = id || generatedId;
+        const errorId = error ? `${inputId}-error` : undefined;
+        const helperId = helperText && !error ? `${inputId}-helper` : undefined;
+        const describedBy = [ariaDescribedBy, errorId, helperId].filter(Boolean).join(" ") || undefined;
+
         return (
             <div className="flex flex-col gap-1.5 w-full">
                 {label && (
-                    <label className="text-sm font-medium text-slate-300">
+                    <label htmlFor={inputId} className="text-sm font-medium text-slate-300">
                         {label} {props.required && <span className="text-red-400">*</span>}
                     </label>
                 )}
                 <div className="relative">
                     <input
+                        id={inputId}
                         type={type}
+                        aria-invalid={error ? true : undefined}
+                        aria-describedby={describedBy}
                         className={cn(
                             "flex h-10 w-full rounded-md border text-sm shadow-sm transition-colors",
                             "bg-black/20 border-white/5 text-slate-100 placeholder:text-slate-500",
@@ -37,12 +46,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                     />
                 </div>
                 {error && (
-                    <span className="text-xs text-red-400 font-medium animate-in fade-in slide-in-from-top-1">
+                    <span id={errorId} className="text-xs text-red-400 font-medium animate-in fade-in slide-in-from-top-1">
                         {error}
                     </span>
                 )}
                 {helperText && !error && (
-                    <span className="text-xs text-slate-500">
+                    <span id={helperId} className="text-xs text-slate-500">
                         {helperText}
                     </span>
                 )}

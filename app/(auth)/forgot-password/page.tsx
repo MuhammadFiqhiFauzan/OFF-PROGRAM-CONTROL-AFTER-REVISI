@@ -67,7 +67,7 @@ export default function ForgotPasswordPage() {
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100">
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 text-white relative">
-                    <Link href="/login" className="absolute top-4 left-4 p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors">
+                    <Link href="/login" aria-label="Kembali ke halaman masuk" className="absolute top-4 left-4 p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors">
                         <ArrowLeft size={16} />
                     </Link>
                     <div className="text-center mt-4">
@@ -91,12 +91,13 @@ export default function ForgotPasswordPage() {
                     ) : (
                         <form onSubmit={handleReset} className="space-y-6">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Alamat Email Terdaftar</label>
+                                <label htmlFor="forgot-email" className="block text-sm font-medium text-slate-700 mb-1">Alamat Email Terdaftar</label>
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                         <Mail className="h-5 w-5 text-slate-400" />
                                     </div>
                                     <input
+                                        id="forgot-email"
                                         type="email"
                                         required
                                         value={email}

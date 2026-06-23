@@ -66,7 +66,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="id-ID" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: applyStoredThemeScript }} />
       </head>

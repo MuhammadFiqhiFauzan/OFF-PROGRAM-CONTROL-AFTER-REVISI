@@ -1,6 +1,6 @@
 "use client";
 
-import React, { forwardRef } from "react";
+import React, { forwardRef, useId } from "react";
 import AsyncSelect from "react-select/async";
 import type { SelectInstance, StylesConfig } from "react-select";
 import { accurateFetch } from "@/lib/apiFetcher";
@@ -20,6 +20,7 @@ interface SelectOption {
 }
 
 interface AsyncSearchSelectProps {
+    id?: string;
     label?: string;
     error?: string;
     helperText?: string;
@@ -38,11 +39,16 @@ interface AsyncSearchSelectProps {
 
 export const AsyncSearchSelect = forwardRef<SelectInstance<SelectOption, false>, AsyncSearchSelectProps>(
     ({ 
-        label, error, helperText, endpoint, searchField = "name", 
+        id, label, error, helperText, endpoint, searchField = "name",
         labelField = "name", valueField = "no", extraFields = "",
         required, placeholder = "Ketik untuk mencari...",
         value, onChange, onBlur, className
     }, ref) => {
+        const generatedId = useId();
+        const selectId = id || generatedId;
+        const errorId = error ? `${selectId}-error` : undefined;
+        const helperId = helperText && !error ? `${selectId}-helper` : undefined;
+        const describedBy = [errorId, helperId].filter(Boolean).join(" ") || undefined;
 
         const loadOptions = async (inputValue: string): Promise<SelectOption[]> => {
             if (!inputValue) return [];
@@ -142,13 +148,16 @@ export const AsyncSearchSelect = forwardRef<SelectInstance<SelectOption, false>,
         return (
             <div className={cn("flex flex-col gap-1.5 w-full", className)}>
                 {label && (
-                    <label className="text-sm font-medium text-slate-300">
+                    <label htmlFor={selectId} className="text-sm font-medium text-slate-300">
                         {label} {required && <span className="text-red-400">*</span>}
                     </label>
                 )}
                 
                 <AsyncSelect<SelectOption, false>
                     ref={ref}
+                    inputId={selectId}
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={describedBy}
                     cacheOptions
                     defaultOptions
                     loadOptions={loadOptions}
@@ -162,12 +171,12 @@ export const AsyncSearchSelect = forwardRef<SelectInstance<SelectOption, false>,
                 />
 
                 {error && (
-                    <span className="text-xs text-red-400 font-medium animate-in fade-in slide-in-from-top-1">
+                    <span id={errorId} className="text-xs text-red-400 font-medium animate-in fade-in slide-in-from-top-1">
                         {error}
                     </span>
                 )}
                 {helperText && !error && (
-                    <span className="text-xs text-slate-500">
+                    <span id={helperId} className="text-xs text-slate-500">
                         {helperText}
                     </span>
                 )}

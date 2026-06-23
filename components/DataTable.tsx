@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 import {
     ColumnDef,
     flexRender,
@@ -26,7 +26,7 @@ interface DataTableProps<TData, TValue> {
 export function DataTable<TData, TValue>({
     columns,
     data,
-    searchPlaceholder = "Search all columns...",
+    searchPlaceholder = "Cari semua kolom...",
     isLoading = false
 }: DataTableProps<TData, TValue>) {
     const [sorting, setSorting] = useState<SortingState>([]);
@@ -34,6 +34,10 @@ export function DataTable<TData, TValue>({
     const [rowSelection, setRowSelection] = useState({});
 
     const [isViewOpen, setIsViewOpen] = useState(false);
+    const tableId = useId();
+    const searchInputId = `${tableId}-search`;
+    const columnMenuId = `${tableId}-column-menu`;
+    const pageSizeId = `${tableId}-page-size`;
 
     const fuzzyOrWildcardFilter: FilterFn<TData> = (row, columnId, filterValue) => {
         const value = row.getValue(columnId);
@@ -61,10 +65,12 @@ export function DataTable<TData, TValue>({
     return (
         <div className="space-y-4">
             {/* Toolbar */}
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 bg-white/5 border border-white/5 rounded-lg px-3 py-2 w-72 shadow-sm focus-within:ring-2 focus-within:ring-indigo-500/50 focus-within:border-indigo-500 transition-all">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex w-full items-center gap-2 bg-white/5 border border-white/5 rounded-lg px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-indigo-500/50 focus-within:border-indigo-500 transition-all sm:w-72">
                     <Search className="h-4 w-4 text-slate-400" />
+                    <label htmlFor={searchInputId} className="sr-only">Cari tabel</label>
                     <input
+                        id={searchInputId}
                         placeholder={searchPlaceholder}
                         value={globalFilter ?? ""}
                         onChange={(event) => setGlobalFilter(event.target.value)}
@@ -73,8 +79,11 @@ export function DataTable<TData, TValue>({
                 </div>
                 
                 <div className="flex items-center gap-2 relative">
-                    <button 
+                    <button
+                        type="button"
                         onClick={() => setIsViewOpen(!isViewOpen)}
+                        aria-expanded={isViewOpen}
+                        aria-controls={columnMenuId}
                         className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg px-3 py-2 text-sm text-slate-300 transition-colors shadow-sm"
                     >
                         <SlidersHorizontal className="h-4 w-4" />
@@ -82,7 +91,7 @@ export function DataTable<TData, TValue>({
                     </button>
 
                     {isViewOpen && (
-                        <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1c23] border border-white/5 rounded-lg shadow-xl shadow-black/50 z-50 p-2 py-3 backdrop-blur-xl">
+                        <div id={columnMenuId} className="absolute right-0 top-full mt-2 w-48 bg-[#1a1c23] border border-white/5 rounded-lg shadow-xl shadow-black/50 z-50 p-2 py-3 backdrop-blur-xl">
                             <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">Tampilkan Kolom</div>
                             <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
                                 {table.getAllLeafColumns().map(column => {
@@ -115,28 +124,37 @@ export function DataTable<TData, TValue>({
                             {table.getHeaderGroups().map((headerGroup) => (
                                 <tr key={headerGroup.id}>
                                     {headerGroup.headers.map((header) => {
+                                        const sorted = header.column.getIsSorted();
+                                        const canSort = header.column.getCanSort();
+                                        const ariaSort = sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : canSort ? "none" : undefined;
                                         return (
-                                            <th key={header.id} className="px-4 py-3 font-medium whitespace-nowrap">
+                                            <th key={header.id} scope="col" aria-sort={ariaSort} className="px-4 py-3 font-medium whitespace-nowrap">
                                                 {header.isPlaceholder ? null : (
-                                                    <div
-                                                        className={
-                                                            header.column.getCanSort()
-                                                                ? "cursor-pointer select-none flex items-center gap-1 group"
-                                                                : "flex items-center gap-1"
-                                                        }
-                                                        onClick={header.column.getToggleSortingHandler()}
-                                                    >
-                                                        {flexRender(
-                                                            header.column.columnDef.header,
-                                                            header.getContext()
-                                                        )}
-                                                        <span className="text-slate-500 group-hover:text-slate-300 transition-colors">
-                                                            {{
-                                                                asc: <ChevronUp className="h-3 w-3" />,
-                                                                desc: <ChevronDown className="h-3 w-3" />,
-                                                            }[header.column.getIsSorted() as string] ?? null}
-                                                        </span>
-                                                    </div>
+                                                    canSort ? (
+                                                        <button
+                                                            type="button"
+                                                            className="flex items-center gap-1 text-left select-none group"
+                                                            onClick={header.column.getToggleSortingHandler()}
+                                                        >
+                                                            {flexRender(
+                                                                header.column.columnDef.header,
+                                                                header.getContext()
+                                                            )}
+                                                            <span className="text-slate-500 group-hover:text-slate-300 transition-colors">
+                                                                {{
+                                                                    asc: <ChevronUp className="h-3 w-3" />,
+                                                                    desc: <ChevronDown className="h-3 w-3" />,
+                                                                }[sorted as string] ?? null}
+                                                            </span>
+                                                        </button>
+                                                    ) : (
+                                                        <div className="flex items-center gap-1">
+                                                            {flexRender(
+                                                                header.column.columnDef.header,
+                                                                header.getContext()
+                                                            )}
+                                                        </div>
+                                                    )
                                                 )}
                                             </th>
                                         );
@@ -150,7 +168,7 @@ export function DataTable<TData, TValue>({
                                     <td colSpan={columns.length} className="h-24 text-center">
                                         <div className="flex items-center justify-center gap-2 text-slate-400">
                                             <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                                            Loading data...
+                                            Memuat data...
                                         </div>
                                     </td>
                                 </tr>
@@ -171,7 +189,7 @@ export function DataTable<TData, TValue>({
                             ) : (
                                 <tr>
                                     <td colSpan={columns.length} className="h-24 text-center text-slate-500">
-                                        No results found.
+                                        Tidak ada hasil.
                                     </td>
                                 </tr>
                             )}
@@ -181,16 +199,17 @@ export function DataTable<TData, TValue>({
             </div>
 
             {/* Pagination Controls */}
-            <div className="flex items-center justify-between text-sm text-slate-400">
-                <div className="flex-1 text-xs">
-                    {Object.keys(rowSelection).length} of{" "}
-                    {table.getFilteredRowModel().rows.length} row(s) selected.
+            <div className="flex flex-col gap-3 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs">
+                    {Object.keys(rowSelection).length} dari{" "}
+                    {table.getFilteredRowModel().rows.length} baris dipilih.
                 </div>
                 
-                <div className="flex items-center space-x-6 lg:space-x-8">
+                <div className="flex flex-wrap items-center gap-4 sm:gap-6 lg:gap-8">
                     <div className="flex items-center space-x-2">
-                        <p className="text-xs font-medium">Rows per page</p>
+                        <label htmlFor={pageSizeId} className="text-xs font-medium">Baris per halaman</label>
                         <select
+                            id={pageSizeId}
                             value={table.getState().pagination.pageSize}
                             onChange={(e) => {
                                 table.setPageSize(Number(e.target.value));
@@ -205,7 +224,7 @@ export function DataTable<TData, TValue>({
                         </select>
                     </div>
                     <div className="flex w-[100px] items-center justify-center text-xs font-medium">
-                        Page {table.getState().pagination.pageIndex + 1} of{" "}
+                        Halaman {table.getState().pagination.pageIndex + 1} dari{" "}
                         {table.getPageCount()}
                     </div>
                     <div className="flex items-center space-x-2">
@@ -214,7 +233,7 @@ export function DataTable<TData, TValue>({
                             disabled={!table.getCanPreviousPage()}
                             className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
-                            <span className="sr-only">Go to first page</span>
+                            <span className="sr-only">Ke halaman pertama</span>
                             <ChevronsLeft className="h-4 w-4" />
                         </button>
                         <button
@@ -222,7 +241,7 @@ export function DataTable<TData, TValue>({
                             disabled={!table.getCanPreviousPage()}
                             className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
-                            <span className="sr-only">Go to previous page</span>
+                            <span className="sr-only">Ke halaman sebelumnya</span>
                             <ChevronLeft className="h-4 w-4" />
                         </button>
                         <button
@@ -230,7 +249,7 @@ export function DataTable<TData, TValue>({
                             disabled={!table.getCanNextPage()}
                             className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
-                            <span className="sr-only">Go to next page</span>
+                            <span className="sr-only">Ke halaman berikutnya</span>
                             <ChevronRight className="h-4 w-4" />
                         </button>
                         <button
@@ -238,7 +257,7 @@ export function DataTable<TData, TValue>({
                             disabled={!table.getCanNextPage()}
                             className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 transition-colors"
                         >
-                            <span className="sr-only">Go to last page</span>
+                            <span className="sr-only">Ke halaman terakhir</span>
                             <ChevronsRight className="h-4 w-4" />
                         </button>
                     </div>

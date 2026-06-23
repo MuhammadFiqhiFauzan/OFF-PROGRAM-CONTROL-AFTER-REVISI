@@ -56,12 +56,13 @@ function ResetPasswordForm() {
         <div className="p-8">
             <form onSubmit={handleReset} className="space-y-6">
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Password Baru</label>
+                    <label htmlFor="new-password" className="block text-sm font-medium text-slate-700 mb-1">Password Baru</label>
                     <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <Lock className="h-5 w-5 text-slate-400" />
                         </div>
                         <input
+                            id="new-password"
                             type="password"
                             required
                             value={password}
@@ -73,12 +74,13 @@ function ResetPasswordForm() {
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Konfirmasi Password Baru</label>
+                    <label htmlFor="confirm-password" className="block text-sm font-medium text-slate-700 mb-1">Konfirmasi Password Baru</label>
                     <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <Lock className="h-5 w-5 text-slate-400" />
                         </div>
                         <input
+                            id="confirm-password"
                             type="password"
                             required
                             value={confirmPassword}

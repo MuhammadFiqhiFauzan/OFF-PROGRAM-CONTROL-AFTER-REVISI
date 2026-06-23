@@ -5,7 +5,7 @@
 // Side Effects: Tidak ada — callback onSelect untuk navigasi/filter.
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useId, useMemo } from "react";
 import { Search, X, ArrowRight } from "lucide-react";
 import { fuzzyMatch } from "@/lib/fuzzySearch";
 
@@ -27,6 +27,8 @@ export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari p
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const inputRef = useRef<HTMLInputElement>(null);
+    const resultsId = useId();
+    const hasResultsPopup = open && Boolean(query.trim());
 
     const filtered = useMemo(() => {
         if (!query.trim()) return items.slice(0, 8);
@@ -73,6 +75,11 @@ export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari p
                 <input
                     ref={inputRef}
                     type="text"
+                    aria-label="Cari pengajuan OFF"
+                    aria-expanded={hasResultsPopup}
+                    aria-controls={hasResultsPopup ? resultsId : undefined}
+                    aria-autocomplete="list"
+                    role="combobox"
                     value={query}
                     onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
                     onFocus={() => setOpen(true)}
@@ -83,6 +90,7 @@ export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari p
                     <button
                         type="button"
                         onClick={() => { setQuery(""); inputRef.current?.focus(); }}
+                        aria-label="Kosongkan pencarian"
                         className="shrink-0 rounded p-0.5 text-[var(--luxury-subtle)] hover:text-[var(--luxury-text)]"
                     >
                         <X size={14} />
@@ -91,10 +99,15 @@ export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari p
             </div>
 
             {/* Dropdown results */}
-            {open && query.trim() && (
+            {hasResultsPopup && (
                 <>
                     <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden="true" />
-                    <div className="absolute left-0 right-0 z-40 mt-2 max-h-72 overflow-y-auto rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl backdrop-blur-xl">
+                    <div
+                        id={resultsId}
+                        role="listbox"
+                        aria-label="Hasil pencarian pengajuan OFF"
+                        className="absolute left-0 right-0 z-40 mt-2 max-h-72 overflow-y-auto rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl backdrop-blur-xl"
+                    >
                         {filtered.length === 0 ? (
                             <div className="py-6 text-center text-sm text-[var(--luxury-subtle)]">
                                 Tidak ditemukan batch yang cocok
@@ -104,6 +117,8 @@ export default function OffGlobalSearch({ items, onSelect, placeholder = "Cari p
                                 <button
                                     key={item.id}
                                     type="button"
+                                    role="option"
+                                    aria-selected="false"
                                     onClick={() => handleSelect(item.id)}
                                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--luxury-gold-2)]/10 border-b border-[var(--border-soft)] last:border-b-0"
                                 >
