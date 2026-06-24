@@ -6,6 +6,7 @@
 import { createClient } from "@libsql/client";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 
 // Load .env dari working directory supaya `DATABASE_URL=file:sqlite.db` di
 // `.env` lokal kepakai saat dijalankan langsung dari CLI dev.
@@ -1059,6 +1060,78 @@ for (const sql of rbacStatements) {
     const message = String(error?.message || error);
     if (!/already exists/i.test(message)) throw error;
   }
+}
+
+// Seed 11 grup preset Access Group — SEKALI SAJA (insert-if-name-not-exists).
+// Grup yang sudah ada TIDAK disentuh → perubahan izin/anggota manual via UI aman.
+// Backfill user_group hanya untuk user yang BELUM punya grup sama sekali.
+const PERMISSION_REGISTRY = {
+  dashboard: ["view"],
+  api_wrapper: ["view", "execute"],
+  payments: ["view", "create", "edit", "update", "delete", "upload", "export", "submit"],
+  sppd: ["view", "edit_settings", "upload_excel", "generate", "download"],
+  finance: ["view", "approve", "transfer", "upload_proof", "post_accurate", "retry_post", "export", "update"],
+  principles: ["view", "upload", "delete"],
+  summary: ["view", "upload", "generate", "email", "export", "edit", "update"],
+  validator: ["view", "upload", "run", "download", "edit"],
+  off_program_control: ["view", "create", "update", "approve", "export", "create_batch", "edit_returned_batch", "submit_batch", "sm_approve", "sm_return", "claim_review", "claim_final", "om_approve", "om_cancel", "finance_payment", "submit_refund", "audit_read", "audit_export", "audit_correct", "period_close", "period_unlock", "discount_view", "discount_manage"],
+  claim_workflow: ["view", "create", "edit", "update", "submit", "approve", "export"],
+  users: ["view", "create_user", "edit_user", "delete_user", "set_role", "set_permission", "manage"],
+  form_kontrol: ["view", "submit", "manage"],
+  insentif_sales: ["view", "manage", "upload_target", "upload_progress", "input_support", "manage_payment"],
+};
+const allPresetKeys = Object.entries(PERMISSION_REGISTRY).flatMap(([m, acts]) => acts.map((a) => `${m}.${a}`));
+const kk = (mod, acts) => acts.map((a) => `${mod}.${a}`);
+const PRESETS = [
+  { name: "Admin", desc: "Akses penuh semua modul", keys: allPresetKeys },
+  { name: "Manager", desc: "Manajer lintas modul", keys: [...kk("dashboard", ["view"]), ...kk("api_wrapper", ["view", "execute"]), ...kk("payments", ["view", "export", "submit", "edit", "update"]), ...kk("sppd", ["view", "generate", "download"]), ...kk("finance", ["view", "approve", "export", "update"]), ...kk("principles", ["view"]), ...kk("summary", ["view", "export"]), ...kk("validator", ["view", "download"]), ...kk("off_program_control", ["view", "update", "approve", "export"]), ...kk("claim_workflow", ["view", "approve", "export"]), ...kk("form_kontrol", ["view", "submit", "manage"]), ...kk("insentif_sales", ["view", "upload_target", "upload_progress"])] },
+  { name: "Finance", desc: "Keuangan / pembayaran", keys: [...kk("dashboard", ["view"]), ...kk("payments", ["view", "export"]), ...kk("sppd", ["view", "download"]), ...kk("finance", ["view", "approve", "transfer", "upload_proof", "post_accurate", "retry_post", "export", "update"]), ...kk("off_program_control", ["view", "update", "finance_payment", "submit_refund"]), ...kk("claim_workflow", ["view", "update", "export"]), ...kk("principles", ["view"]), ...kk("insentif_sales", ["view", "input_support", "manage_payment"])] },
+  { name: "Staff", desc: "Staf input operasional", keys: [...kk("dashboard", ["view"]), ...kk("payments", ["view", "create", "edit", "upload", "submit"]), ...kk("sppd", ["view", "generate", "download"]), ...kk("principles", ["view"]), ...kk("summary", ["view", "upload", "generate", "export", "edit", "update"]), ...kk("validator", ["view", "upload", "run", "download", "edit"]), ...kk("off_program_control", ["view", "create", "update"]), ...kk("claim_workflow", ["view"])] },
+  { name: "Viewer", desc: "Hanya lihat", keys: [...kk("dashboard", ["view"]), ...kk("payments", ["view"]), ...kk("sppd", ["view"]), ...kk("finance", ["view"]), ...kk("off_program_control", ["view"]), ...kk("claim_workflow", ["view"]), ...kk("summary", ["view"]), ...kk("validator", ["view"])] },
+  { name: "SPV", desc: "Supervisor — OPC pengajuan + Form Kontrol tim", keys: [...kk("dashboard", ["view"]), ...kk("off_program_control", ["view", "create", "update", "create_batch", "edit_returned_batch", "submit_batch", "submit_refund", "discount_view", "discount_manage"]), ...kk("form_kontrol", ["view", "submit"]), ...kk("insentif_sales", ["view", "upload_progress"])] },
+  { name: "SM", desc: "Sales Manager — approve OPC + Form Kontrol", keys: [...kk("dashboard", ["view"]), ...kk("off_program_control", ["view", "sm_approve", "sm_return", "submit_refund"]), ...kk("form_kontrol", ["view", "submit"]), ...kk("insentif_sales", ["view"])] },
+  { name: "Claim", desc: "Tim Klaim — review & klaim", keys: [...kk("dashboard", ["view"]), ...kk("off_program_control", ["view", "export", "claim_review", "claim_final", "audit_read", "audit_export", "audit_correct", "period_close", "create_batch", "submit_batch", "edit_returned_batch"]), ...kk("claim_workflow", ["view", "create", "edit", "update", "submit", "approve", "export"])] },
+  { name: "OM", desc: "Operational Manager — approve akhir OPC", keys: [...kk("dashboard", ["view"]), ...kk("off_program_control", ["view", "om_approve", "om_cancel"])] },
+  { name: "Salesman", desc: "Sales lapangan — Form Kontrol & insentif sendiri", keys: [...kk("dashboard", ["view"]), ...kk("form_kontrol", ["view", "submit"]), ...kk("insentif_sales", ["view"])] },
+  { name: "Admin Sales", desc: "Admin sales — kelola Form Kontrol & target insentif", keys: [...kk("dashboard", ["view"]), ...kk("form_kontrol", ["view", "submit", "manage"]), ...kk("insentif_sales", ["view", "manage", "upload_target", "upload_progress", "input_support", "manage_payment"])] },
+];
+const ROLE_TO_GROUP = {
+  admin: "Admin", super_admin: "Admin", manager: "Manager", finance: "Finance", staff: "Staff", viewer: "Viewer",
+  spv: "SPV", supervisor: "SPV", sm: "SM", sales_manager: "SM", claim: "Claim", om: "OM", operational_manager: "OM",
+  salesman: "Salesman", sales: "Salesman", admin_sales: "Admin Sales",
+};
+
+try {
+  const seedNow = Date.now();
+  const groupIdByName = {};
+  for (const p of PRESETS) {
+    const existing = await db.execute({ sql: "SELECT id FROM access_group WHERE name = ?", args: [p.name] });
+    if (existing.rows.length > 0) {
+      groupIdByName[p.name] = String(existing.rows[0].id);
+      continue; // sudah ada → jangan timpa izin/anggota yang mungkin sudah diubah manual
+    }
+    const id = randomUUID();
+    groupIdByName[p.name] = id;
+    await db.execute({ sql: "INSERT INTO access_group (id, name, description, is_preset, created_at, updated_at) VALUES (?,?,?,1,?,?)", args: [id, p.name, p.desc, seedNow, seedNow] });
+    for (const key of p.keys) {
+      await db.execute({ sql: "INSERT OR IGNORE INTO group_permission (group_id, permission_key) VALUES (?,?)", args: [id, key] });
+    }
+  }
+
+  // Backfill: hanya user yang BELUM punya grup apa pun (jangan ganggu kurasi manual).
+  const assignedRows = await db.execute("SELECT DISTINCT user_id FROM user_group");
+  const hasGroup = new Set(assignedRows.rows.map((r) => String(r.user_id)));
+  const userRows = await db.execute("SELECT id, role FROM user");
+  for (const u of userRows.rows) {
+    const uid = String(u.id);
+    if (hasGroup.has(uid)) continue;
+    const roleKey = String(u.role ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    const groupName = ROLE_TO_GROUP[roleKey];
+    if (!groupName || !groupIdByName[groupName]) continue;
+    await db.execute({ sql: "INSERT OR IGNORE INTO user_group (user_id, group_id, assigned_by, assigned_at) VALUES (?,?,?,?)", args: [uid, groupIdByName[groupName], "init-db-seed", seedNow] });
+  }
+} catch (error) {
+  console.warn("[init-db] seed grup preset dilewati:", String(error?.message || error));
 }
 
 console.log("SQLite tables are ready");
