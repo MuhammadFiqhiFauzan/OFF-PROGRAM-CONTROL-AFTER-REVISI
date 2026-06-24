@@ -1011,4 +1011,54 @@ for (const sql of formKontrolMigrations) {
   }
 }
 
+// Dynamic RBAC (Access Group) — additive, idempotent. Dibuat di sini supaya
+// otomatis ada di produksi tiap deploy (CMD container = init-db sebelum start),
+// tanpa perlu better-sqlite3 / seed manual di VPS.
+const rbacStatements = [
+  `CREATE TABLE IF NOT EXISTS access_group (
+     id           TEXT PRIMARY KEY,
+     name         TEXT NOT NULL UNIQUE,
+     description  TEXT,
+     is_preset    INTEGER NOT NULL DEFAULT 0,
+     created_at   INTEGER NOT NULL,
+     updated_at   INTEGER NOT NULL
+   );`,
+  `CREATE TABLE IF NOT EXISTS group_permission (
+     group_id        TEXT NOT NULL REFERENCES access_group(id),
+     permission_key  TEXT NOT NULL,
+     PRIMARY KEY (group_id, permission_key)
+   );`,
+  `CREATE INDEX IF NOT EXISTS idx_group_permission_group ON group_permission(group_id);`,
+  `CREATE TABLE IF NOT EXISTS user_group (
+     user_id      TEXT NOT NULL REFERENCES user(id),
+     group_id     TEXT NOT NULL REFERENCES access_group(id),
+     assigned_by  TEXT,
+     assigned_at  INTEGER NOT NULL,
+     PRIMARY KEY (user_id, group_id)
+   );`,
+  `CREATE INDEX IF NOT EXISTS idx_user_group_user  ON user_group(user_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_user_group_group ON user_group(group_id);`,
+  `CREATE TABLE IF NOT EXISTS permission_audit_log (
+     id              TEXT PRIMARY KEY,
+     actor_user_id   TEXT,
+     actor_name      TEXT,
+     action          TEXT NOT NULL,
+     target_user_id  TEXT,
+     target_group_id TEXT,
+     detail          TEXT,
+     created_at      INTEGER NOT NULL
+   );`,
+  `CREATE INDEX IF NOT EXISTS idx_pal_actor        ON permission_audit_log(actor_user_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_pal_target_user  ON permission_audit_log(target_user_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_pal_target_group ON permission_audit_log(target_group_id);`,
+];
+for (const sql of rbacStatements) {
+  try {
+    await db.execute(sql);
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (!/already exists/i.test(message)) throw error;
+  }
+}
+
 console.log("SQLite tables are ready");
