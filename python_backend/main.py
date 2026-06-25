@@ -30,6 +30,7 @@ import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 import pandas as pd
+import asyncio
 import io, os, re, uuid, json, math, base64, hashlib, hmac, time, zipfile, copy, mimetypes
 from dotenv import load_dotenv
 load_dotenv(override=False)
@@ -1501,6 +1502,10 @@ def append_error_log(where: str, err: Exception, context: Optional[Dict[str, Any
 _PAYMENTS_DB_CACHE: Optional[Dict[str, Any]] = None
 _PAYMENTS_DB_MTIME: float = 0.0
 _PAYMENTS_DB_EMPTY: Dict[str, Any] = {"lpb": {}, "submissions": {}, "drafts": {}, "finance_mappings": {}, "proofs": {}, "sppd_settings": {}}
+# ponytail: satu lock global cukup karena payments.json adalah satu file tunggal.
+# Ceiling: serializes semua write — tidak ada parallelism untuk mutation routes.
+# Upgrade path: per-resource lock jika ada multiple JSON stores.
+_PAYMENTS_DB_LOCK: asyncio.Lock = asyncio.Lock()
 
 def load_payments_db() -> Dict[str, Any]:
     global _PAYMENTS_DB_CACHE, _PAYMENTS_DB_MTIME
@@ -1537,6 +1542,32 @@ def save_payments_db(data: Dict[str, Any]) -> None:
     os.replace(tmp_path, PAYMENTS_DB_PATH)
     _PAYMENTS_DB_CACHE = data
     _PAYMENTS_DB_MTIME = os.path.getmtime(PAYMENTS_DB_PATH)
+
+async def load_and_lock_payments_db():
+    """Acquire _PAYMENTS_DB_LOCK lalu load payments.json.
+
+    Gunakan sebagai async context manager di semua route yang melakukan
+    read-modify-write agar tidak ada dua request concurrent yang menulis
+    snapshot berbeda ke file yang sama (last-writer-wins silent data loss).
+
+    Contoh pemakaian:
+        async with load_and_lock_payments_db() as db:
+            db["lpb"][key] = rec
+            save_payments_db(db)
+    """
+    # ponytail: yield inside asyncio.Lock context — satu lock serializes semua
+    # mutation. Ceiling: throughput mutation routes turun jadi sequential.
+    # Upgrade: per-key optimistic locking jika contention terbukti tinggi.
+    class _Ctx:
+        def __init__(self):
+            self._db: Dict[str, Any] = {}
+        async def __aenter__(self) -> Dict[str, Any]:
+            await _PAYMENTS_DB_LOCK.acquire()
+            self._db = load_payments_db()
+            return self._db
+        async def __aexit__(self, exc_type, exc, tb):
+            _PAYMENTS_DB_LOCK.release()
+    return _Ctx()
 
 def empty_payments_db_preserving_config(db: Dict[str, Any]) -> Dict[str, Any]:
     db = db if isinstance(db, dict) else {}
@@ -5882,63 +5913,65 @@ async def payments_upload(request: Request, file: UploadFile = File(None)):
             restore_rows = parse_payments_backup_upload(content)
             if not restore_rows:
                 return JSONResponse(status_code=400, content={"ok": False, "error": "Data backup PAYMENTS kosong."})
-            db = load_payments_db()
-            conflicts = validate_backup_restore_conflicts(db, restore_rows)
-            if conflicts:
-                return JSONResponse(status_code=400, content={"ok": False, "error": "Restore backup dibatalkan: " + "; ".join(conflicts[:5])})
-            for key, rec in restore_rows:
-                db["lpb"][key] = rec
-            rebuild_payment_submissions(db)
-            max_seq = max_sppd_sequence_from_records([rec for _, rec in restore_rows])
-            if max_seq:
-                db["sppd_seq"] = max(int(db.get("sppd_seq", 0) or 0), max_seq)
-            save_payments_db(db)
+            async with _PAYMENTS_DB_LOCK:
+                db = load_payments_db()
+                conflicts = validate_backup_restore_conflicts(db, restore_rows)
+                if conflicts:
+                    return JSONResponse(status_code=400, content={"ok": False, "error": "Restore backup dibatalkan: " + "; ".join(conflicts[:5])})
+                for key, rec in restore_rows:
+                    db["lpb"][key] = rec
+                rebuild_payment_submissions(db)
+                max_seq = max_sppd_sequence_from_records([rec for _, rec in restore_rows])
+                if max_seq:
+                    db["sppd_seq"] = max(int(db.get("sppd_seq", 0) or 0), max_seq)
+                save_payments_db(db)
             append_audit_log(user, "payments_restore_backup", "lpb", {"added": len(restore_rows), "max_sppd_seq": max_seq})
             return JSONResponse({"ok": True, "added": len(restore_rows), "mode": "restore_backup", "message": f"Restore backup berhasil: {len(restore_rows)} record."})
 
         rows = parse_lpb_upload(content)
         if not rows:
             return JSONResponse(status_code=400, content={"ok": False, "error": "Data LPB kosong."})
-        db = load_payments_db()
-        dups = []
-        for r in rows:
-            no_lpb = s(r.get("no_lpb", ""))
-            if find_lpb_duplicate_key(db, no_lpb):
-                dups.append(no_lpb)
-        if dups:
-            return JSONResponse(status_code=400, content={"ok": False, "error": f"No. LPB {dups[0]} sudah ada di sistem, gagal upload"})
         now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-        for r in rows:
-            key = normalize_lpb_no(r["no_lpb"])
-            nilai_invoice = parse_number_id(r.get("nilai_invoice", 0))
-            gap_nilai = parse_number_id(r.get("gap_nilai", 0))
-            db["lpb"][key] = {
-                **r,
-                "record_id": key,
-                "tipe_pengajuan": "LPB",
-                "tgl_invoice": s(r.get("tgl_invoice", "")),
-                "jt_invoice": s(r.get("jt_invoice", "")),
-                "tgl_pembayaran": s(r.get("tgl_pembayaran", "")),
-                "actual_date": s(r.get("actual_date", "")),
-                "nilai_invoice": nilai_invoice if nilai_invoice > 0 else "",
-                "gap_nilai": gap_nilai,
-                "invoice_no": s(r.get("invoice_no", "")),
-                "status_pembayaran": "",
-                "payment_method": "",
-                "submitted_at": "",
-                "submitted_by": "",
-                "submission_id": "",
-                "draft_id": "",
-                "potongan": 0.0,
-                "nilai_pembayaran": 0.0,
-                "target_payment_date": "",
-                "jenis_dokumen": s(r.get("jenis_dokumen", "")),
-                "nomor_dokumen": s(r.get("nomor_dokumen", "")),
-                "keterangan": s(r.get("keterangan", "")),
-                "created_at": now,
-                "created_by": user,
-            }
-        save_payments_db(db)
+        async with _PAYMENTS_DB_LOCK:
+            db = load_payments_db()
+            dups = []
+            for r in rows:
+                no_lpb = s(r.get("no_lpb", ""))
+                if find_lpb_duplicate_key(db, no_lpb):
+                    dups.append(no_lpb)
+            if dups:
+                return JSONResponse(status_code=400, content={"ok": False, "error": f"No. LPB {dups[0]} sudah ada di sistem, gagal upload"})
+            for r in rows:
+                key = normalize_lpb_no(r["no_lpb"])
+                nilai_invoice = parse_number_id(r.get("nilai_invoice", 0))
+                gap_nilai = parse_number_id(r.get("gap_nilai", 0))
+                db["lpb"][key] = {
+                    **r,
+                    "record_id": key,
+                    "tipe_pengajuan": "LPB",
+                    "tgl_invoice": s(r.get("tgl_invoice", "")),
+                    "jt_invoice": s(r.get("jt_invoice", "")),
+                    "tgl_pembayaran": s(r.get("tgl_pembayaran", "")),
+                    "actual_date": s(r.get("actual_date", "")),
+                    "nilai_invoice": nilai_invoice if nilai_invoice > 0 else "",
+                    "gap_nilai": gap_nilai,
+                    "invoice_no": s(r.get("invoice_no", "")),
+                    "status_pembayaran": "",
+                    "payment_method": "",
+                    "submitted_at": "",
+                    "submitted_by": "",
+                    "submission_id": "",
+                    "draft_id": "",
+                    "potongan": 0.0,
+                    "nilai_pembayaran": 0.0,
+                    "target_payment_date": "",
+                    "jenis_dokumen": s(r.get("jenis_dokumen", "")),
+                    "nomor_dokumen": s(r.get("nomor_dokumen", "")),
+                    "keterangan": s(r.get("keterangan", "")),
+                    "created_at": now,
+                    "created_by": user,
+                }
+            save_payments_db(db)
         append_audit_log(user, "payments_upload", "lpb", {"added": len(rows)})
         return JSONResponse({"ok": True, "added": len(rows)})
     except ValueError as e:
@@ -5977,22 +6010,23 @@ async def payments_manual_add(request: Request):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Nilai Invoice wajib > 0."})
     if tipe == "LPB" and not no_lpb:
         return JSONResponse(status_code=400, content={"ok": False, "error": "Tipe LPB wajib isi No. LPB."})
-    db = load_payments_db()
     if tipe == "NON_LPB" and (not jenis_dokumen or not nomor_dokumen):
         return JSONResponse(status_code=400, content={"ok": False, "error": "NON_LPB wajib isi Jenis Dokumen dan Nomor Dokumen."})
-    if no_lpb and find_lpb_duplicate_key(db, no_lpb):
-        return JSONResponse(status_code=400, content={"ok": False, "error": f"No. LPB {no_lpb} sudah ada di sistem."})
-    if no_lpb:
-        key = normalize_lpb_no(no_lpb)
-        if key in db.get("lpb", {}):
-            key = make_payment_record_id(tipe)
-    else:
-        key = make_payment_record_id(tipe)
-    while key in db.get("lpb", {}):
-        key = make_payment_record_id(tipe)
 
     now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-    db["lpb"][key] = {
+    async with _PAYMENTS_DB_LOCK:
+      db = load_payments_db()
+      if no_lpb and find_lpb_duplicate_key(db, no_lpb):
+          return JSONResponse(status_code=400, content={"ok": False, "error": f"No. LPB {no_lpb} sudah ada di sistem."})
+      if no_lpb:
+          key = normalize_lpb_no(no_lpb)
+          if key in db.get("lpb", {}):
+              key = make_payment_record_id(tipe)
+      else:
+          key = make_payment_record_id(tipe)
+      while key in db.get("lpb", {}):
+          key = make_payment_record_id(tipe)
+      db["lpb"][key] = {
         "record_id": key,
         "tipe_pengajuan": tipe,
         "no_lpb": no_lpb,
@@ -6018,12 +6052,12 @@ async def payments_manual_add(request: Request):
         "potongan": 0.0,
         "nilai_pembayaran": 0.0,
         "target_payment_date": "",
-        "jenis_dokumen": jenis_dokumen,
-        "nomor_dokumen": nomor_dokumen,
-        "created_at": now,
-        "created_by": user,
-    }
-    save_payments_db(db)
+          "jenis_dokumen": jenis_dokumen,
+          "nomor_dokumen": nomor_dokumen,
+          "created_at": now,
+          "created_by": user,
+      }
+      save_payments_db(db)
     append_audit_log(user, "payments_manual_add", "lpb", {"record_id": key, "tipe_pengajuan": tipe})
     return JSONResponse({"ok": True, "record_id": key})
 
@@ -6044,78 +6078,79 @@ async def payments_update(request: Request):
     items = payload.get("items", [])
     if not isinstance(items, list):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Format data tidak valid."})
-    db = load_payments_db()
     updated = []
     skipped = []
-    for item in items:
-        if not isinstance(item, dict):
-            skipped.append("")
-            continue
-        row_id = s(item.get("record_id", "")) or s(item.get("id", "")) or s(item.get("no_lpb", ""))
-        key = resolve_payment_record_key(db, row_id)
-        if not key or key not in db.get("lpb", {}):
-            skipped.append(row_id)
-            continue
-        rec = db["lpb"][key]
-        tipe = normalize_pengajuan_type(item.get("tipe_pengajuan", rec.get("tipe_pengajuan", "LPB")))
-        no_lpb = s(item.get("no_lpb", rec.get("no_lpb", "")))
-        jenis_dokumen = s(item.get("jenis_dokumen", rec.get("jenis_dokumen", "")))
-        nomor_dokumen = s(item.get("nomor_dokumen", rec.get("nomor_dokumen", "")))
+    async with _PAYMENTS_DB_LOCK:
+        db = load_payments_db()
+        for item in items:
+            if not isinstance(item, dict):
+                skipped.append("")
+                continue
+            row_id = s(item.get("record_id", "")) or s(item.get("id", "")) or s(item.get("no_lpb", ""))
+            key = resolve_payment_record_key(db, row_id)
+            if not key or key not in db.get("lpb", {}):
+                skipped.append(row_id)
+                continue
+            rec = db["lpb"][key]
+            tipe = normalize_pengajuan_type(item.get("tipe_pengajuan", rec.get("tipe_pengajuan", "LPB")))
+            no_lpb = s(item.get("no_lpb", rec.get("no_lpb", "")))
+            jenis_dokumen = s(item.get("jenis_dokumen", rec.get("jenis_dokumen", "")))
+            nomor_dokumen = s(item.get("nomor_dokumen", rec.get("nomor_dokumen", "")))
 
-        if tipe == "LPB" and not no_lpb:
-            return JSONResponse(status_code=400, content={"ok": False, "error": "Tipe LPB wajib isi No. LPB."})
-        if tipe == "NON_LPB" and (not jenis_dokumen or not nomor_dokumen):
-            return JSONResponse(status_code=400, content={"ok": False, "error": "NON_LPB wajib isi Jenis Dokumen dan Nomor Dokumen."})
-        if no_lpb:
-            dup_key = find_lpb_duplicate_key(db, no_lpb, exclude_key=key)
-            if dup_key:
-                return JSONResponse(status_code=400, content={"ok": False, "error": f"No. LPB {no_lpb} sudah dipakai record lain."})
+            if tipe == "LPB" and not no_lpb:
+                return JSONResponse(status_code=400, content={"ok": False, "error": "Tipe LPB wajib isi No. LPB."})
+            if tipe == "NON_LPB" and (not jenis_dokumen or not nomor_dokumen):
+                return JSONResponse(status_code=400, content={"ok": False, "error": "NON_LPB wajib isi Jenis Dokumen dan Nomor Dokumen."})
+            if no_lpb:
+                dup_key = find_lpb_duplicate_key(db, no_lpb, exclude_key=key)
+                if dup_key:
+                    return JSONResponse(status_code=400, content={"ok": False, "error": f"No. LPB {no_lpb} sudah dipakai record lain."})
 
-        changed = False
-        rec["record_id"] = key
-        if "tipe_pengajuan" in item:
-            rec["tipe_pengajuan"] = tipe
-            changed = True
-        if "no_lpb" in item:
-            rec["no_lpb"] = no_lpb
-            changed = True
-        if "jenis_dokumen" in item:
-            rec["jenis_dokumen"] = jenis_dokumen
-            changed = True
-        if "nomor_dokumen" in item:
-            rec["nomor_dokumen"] = nomor_dokumen
-            changed = True
-        if "tgl_invoice" in item:
-            rec["tgl_invoice"] = s(item.get("tgl_invoice", ""))
-            changed = True
-        if "jt_invoice" in item:
-            rec["jt_invoice"] = s(item.get("jt_invoice", ""))
-            changed = True
-        if "tgl_pembayaran" in item:
-            rec["tgl_pembayaran"] = s(item.get("tgl_pembayaran", ""))
-            changed = True
-        if "actual_date" in item:
-            rec["actual_date"] = s(item.get("actual_date", ""))
-            changed = True
-        if "nilai_invoice" in item:
-            rec["nilai_invoice"] = parse_number_id(item.get("nilai_invoice", 0))
-            changed = True
-        if "invoice_no" in item:
-            rec["invoice_no"] = s(item.get("invoice_no", ""))
-            changed = True
-        if "principle" in item:
-            rec["principle"] = s(item.get("principle", rec.get("principle", "")))
-            changed = True
-        if "ajukan" in item:
-            rec["ajukan"] = bool(item.get("ajukan"))
-            changed = True
-        try:
-            rec["gap_nilai"] = float(rec.get("nilai_win", 0) or 0.0) - float(rec.get("nilai_invoice", 0) or 0.0)
-        except Exception:
-            rec["gap_nilai"] = 0.0
-        if changed:
-            updated.append(key)
-    save_payments_db(db)
+            changed = False
+            rec["record_id"] = key
+            if "tipe_pengajuan" in item:
+                rec["tipe_pengajuan"] = tipe
+                changed = True
+            if "no_lpb" in item:
+                rec["no_lpb"] = no_lpb
+                changed = True
+            if "jenis_dokumen" in item:
+                rec["jenis_dokumen"] = jenis_dokumen
+                changed = True
+            if "nomor_dokumen" in item:
+                rec["nomor_dokumen"] = nomor_dokumen
+                changed = True
+            if "tgl_invoice" in item:
+                rec["tgl_invoice"] = s(item.get("tgl_invoice", ""))
+                changed = True
+            if "jt_invoice" in item:
+                rec["jt_invoice"] = s(item.get("jt_invoice", ""))
+                changed = True
+            if "tgl_pembayaran" in item:
+                rec["tgl_pembayaran"] = s(item.get("tgl_pembayaran", ""))
+                changed = True
+            if "actual_date" in item:
+                rec["actual_date"] = s(item.get("actual_date", ""))
+                changed = True
+            if "nilai_invoice" in item:
+                rec["nilai_invoice"] = parse_number_id(item.get("nilai_invoice", 0))
+                changed = True
+            if "invoice_no" in item:
+                rec["invoice_no"] = s(item.get("invoice_no", ""))
+                changed = True
+            if "principle" in item:
+                rec["principle"] = s(item.get("principle", rec.get("principle", "")))
+                changed = True
+            if "ajukan" in item:
+                rec["ajukan"] = bool(item.get("ajukan"))
+                changed = True
+            try:
+                rec["gap_nilai"] = float(rec.get("nilai_win", 0) or 0.0) - float(rec.get("nilai_invoice", 0) or 0.0)
+            except Exception:
+                rec["gap_nilai"] = 0.0
+            if changed:
+                updated.append(key)
+        save_payments_db(db)
     append_audit_log(user, "payments_update", "lpb", {"count": len(updated), "samples": updated[:10], "skipped": skipped[:10]})
     return JSONResponse({"ok": True, "updated": len(updated), "updated_ids": updated, "skipped": len(skipped)})
 
@@ -6414,23 +6449,24 @@ async def payments_clear(request: Request):
     if not PAYMENTS_DB_PATH:
         return JSONResponse(status_code=500, content={"ok": False, "error": "PAYMENTS_DB_PATH belum dikonfigurasi."})
 
-    db = load_payments_db()
-    before_counts = {
-        "lpb": len(db.get("lpb", {}) or {}),
-        "submissions": len(db.get("submissions", {}) or {}),
-        "drafts": len(db.get("drafts", {}) or {}),
-        "proofs": len(db.get("proofs", {}) or {}),
-    }
     backup_name = ""
     try:
-        os.makedirs(os.path.dirname(PAYMENTS_DB_PATH), exist_ok=True)
-        if os.path.exists(PAYMENTS_DB_PATH):
-            ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = f"{PAYMENTS_DB_PATH}.backup_before_clear_{ts}"
-            import shutil
-            shutil.copy2(PAYMENTS_DB_PATH, backup_path)
-            backup_name = os.path.basename(backup_path)
-        save_payments_db(empty_payments_db_preserving_config(db))
+        async with _PAYMENTS_DB_LOCK:
+            db = load_payments_db()
+            before_counts = {
+                "lpb": len(db.get("lpb", {}) or {}),
+                "submissions": len(db.get("submissions", {}) or {}),
+                "drafts": len(db.get("drafts", {}) or {}),
+                "proofs": len(db.get("proofs", {}) or {}),
+            }
+            os.makedirs(os.path.dirname(PAYMENTS_DB_PATH), exist_ok=True)
+            if os.path.exists(PAYMENTS_DB_PATH):
+                ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+                backup_path = f"{PAYMENTS_DB_PATH}.backup_before_clear_{ts}"
+                import shutil
+                shutil.copy2(PAYMENTS_DB_PATH, backup_path)
+                backup_name = os.path.basename(backup_path)
+            save_payments_db(empty_payments_db_preserving_config(db))
         append_audit_log(user, "payments_clear_all", "payments", {"backup": backup_name, "before": before_counts})
         return JSONResponse({
             "ok": True,
@@ -6473,15 +6509,16 @@ async def payments_cart_create(request: Request):
     if not isinstance(record_ids, list) or not record_ids:
         return JSONResponse(status_code=400, content={"ok": False, "error": "Data belum dipilih."})
 
-    db = load_payments_db()
-    selected = []
-    for row_id in record_ids:
-        key = resolve_payment_record_key(db, s(row_id))
-        rec = db.get("lpb", {}).get(key)
-        if rec:
-            selected.append({**rec, "record_id": key})
-    if not selected:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "Data pengajuan tidak ditemukan."})
+    async with _PAYMENTS_DB_LOCK:
+      db = load_payments_db()
+      selected = []
+      for row_id in record_ids:
+          key = resolve_payment_record_key(db, s(row_id))
+          rec = db.get("lpb", {}).get(key)
+          if rec:
+              selected.append({**rec, "record_id": key})
+      if not selected:
+          return JSONResponse(status_code=400, content={"ok": False, "error": "Data pengajuan tidak ditemukan."})
 
     for rec in selected:
         tipe = normalize_pengajuan_type(rec.get("tipe_pengajuan", "LPB"))
@@ -6553,16 +6590,18 @@ async def payments_cart_create(request: Request):
 
     draft_id = str(uuid.uuid4())[:8]
     now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-    db["drafts"][draft_id] = {
-        "id": draft_id,
-        "created_at": now,
-        "created_by": user,
-        "method": method,
-        "target_payment_date": target_payment_date,
-        "record_ids": [s(r.get("record_id", "")) for r in selected],
-        "items": items,
-    }
-    save_payments_db(db)
+    async with _PAYMENTS_DB_LOCK:
+        db2 = load_payments_db()
+        db2["drafts"][draft_id] = {
+            "id": draft_id,
+            "created_at": now,
+            "created_by": user,
+            "method": method,
+            "target_payment_date": target_payment_date,
+            "record_ids": [s(r.get("record_id", "")) for r in selected],
+            "items": items,
+        }
+        save_payments_db(db2)
     append_audit_log(user, "payments_cart_create", "draft", {"draft_id": draft_id, "count": len(selected), "types": sorted({normalize_pengajuan_type(x.get("tipe_pengajuan", "")) for x in selected})})
     return JSONResponse({"ok": True, "draft_id": draft_id})
 
@@ -6662,18 +6701,7 @@ async def payments_cart_submit(request: Request):
     if not isinstance(items, list):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Format data tidak valid."})
 
-    db = load_payments_db()
-    draft = db.get("drafts", {}).get(draft_id)
-    if not draft or not _can_access_draft(user, draft):
-        return JSONResponse(status_code=404, content={"ok": False, "error": "Draft tidak ditemukan."})
-    method = s(draft.get("method", ""))
-    if method not in ["NON_PANIN", "BANK_PANIN"]:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "Metode pembayaran tidak valid."})
-    if not target_payment_date:
-        target_payment_date = _normalize_yyyy_mm_dd(s(draft.get("target_payment_date", "")))
-    if not target_payment_date:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "Tanggal pengajuan pembayaran wajib diisi."})
-
+    # Validasi item_input_map bisa dilakukan sebelum lock (pure CPU, tidak baca DB)
     item_input_map: Dict[str, Dict[str, Any]] = {}
     for it in items:
         group_key = s(it.get("group_key", ""))
@@ -6692,15 +6720,29 @@ async def payments_cart_submit(request: Request):
             return JSONResponse(status_code=400, content={"ok": False, "error": f"Potongan tidak boleh minus untuk {pr or group_key}."})
         item_input_map[group_key] = {"jenis_pembayaran": jenis, "keterangan": ket, "potongan": potongan}
 
-    selected = []
-    selected_ids = draft.get("record_ids", draft.get("lpb", []))
-    for row_id in selected_ids:
-        key = resolve_payment_record_key(db, s(row_id))
-        rec = db.get("lpb", {}).get(key)
-        if rec:
-            selected.append({**rec, "record_id": key})
-    if not selected:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "Data pengajuan tidak ditemukan."})
+    # Lock mulai dari sini — semua read-modify-write dilindungi satu lock
+    async with _PAYMENTS_DB_LOCK:
+        db = load_payments_db()
+        draft = db.get("drafts", {}).get(draft_id)
+        if not draft or not _can_access_draft(user, draft):
+            return JSONResponse(status_code=404, content={"ok": False, "error": "Draft tidak ditemukan."})
+        method = s(draft.get("method", ""))
+        if method not in ["NON_PANIN", "BANK_PANIN"]:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Metode pembayaran tidak valid."})
+        if not target_payment_date:
+            target_payment_date = _normalize_yyyy_mm_dd(s(draft.get("target_payment_date", "")))
+        if not target_payment_date:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Tanggal pengajuan pembayaran wajib diisi."})
+
+        selected = []
+        selected_ids = draft.get("record_ids", draft.get("lpb", []))
+        for row_id in selected_ids:
+            key = resolve_payment_record_key(db, s(row_id))
+            rec = db.get("lpb", {}).get(key)
+            if rec:
+                selected.append({**rec, "record_id": key})
+        if not selected:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Data pengajuan tidak ditemukan."})
 
     submission_id = str(uuid.uuid4())[:8]
     submit_dt = pd.Timestamp.now()
@@ -6809,43 +6851,46 @@ async def payments_cart_submit(request: Request):
             payment_alloc_by_lpb[key] = nilai_bayar
             potongan_alloc_by_lpb[key] = max(float(nilai_invoice or 0.0) - nilai_bayar, 0.0)
 
-    for rec in selected:
-        key = s(rec.get("record_id", ""))
-        if key in db.get("lpb", {}):
-            principle = s(db["lpb"][key].get("principle", ""))
-            tipe = normalize_pengajuan_type(db["lpb"][key].get("tipe_pengajuan", "LPB"))
-            group_key = f"{principle}||{tipe}"
-            cart_info = item_map.get(group_key, {})
-            db["lpb"][key]["payment_method"] = "Bank Panin" if method == "BANK_PANIN" else "Non Panin"
-            db["lpb"][key]["status_pembayaran"] = "Belum Transfer"
-            db["lpb"][key]["submitted_at"] = now
-            db["lpb"][key]["submitted_by"] = user
-            db["lpb"][key]["submission_id"] = submission_id
-            db["lpb"][key]["draft_id"] = draft_id
-            db["lpb"][key]["target_payment_date"] = target_payment_date
-            db["lpb"][key]["jenis_pembayaran"] = cart_info.get("jenis_pembayaran", "")
-            db["lpb"][key]["keterangan"] = cart_info.get("keterangan", "")
-            db["lpb"][key]["potongan"] = float(potongan_alloc_by_lpb.get(key, 0.0) or 0.0)
-            db["lpb"][key]["nilai_pembayaran"] = float(payment_alloc_by_lpb.get(key, 0.0) or 0.0)
-            if sppd_no:
-                db["lpb"][key]["sppd_no"] = sppd_no
+    # Tulis semua perubahan ke DB di dalam lock
+    async with _PAYMENTS_DB_LOCK:
+        db = load_payments_db()
+        for rec in selected:
+            key = s(rec.get("record_id", ""))
+            if key in db.get("lpb", {}):
+                principle = s(db["lpb"][key].get("principle", ""))
+                tipe = normalize_pengajuan_type(db["lpb"][key].get("tipe_pengajuan", "LPB"))
+                group_key = f"{principle}||{tipe}"
+                cart_info = item_map.get(group_key, {})
+                db["lpb"][key]["payment_method"] = "Bank Panin" if method == "BANK_PANIN" else "Non Panin"
+                db["lpb"][key]["status_pembayaran"] = "Belum Transfer"
+                db["lpb"][key]["submitted_at"] = now
+                db["lpb"][key]["submitted_by"] = user
+                db["lpb"][key]["submission_id"] = submission_id
+                db["lpb"][key]["draft_id"] = draft_id
+                db["lpb"][key]["target_payment_date"] = target_payment_date
+                db["lpb"][key]["jenis_pembayaran"] = cart_info.get("jenis_pembayaran", "")
+                db["lpb"][key]["keterangan"] = cart_info.get("keterangan", "")
+                db["lpb"][key]["potongan"] = float(potongan_alloc_by_lpb.get(key, 0.0) or 0.0)
+                db["lpb"][key]["nilai_pembayaran"] = float(payment_alloc_by_lpb.get(key, 0.0) or 0.0)
+                if sppd_no:
+                    db["lpb"][key]["sppd_no"] = sppd_no
 
-    db["submissions"][submission_id] = {
-        "id": submission_id,
-        "created_at": now,
-        "created_by": user,
-        "draft_id": draft_id,
-        "method": method,
-        "target_payment_date": target_payment_date,
-        "record_ids": [s(r.get("record_id", "")) for r in selected],
-        "files": files,
-        "sppd_file": sppd_file,
-        "sppd_no": sppd_no,
-        "cart_items": item_map,
-    }
-    if draft_id in db.get("drafts", {}):
-        del db["drafts"][draft_id]
-    save_payments_db(db)
+        db["submissions"][submission_id] = {
+            "id": submission_id,
+            "created_at": now,
+            "created_by": user,
+            "draft_id": draft_id,
+            "method": method,
+            "target_payment_date": target_payment_date,
+            "record_ids": [s(r.get("record_id", "")) for r in selected],
+            "files": files,
+            "sppd_file": sppd_file,
+            "sppd_no": sppd_no,
+            "cart_items": item_map,
+        }
+        if draft_id in db.get("drafts", {}):
+            del db["drafts"][draft_id]
+        save_payments_db(db)
     append_audit_log(
         user,
         "payments_cart_submit",
