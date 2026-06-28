@@ -8,6 +8,7 @@
 import SidebarLayout from "@/components/SidebarLayout";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
+import AccessDenied from "@/components/AccessDenied";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -38,13 +39,11 @@ export default async function DashboardLayout({
     const permissions = dbUser?.permissions || "{}";
     const currentPath = requestHeaders.get("x-current-path") || "/";
 
-    if (!canAccessPath(currentPath, role, permissions)) {
-        redirect("/");
-    }
+    const allowed = canAccessPath(currentPath, role, permissions);
 
     return (
         <SidebarLayout role={role} permissions={permissions}>
-            {children}
+            {allowed ? children : <AccessDenied />}
             <ServiceWorkerRegistration />
             <PWAInstallPrompt />
         </SidebarLayout>

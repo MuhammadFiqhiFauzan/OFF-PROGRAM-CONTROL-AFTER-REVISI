@@ -8,6 +8,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import AccessDenied from "@/components/AccessDenied";
 import UserManagement from "./UserManagement";
 
 export default async function AdminUsersPage() {
@@ -17,7 +18,7 @@ export default async function AdminUsersPage() {
     }
 
     if (session.user.role !== "admin") {
-        redirect("/");
+        return <AccessDenied message="Halaman ini khusus untuk admin." />;
     }
 
     return <UserManagement />;

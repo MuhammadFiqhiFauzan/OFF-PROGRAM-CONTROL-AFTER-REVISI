@@ -88,6 +88,11 @@ export default function FormKontrolPage() {
 
             {/* Active tab content */}
             <div className="bg-[#1a1c23]/40 border border-white/10 rounded-xl p-4 md:p-6">
+                {visibleTabs.length === 0 && (
+                    <p className="text-sm text-slate-400 text-center py-10">
+                        Belum ada modul Form Kontrol yang tersedia untuk peran Anda. Hubungi admin bila ini keliru.
+                    </p>
+                )}
                 {effectiveTab === "jks"           && <TabJks scope={scope!} />}
                 {effectiveTab === "ao"            && <TabAo scope={scope!} />}
                 {effectiveTab === "no-order"      && <TabNoOrder scope={scope!} />}

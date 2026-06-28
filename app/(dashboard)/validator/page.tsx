@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Upload, CheckCircle, AlertTriangle, FileSpreadsheet, Play, Percent } from "lucide-react";
+import { Upload, CheckCircle, AlertTriangle, FileSpreadsheet, Play, Percent, Loader2 } from "lucide-react";
 import { resolveApiBase } from "@/lib/apiBase";
 
 export default function ValidatorPage() {
@@ -76,7 +76,17 @@ export default function ValidatorPage() {
                 </div>
             )}
 
-            {jsonResult && (
+            {isProcessing && (
+                <div className="mb-8 p-6 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center gap-4 backdrop-blur-md">
+                    <Loader2 className="text-indigo-300 animate-spin shrink-0" size={28} />
+                    <div>
+                        <h3 className="text-lg font-bold text-indigo-200">Memproses data validasi…</h3>
+                        <p className="text-sm text-indigo-300/80">Engine Python sedang mencocokkan baris penjualan dengan master promo. Mohon tunggu, jangan tutup halaman.</p>
+                    </div>
+                </div>
+            )}
+
+            {!isProcessing && jsonResult && (
                 <div className="mb-8 p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col md:flex-row items-center justify-between gap-4 backdrop-blur-md">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 border border-emerald-500/30">
