@@ -1,7 +1,7 @@
 /*
  * Tujuan: Guard server untuk seluruh route dashboard berdasarkan session Better Auth dan RBAC per halaman.
  * Caller: Semua route di grup `app/(dashboard)`.
- * Dependensi: Better Auth, Drizzle SQLite user, helper RBAC, middleware header `x-current-path`.
+ * Dependensi: Better Auth, getUserPermissions (union group ∪ legacy), helper RBAC, middleware header `x-current-path`.
  * Main Functions: DashboardLayout.
  * Side Effects: Redirect login/dashboard bila session atau permission halaman tidak valid.
  */
@@ -12,10 +12,8 @@ import AccessDenied from "@/components/AccessDenied";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { user } from "@/db/schema";
-import { canAccessPath, normalizeRole } from "@/lib/rbac";
+import { canAccessPathWithKeys, normalizeRole } from "@/lib/rbac";
+import { getUserPermissions } from "@/lib/rbac/resolve";
 
 export default async function DashboardLayout({
     children,
@@ -32,17 +30,15 @@ export default async function DashboardLayout({
     }
 
     const userId = String(session.user.id || "");
-    const [dbUser] = userId
-        ? await db.select({ role: user.role, permissions: user.permissions }).from(user).where(eq(user.id, userId)).limit(1)
-        : [];
-    const role = normalizeRole(dbUser?.role || session.user.role);
-    const permissions = dbUser?.permissions || "{}";
+    const role = normalizeRole(session.user.role);
+    // Union group ∪ legacy — resolver yang sama dengan guard API, agar halaman/sidebar/API sepakat.
+    const permKeys = userId ? [...await getUserPermissions(userId)] : [];
     const currentPath = requestHeaders.get("x-current-path") || "/";
 
-    const allowed = canAccessPath(currentPath, role, permissions);
+    const allowed = canAccessPathWithKeys(currentPath, permKeys);
 
     return (
-        <SidebarLayout role={role} permissions={permissions}>
+        <SidebarLayout role={role} permKeys={permKeys}>
             {allowed ? children : <AccessDenied />}
             <ServiceWorkerRegistration />
             <PWAInstallPrompt />

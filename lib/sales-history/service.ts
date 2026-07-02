@@ -1,14 +1,14 @@
 ﻿/*
  * Tujuan: Service query backend Sales History untuk status DB, cascade filter, tabel faktur, dan detail item INV.
  * Caller: app/api/sales-history/* route handlers.
- * Dependensi: lib/sales-history/db.ts dan lib/sales-history/search.ts.
+ * Dependensi: lib/sales-history/db.ts.
  * Main Functions: getSalesHistoryDatabaseStatus, listSalesHistoryYears, listSalesHistoryPrincipals,
  *   listSalesHistoryCustomers, listSalesHistoryInvoices, listSalesHistoryItems.
- * Side Effects: DB read-only ke sales-history-inv.db; HTTP Elasticsearch hanya saat product search aktif.
+ * Side Effects: DB read-only ke sales-history-inv.db.
  * Catatan: semua query membatasi referensi INV dan memakai range tanggal agar index tetap efektif.
+ *   Pencarian produk: SQLite fuzzy (kamus + IN-clause berindeks), toleran typo.
  */
 import { ensureSalesHistorySchema, salesClient } from "@/lib/sales-history/db";
-import { searchSalesHistoryItemsWithElasticsearch, searchSalesHistoryRefsWithElasticsearch } from "@/lib/sales-history/search";
 import { resolveFuzzyProduct } from "@/lib/sales-history/fuzzy";
 
 export type SalesHistoryInvoiceFilters = {
@@ -267,29 +267,6 @@ export async function listSalesHistoryInvoices(input: SalesHistoryInvoiceFilters
     const limit = normalizePositiveInt(input.limit, 50, 200);
     const offset = (page - 1) * limit;
 
-    if (product) {
-        try {
-            const elastic = await searchSalesHistoryRefsWithElasticsearch({
-                query: product,
-                filters: { year, principal, kodeCust },
-                limit,
-                offset,
-            });
-            if (elastic) {
-                return {
-                    invoices: await rowsForRefs(elastic.refs),
-                    total: elastic.total,
-                    totalApproximate: false,
-                    page,
-                    limit,
-                    searchBackend: elastic.backend,
-                };
-            }
-        } catch (error) {
-            console.warn("[SALES HISTORY ELASTICSEARCH FALLBACK]", error);
-        }
-    }
-
     const { where, args } = buildInvoiceWhere({ year, principal, kodeCust }, "im");
     if (product) {
         const local = await sqliteProductRefs(where, args, product, limit, offset);
@@ -328,7 +305,7 @@ export async function listSalesHistoryInvoices(input: SalesHistoryInvoiceFilters
     };
 }
 
-// Pencarian item flat (1 baris = 1 produk + No Faktur). Pakai Elasticsearch fuzzy bila tersedia, fallback SQLite LIKE.
+// Pencarian item flat (1 baris = 1 produk + No Faktur). SQLite fuzzy (kamus → IN-clause berindeks), toleran typo.
 export async function searchSalesHistoryItems(input: SalesHistoryInvoiceFilters) {
     await ensureSalesHistorySchema();
     const year = clean(input.year);
@@ -343,28 +320,7 @@ export async function searchSalesHistoryItems(input: SalesHistoryInvoiceFilters)
         return { items: [], total: 0, totalApproximate: false, page, limit, searchBackend: "none" as const };
     }
 
-    try {
-        const elastic = await searchSalesHistoryItemsWithElasticsearch({
-            query: product,
-            filters: { year, principal, kodeCust },
-            limit,
-            offset,
-        });
-        if (elastic) {
-            return {
-                items: elastic.items,
-                total: elastic.total,
-                totalApproximate: false,
-                page,
-                limit,
-                searchBackend: elastic.backend,
-            };
-        }
-    } catch (error) {
-        console.warn("[SALES HISTORY ITEM SEARCH ELASTICSEARCH FALLBACK]", error);
-    }
-
-    // Fallback SQLite fuzzy: resolusi nama lewat kamus → IN-clause berindeks (toleran typo, mis. "marei"→"marie").
+    // SQLite fuzzy: resolusi nama lewat kamus → IN-clause berindeks (toleran typo, mis. "marei"→"marie").
     // total perkiraan via limit+1 agar tak full-count 4.5jt baris.
     const { where, args } = buildInvoiceWhere({ year, principal, kodeCust }, "im");
     const pc = buildProductCond(await resolveFuzzyProduct(product));

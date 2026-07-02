@@ -7,11 +7,9 @@
 import { Percent, CalendarCheck2, DollarSign, Wallet, Database, ArrowRight, Settings2, ShieldCheck, Cpu, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { user } from "@/db/schema";
-import { canAccessPath, normalizeRole } from "@/lib/rbac";
+import { canAccessPathWithKeys } from "@/lib/rbac";
+import { getUserPermissions } from "@/lib/rbac/resolve";
 
 const MODULES = [
     {
@@ -82,12 +80,9 @@ const MODULES = [
 export default async function DashboardLanding() {
     const session = await auth.api.getSession({ headers: await headers() });
     const userId = String(session?.user?.id || "");
-    const [dbUser] = userId
-        ? await db.select({ role: user.role, permissions: user.permissions }).from(user).where(eq(user.id, userId)).limit(1)
-        : [];
-    const role = normalizeRole(dbUser?.role || session?.user?.role);
-    const permissions = dbUser?.permissions || "{}";
-    const visibleModules = MODULES.filter((mod) => canAccessPath(mod.href, role, permissions));
+    // Union group ∪ legacy — konsisten dengan guard layout & API.
+    const permKeys = userId ? await getUserPermissions(userId) : new Set<string>();
+    const visibleModules = MODULES.filter((mod) => canAccessPathWithKeys(mod.href, permKeys));
 
     return (
         <div className="max-w-7xl mx-auto pb-12 pt-4 selection:bg-indigo-500/30">

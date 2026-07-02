@@ -150,7 +150,7 @@ export default function SalesHistoryPage() {
     const [totalApprox, setTotalApprox] = useState(false);
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(false);
-    const [searchBackend, setSearchBackend] = useState<"none" | "sqlite" | "elasticsearch">("none");
+    const [searchBackend, setSearchBackend] = useState<"none" | "sqlite">("none");
     const [uploading, setUploading] = useState(false);
     const [frozen, setFrozen] = useState(true);
     const [showKeterangan, setShowKeterangan] = useState(false);
@@ -217,7 +217,7 @@ export default function SalesHistoryPage() {
                 setRows((d.items || []) as ProductRow[]);
                 setTotal(Number(d.total || 0));
                 setTotalApprox(Boolean(d.totalApproximate));
-                setSearchBackend((d.searchBackend || "none") as "none" | "sqlite" | "elasticsearch");
+                setSearchBackend((d.searchBackend || "none") as "none" | "sqlite");
             })
             .catch(() => { if (!cancelled) toast.error("Error jaringan saat memuat item."); })
             .finally(() => { if (!cancelled) setLoading(false); });

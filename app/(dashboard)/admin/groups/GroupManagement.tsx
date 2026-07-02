@@ -15,6 +15,7 @@ const MOD_LABELS: Record<string, string> = {
     validator: "Validator", off_program_control: "OFF Program Control",
     claim_workflow: "Claim Workflow", users: "Users (Admin)",
     form_kontrol: "Form Kontrol", insentif_sales: "Insentif Sales",
+    sales_history: "History Penjualan",
 };
 
 const F: React.CSSProperties = { display: "flex" };

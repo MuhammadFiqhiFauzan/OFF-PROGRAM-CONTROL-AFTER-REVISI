@@ -339,7 +339,13 @@ export function getPagePermission(pathname: string) {
     return pagePermissions.find((item) => path === item.prefix || path.startsWith(`${item.prefix}/`)) || pagePermissions[pagePermissions.length - 1];
 }
 
-export function canAccessPath(pathname: string, roleValue?: string | null, rawPermissions?: unknown): boolean {
+/**
+ * Varian key-based: cek akses halaman dari Set/array permission key efektif
+ * hasil getUserPermissions() (union group ∪ legacy). Dipakai layout/sidebar/landing
+ * agar keputusan akses halaman konsisten dengan guard API.
+ */
+export function canAccessPathWithKeys(pathname: string, keys: ReadonlySet<string> | readonly string[]): boolean {
     const permission = getPagePermission(pathname);
-    return canAccess(permission.module, permission.action, roleValue, rawPermissions);
+    const set = keys instanceof Set ? keys : new Set(keys);
+    return set.has(`${permission.module}.${permission.action}`);
 }

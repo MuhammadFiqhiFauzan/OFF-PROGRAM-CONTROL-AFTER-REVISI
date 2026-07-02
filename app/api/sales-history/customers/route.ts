@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
         const customers = await listSalesHistoryCustomers({
             year,
             principal: (searchParams.get("principal") || "").trim(),
-            q: (searchParams.get("q") || "").trim(),
+            q: (searchParams.get("q") || "").trim().slice(0, 100),
             limit: normalizePositiveInt(searchParams.get("limit"), 50, 200),
         });
         return NextResponse.json({ ok: true, customers });

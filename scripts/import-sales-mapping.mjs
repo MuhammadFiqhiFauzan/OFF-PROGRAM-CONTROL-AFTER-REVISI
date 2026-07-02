@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Tujuan: Backfill mapping Sales History dari file lokal:
  *   - Mapping_Customer.xlsx        -> tabel customer_map  (kode -> nama, alamat, kota, region, npwp)
  *   - Data_Penjualan/**.xlsx       -> tabel invoice_map   (NO_NOTA=referensi -> kode_cust, principal, salesman, tanggal)
  *   - Data_Penjualan/**.xlsx       -> tabel sales_history_item (baris item per NO_NOTA, termasuk qty+satuan)
  * Caller: dijalankan manual (sekali / saat ada data baru). Lihat perintah di bawah.
  * Dependensi: @libsql/client + xlsx (SheetJS). DB: SALES_HISTORY_DATABASE_URL || file:sales-history-inv.db.
- * Main Functions: ensureSchema, importCustomers, importInvoices, bulkIndexSalesItems, main.
+ * Main Functions: ensureSchema, importCustomers, importInvoices, main.
  * Side Effects: Membuat/memperbarui sales-history-inv.db, upsert customer_map/invoice_map, replace sales_history_item per faktur,
- *   opsional upsert Elasticsearch jika ELASTICSEARCH_URL tersedia, dan log progres ke console.
+ *   dan log progres ke console.
  * Catatan: jalur legacy/incremental; full rebuild besar pakai scripts/build-sales-history-staging.mjs.
  *   Kolom dicari by NAMA HEADER (bukan posisi) â€” toleran beda layout antar tahun.
  *   Hanya referensi INV/ yang diimpor; RJN/SRT di-skip. File diproses urut mtime ASC -> versi FIX/UPDATE terbaru menang.
@@ -55,71 +55,6 @@ async function withBusyRetry(label, fn) {
         }
     }
     throw lastError;
-}
-
-function elasticsearchConfig() {
-    const url = process.env.ELASTICSEARCH_URL?.replace(/\/+$/, "");
-    if (!url) return null;
-    return {
-        url,
-        index: process.env.ELASTICSEARCH_SALES_HISTORY_INDEX || "sales-history-items",
-        apiKey: process.env.ELASTICSEARCH_API_KEY || "",
-        username: process.env.ELASTICSEARCH_USERNAME || "",
-        password: process.env.ELASTICSEARCH_PASSWORD || "",
-    };
-}
-
-function elasticsearchHeaders(config) {
-    const headers = { "Content-Type": "application/json" };
-    if (config.apiKey) headers.Authorization = `ApiKey ${config.apiKey}`;
-    else if (config.username || config.password) headers.Authorization = `Basic ${Buffer.from(`${config.username}:${config.password}`).toString("base64")}`;
-    return headers;
-}
-
-async function ensureSalesSearchIndex(config) {
-    await fetch(`${config.url}/${encodeURIComponent(config.index)}`, {
-        method: "PUT",
-        headers: elasticsearchHeaders(config),
-        body: JSON.stringify({
-            settings: {
-                analysis: {
-                    analyzer: {
-                        sales_history_analyzer: {
-                            tokenizer: "standard",
-                            filter: ["lowercase", "asciifolding"],
-                        },
-                    },
-                },
-            },
-            mappings: {
-                properties: {
-                    referensi: { type: "keyword" },
-                    tanggal: { type: "date" },
-                    principal: { type: "keyword" },
-                    kodeCust: { type: "keyword" },
-                    kodeObjek: { type: "text", analyzer: "sales_history_analyzer", fields: { keyword: { type: "keyword" } } },
-                    namaProduk: { type: "text", analyzer: "sales_history_analyzer" },
-                },
-            },
-        }),
-    }).catch(() => undefined);
-}
-
-async function bulkIndexSalesItems(config, docs) {
-    if (!config || docs.length === 0) return;
-    for (let i = 0; i < docs.length; i += 500) {
-        const chunk = docs.slice(i, i + 500);
-        const body = chunk
-            .flatMap((doc) => [{ index: { _index: config.index, _id: doc.id } }, doc])
-            .map((line) => JSON.stringify(line))
-            .join("\n");
-        const response = await fetch(`${config.url}/_bulk?refresh=false`, {
-            method: "POST",
-            headers: elasticsearchHeaders(config),
-            body: `${body}\n`,
-        });
-        if (!response.ok) throw new Error(`Bulk Elasticsearch gagal: ${response.status}`);
-    }
 }
 
 // Excel serial / string -> ISO yyyy-mm-dd (epoch Excel 1899-12-30).
@@ -260,8 +195,6 @@ function listXlsx(dir) {
 }
 
 async function importInvoices() {
-    const elastic = elasticsearchConfig();
-    if (elastic) await ensureSalesSearchIndex(elastic);
     let files = listXlsx(SALES_DIR).sort((a, b) => a.mtime - b.mtime); // terbaru diproses terakhir -> menang
     if (ONLY_YEAR) files = files.filter((f) => f.path.replace(/\\/g, "/").includes(`Data_Penjualan/${ONLY_YEAR}/`));
     if (ONLY_FILE) files = files.filter((f) => f.path.toLowerCase().includes(ONLY_FILE));
@@ -298,7 +231,6 @@ async function importInvoices() {
         const perInvoice = new Map(); // referensi -> {kode, principal, tanggal}
         const itemRefs = [];
         const itemStmts = [];
-        const itemDocs = [];
         const canImportItems = [iCustomer, iKodeBarang, iNamaBarang, iQty, iHarga].every((i) => i >= 0);
         for (let r = 1; r < rows.length; r++) {
             const row = rows[r];
@@ -317,8 +249,6 @@ async function importInvoices() {
                 const hargaSatuan = num(row[iHarga]);
                 const hargaTotal = iNilaiJual >= 0 ? num(row[iNilaiJual]) : qty * hargaSatuan;
                 itemRefs.push(ref);
-                const kodeCust = clean(row[iKode]);
-                const principal = clean(row[iPrin]);
                 const kodeObjek = clean(row[iKodeBarang]);
                 const namaProduk = clean(row[iNamaBarang]);
                 itemStmts.push({
@@ -346,17 +276,6 @@ async function importInvoices() {
                         clean(iRem >= 0 ? row[iRem] : ""),
                     ],
                 });
-                if (elastic) {
-                    itemDocs.push({
-                        id: `${sourceFile}:${r}:${ref}:${kodeObjek}`,
-                        referensi: ref,
-                        tanggal,
-                        principal,
-                        kodeCust,
-                        kodeObjek,
-                        namaProduk,
-                    });
-                }
             }
         }
         const stmts = [];
@@ -370,7 +289,6 @@ async function importInvoices() {
         if (itemStmts.length) {
             await deleteItemsForRefs(itemRefs);
             await batchExec(itemStmts);
-            await bulkIndexSalesItems(elastic, itemDocs);
         }
         totalInvoices += stmts.length;
         totalItems += itemStmts.length;
@@ -396,5 +314,3 @@ main()
     .finally(() => {
         db.close();
     });
-
-

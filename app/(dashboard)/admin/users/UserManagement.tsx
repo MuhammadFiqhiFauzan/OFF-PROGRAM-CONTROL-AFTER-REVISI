@@ -1,29 +1,21 @@
 "use client";
 
 /*
- * Tujuan: UI admin untuk membuat user internal, reset password, role, dan permission RBAC per modul.
+ * Tujuan: UI admin untuk membuat user internal, reset password, dan role (preset akses dasar).
  * Caller: Route dashboard `/admin/users`.
  * Dependensi: Better Auth admin API, `/api/admin/users/permissions`, helper RBAC, sonner.
- * Main Functions: UserManagement, loadUsers, createUser, updateRole, savePermissions.
- * Side Effects: HTTP read/write ke API auth/admin dan update SQLite user.permissions.
+ * Main Functions: UserManagement, loadUsers, createUser, updateRole, resetPassword.
+ * Side Effects: HTTP read/write ke API auth/admin.
+ * Catatan: permission granular per modul dikelola SATU PINTU di /admin/groups (Access Group).
+ *   Matrix permission per-user dihapus agar tidak tumpang tindih dengan group.
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-    actionLabels,
-    appModules,
     appRoles,
-    moduleActions,
-    moduleLabels,
-    normalizePermissionMap,
     normalizeRole,
-    permissionMapForUser,
     roleLabels,
-    rolePermissionPresets,
-    type AppModule,
     type AppRole,
-    type PermissionAction,
-    type PermissionMap,
 } from "@/lib/rbac";
 
 type UserRow = {
@@ -54,23 +46,8 @@ async function authFetch<T>(url: string, init?: RequestInit): Promise<T> {
     return data as T;
 }
 
-function hasAction(map: PermissionMap, module: AppModule, action: PermissionAction) {
-    return Boolean(map[module]?.includes(action));
-}
-
-function togglePermission(map: PermissionMap, module: AppModule, action: PermissionAction, checked: boolean): PermissionMap {
-    const next = normalizePermissionMap(map);
-    const actions = new Set<PermissionAction>(next[module] || []);
-    if (checked) actions.add(action);
-    else actions.delete(action);
-    if (actions.size) next[module] = [...actions];
-    else delete next[module];
-    return next;
-}
-
 export default function UserManagement() {
     const [users, setUsers] = useState<UserRow[]>([]);
-    const [permissionDrafts, setPermissionDrafts] = useState<Record<string, PermissionMap>>({});
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [name, setName] = useState("");
@@ -87,12 +64,7 @@ export default function UserManagement() {
         setLoading(true);
         try {
             const data = await authFetch<{ users: UserRow[] }>("/api/admin/users/permissions");
-            const nextUsers = data.users || [];
-            setUsers(nextUsers);
-            setPermissionDrafts(Object.fromEntries(nextUsers.map((item) => [
-                item.id,
-                permissionMapForUser(item.role, item.permissions),
-            ])));
+            setUsers(data.users || []);
         } catch (error) {
             toast.error(error instanceof Error ? error.message : "Gagal memuat user");
         } finally {
@@ -160,49 +132,14 @@ export default function UserManagement() {
         }
     }
 
-    function updateDraft(userId: string, module: AppModule, action: PermissionAction, checked: boolean) {
-        setPermissionDrafts((prev) => ({
-            ...prev,
-            [userId]: togglePermission(prev[userId] || {}, module, action, checked),
-        }));
-    }
-
-    async function savePermissions(userId: string) {
-        try {
-            await authFetch("/api/admin/users/permissions", {
-                method: "POST",
-                body: JSON.stringify({ userId, permissions: permissionDrafts[userId] || {} }),
-            });
-            toast.success("Permission user tersimpan.");
-            await loadUsers();
-        } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Gagal menyimpan permission");
-        }
-    }
-
-    async function resetPermissionsToRole(userItem: UserRow) {
-        const normalizedRole = normalizeRole(userItem.role);
-        setPermissionDrafts((prev) => ({
-            ...prev,
-            [userItem.id]: rolePermissionPresets[normalizedRole],
-        }));
-        try {
-            await authFetch("/api/admin/users/permissions", {
-                method: "POST",
-                body: JSON.stringify({ userId: userItem.id, useRolePreset: true }),
-            });
-            toast.success("Permission kembali mengikuti role.");
-            await loadUsers();
-        } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Gagal reset permission");
-        }
-    }
-
     return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-bold text-white">User & RBAC</h1>
-                <p className="text-sm text-slate-400 mt-1">Kelola akun internal, role, dan akses per halaman/modul.</p>
+                <p className="text-sm text-slate-400 mt-1">
+                    Kelola akun internal, role, dan reset password. Permission granular per modul dikelola di{" "}
+                    <a href="/admin/groups" className="text-indigo-300 hover:text-indigo-200 underline">Kelola Akses Group</a>.
+                </p>
             </div>
 
             <form onSubmit={createUser} className="grid gap-3 md:grid-cols-5 bg-[#1a1c23]/70 border border-white/10 rounded-lg p-4">
@@ -235,44 +172,10 @@ export default function UserManagement() {
                                 <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400">Belum ada user.</td></tr>
                             ) : sortedUsers.map((item) => {
                                 const userRole = normalizeRole(item.role);
-                                const draft = permissionDrafts[item.id] || permissionMapForUser(userRole, item.permissions);
                                 return (
                                     <tr key={item.id} className="align-top">
                                         <td className="px-4 py-3">{item.name}</td>
-                                        <td className="px-4 py-3">
-                                            <div>{item.email}</div>
-                                            <details className="mt-3 group">
-                                                <summary className="cursor-pointer text-xs font-semibold text-indigo-300 hover:text-indigo-200">Atur permission modul</summary>
-                                                <div className="mt-3 grid gap-3 min-w-[760px]">
-                                                    {appModules.map((module) => (
-                                                        <div key={module} className="grid grid-cols-[150px_1fr] gap-3 rounded-lg border border-white/10 bg-black/25 p-3">
-                                                            <div className="text-xs font-semibold text-slate-200">{moduleLabels[module]}</div>
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {moduleActions[module].map((action) => (
-                                                                    <label key={action} className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300">
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={hasAction(draft, module, action)}
-                                                                            onChange={(event) => updateDraft(item.id, module, action, event.target.checked)}
-                                                                            className="accent-indigo-500"
-                                                                        />
-                                                                        {actionLabels[action]}
-                                                                    </label>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                    <div className="flex flex-wrap gap-2">
-                                                        <button type="button" onClick={() => savePermissions(item.id)} className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
-                                                            Simpan Permission
-                                                        </button>
-                                                        <button type="button" onClick={() => resetPermissionsToRole(item)} className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">
-                                                            Ikuti Preset Role
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </details>
-                                        </td>
+                                        <td className="px-4 py-3">{item.email}</td>
                                         <td className="px-4 py-3">
                                             <select
                                                 value={userRole}

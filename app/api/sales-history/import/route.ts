@@ -22,6 +22,9 @@ export const runtime = "nodejs";
 export const maxDuration = 300; // file besar -> beri waktu
 
 const BATCH = 1000;
+const MAX_LINE_BYTES = 1_000_000; // tolak baris CSV tunggal > ~1MB agar buf tak tumbuh tak terbatas
+// ponytail: lock in-memory single-instance per sourceFile; upgrade ke DB lock bila jalan multi-node
+const inFlight = new Set<string>();
 
 export async function POST(request: NextRequest) {
     const gate = await requirePermissionH("sales_history.manage");
@@ -31,6 +34,12 @@ export async function POST(request: NextRequest) {
     if (!request.body) {
         return NextResponse.json({ ok: false, error: "Body kosong." }, { status: 400 });
     }
+
+    // Cegah race: upload sourceFile sama bersamaan bisa interleave delete+insert -> data loss parsial.
+    if (inFlight.has(sourceFile)) {
+        return NextResponse.json({ ok: false, error: "File dengan nama sama sedang diproses. Tunggu sampai selesai." }, { status: 409 });
+    }
+    inFlight.add(sourceFile);
 
     try {
         await ensureSalesHistorySchema();
@@ -66,6 +75,9 @@ export async function POST(request: NextRequest) {
             const { done, value } = await reader.read();
             if (done) break;
             buf += decoder.decode(value, { stream: true });
+            if (buf.indexOf("\n") < 0 && buf.length > MAX_LINE_BYTES) {
+                return NextResponse.json({ ok: false, error: "Baris CSV melebihi batas ukuran." }, { status: 400 });
+            }
             let nl: number;
             while ((nl = buf.indexOf("\n")) >= 0) {
                 handleLine(buf.slice(0, nl).replace(/\r$/, ""));
@@ -80,5 +92,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         console.error("[SALES HISTORY IMPORT ERROR]", error);
         return NextResponse.json({ ok: false, error: "Gagal mengimpor data." }, { status: 500 });
+    } finally {
+        inFlight.delete(sourceFile);
     }
 }

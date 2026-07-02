@@ -95,6 +95,7 @@ next-env.d.ts
 *.apl
 *.bak
 *.bak*
+*.gz
 *.db-wal
 *.db-shm
 *.db-journal

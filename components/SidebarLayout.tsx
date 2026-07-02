@@ -9,16 +9,14 @@ import { useState } from "react";
 import { Menu, Home, Database, Server, LogOut, Percent, CalendarCheck2, DollarSign, Wallet, Settings2, FileText, Shield, ShieldCheck, ClipboardCheck, ReceiptText, Trophy, ClipboardList, History, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { usePathname } from "next/navigation";
-import { canAccessPath, normalizeRole } from "@/lib/rbac";
+import { canAccessPathWithKeys } from "@/lib/rbac";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 
-export default function SidebarLayout({ children, role, permissions }: { children: React.ReactNode; role?: string | null; permissions?: string | null }) {
+export default function SidebarLayout({ children, permKeys }: { children: React.ReactNode; role?: string | null; permKeys: string[] }) {
     // Desktop: sidebar collapse/expand. Mobile: drawer open/close (hamburger).
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileOpen, setIsMobileOpen] = useState(false);
     const pathname = usePathname();
-    const { data: session } = authClient.useSession();
-    const userRole = normalizeRole(role || session?.user?.role);
 
     const handleSignOut = async () => {
         await authClient.signOut({
@@ -47,7 +45,7 @@ export default function SidebarLayout({ children, role, permissions }: { childre
         { name: "User & RBAC", icon: Shield, href: "/admin/users" },
         { name: "Kelola Akses Group", icon: ShieldCheck, href: "/admin/groups" },
     ];
-    const navItems = allNavItems.filter((item) => canAccessPath(item.href, userRole, permissions || "{}"));
+    const navItems = allNavItems.filter((item) => canAccessPathWithKeys(item.href, permKeys));
     const activeHref = navItems
         .filter((item) => pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href)))
         .sort((a, b) => b.href.length - a.href.length)[0]?.href;
