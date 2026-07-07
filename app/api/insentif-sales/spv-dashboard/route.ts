@@ -1,14 +1,19 @@
 /*
  * Tujuan: GET agregat insentif SPV (strata Value, lib/insentif-spv-calc) per periode.
  * Caller: app/(dashboard)/insentif-sales/page.tsx (SpvIncentiveTable, view="spv").
- * Dependensi: lib/insentif-sales (getTargetsForPeriod, computeMtdByPrinciple), lib/insentif-spv-calc.
- * Main Functions: GET — group baris target per SPV (spv_name teks bebas, lihat SYSTEM_MAP
- *   catatan hierarki — belum ada tabel assignment), SUM realisasi per principal lintas sales
+ * Dependensi: lib/insentif-sales (getTargetsForPeriod, computeMtdByPrinciple), lib/insentif-spv-calc,
+ *   db/schema (spvSalesAssignment).
+ * Main Functions: GET — group baris target per SPV, SUM realisasi per principal lintas sales
  *   bawahan & channel, lalu calculateInsentifSPV.
+ *   Nama SPV per salesCode diambil dari spv_sales_assignment (Bagian C) kalau sudah di-assign,
+ *   fallback ke sales_targets.spv_name (teks bebas) kalau belum. Assignment table masih additive/
+ *   opsional — tidak breaking selama admin belum mengisi Kelola Hierarki.
  * Side Effects: DB read only.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { spvSalesAssignment } from "@/db/schema";
 import { getTargetsForPeriod, computeMtdByPrinciple } from "@/lib/insentif-sales";
 import { requirePermission } from "@/lib/rbac/resolve";
 import { calculateInsentifSPV, type SpvSalesRow } from "@/lib/insentif-spv-calc";
@@ -23,23 +28,26 @@ export async function GET(req: NextRequest) {
     const month = parseInt(searchParams.get("month") ?? String(now.getMonth() + 1), 10);
     const year = parseInt(searchParams.get("year") ?? String(now.getFullYear()), 10);
 
-    const [targets, realByPrinciple] = await Promise.all([
+    const [targets, realByPrinciple, assignments] = await Promise.all([
         getTargetsForPeriod(month, year),
         computeMtdByPrinciple(month, year),
+        db.select().from(spvSalesAssignment),
     ]);
+    const assignedSpvOf = new Map(assignments.map((a) => [a.salesCode, a.spvName]));
 
     const bySpv = new Map<string, SpvSalesRow[]>();
     for (const t of targets) {
-        if (!t.spvName) continue;
+        const spvName = assignedSpvOf.get(t.salesCode) ?? t.spvName;
+        if (!spvName) continue;
         const real = realByPrinciple.get(`${t.salesCode}|${t.principle}`);
-        const arr = bySpv.get(t.spvName) ?? [];
+        const arr = bySpv.get(spvName) ?? [];
         arr.push({
             principle: t.principle,
             targetValue: t.targetValue,
             realisasiValue: real?.realValue ?? 0,
             statusInsentif: t.statusInsentif as StatusInsentif,
         });
-        bySpv.set(t.spvName, arr);
+        bySpv.set(spvName, arr);
     }
 
     const rows = [...bySpv.entries()].map(([spvName, spvRows]) => ({
