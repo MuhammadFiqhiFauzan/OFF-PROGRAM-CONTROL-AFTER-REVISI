@@ -31,6 +31,7 @@ export const appModules = [
     "claim_workflow",
     "users",
     "sales_history",
+    "laporan_harian",
 ] as const;
 export type AppModule = (typeof appModules)[number];
 
@@ -47,6 +48,7 @@ export const moduleLabels: Record<AppModule, string> = {
     claim_workflow: "Claim Workflow",
     users: "Users & RBAC",
     sales_history: "History Penjualan",
+    laporan_harian: "Laporan Harian",
 };
 
 export const permissionActions = [
@@ -70,6 +72,7 @@ export const permissionActions = [
     "retry_post",
     "run",
     "email",
+    "send",
     "sync",
     "manage",
     "create_user",
@@ -81,6 +84,7 @@ export const permissionActions = [
 export type PermissionAction = (typeof permissionActions)[number];
 
 export const actionLabels: Record<PermissionAction, string> = {
+    send: "Kirim Email",
     view: "Lihat",
     create: "Buat",
     edit: "Edit",
@@ -123,6 +127,7 @@ export const moduleActions: Record<AppModule, readonly PermissionAction[]> = {
     claim_workflow: ["view", "create", "edit", "update", "submit", "approve", "export"],
     users: ["view", "create_user", "edit_user", "delete_user", "set_role", "set_permission", "manage"],
     sales_history: ["view", "export", "manage"],
+    laporan_harian: ["view", "upload", "send"],
 };
 
 export type PermissionMap = Partial<Record<AppModule, PermissionAction[]>>;
@@ -250,6 +255,7 @@ export const pagePermissions: Array<{ prefix: string; module: AppModule; action:
     { prefix: "/off-program-control", module: "off_program_control", action: "view" },
     { prefix: "/claim-workflow", module: "claim_workflow", action: "view" },
     { prefix: "/sales-history", module: "sales_history", action: "view" },
+    { prefix: "/laporan-harian", module: "laporan_harian", action: "view" },
     { prefix: "/", module: "dashboard", action: "view" },
 ];
 

@@ -621,17 +621,24 @@ RBAC: module `sales_history` (`view`/`export`/`manage`) di `lib/rbac/registry.ts
 
 ---
 
-## Risks / Blind Spots
+## Laporan Harian per SPV/SM (Daily Report Pipeline) — 🟠 IN PROGRESS (Tahap 0–4 selesai)
 
-| Area | Catatan |
-|---|---|
-| **Python backend integrasi Next.js** | Tidak ada shared session antar Next.js dan FastAPI. FastAPI punya auth sendiri (`auth.py`); sinkronisasi user hanya via filesystem/env, bukan DB shared. |
-| **Elasticsearch optional** | Jika env tidak di-set, search fallback ke in-memory fuzzy. Perilaku ini tidak eksplisit diuji di test script. |
-| **PPh HOLD** | Kolom PPh disiapkan di schema tapi perhitungan final ditahan (`// PPh HOLD` tersebar di beberapa file). Belum aktif secara bisnis. |
-| **Phase R7 (Multi No Claim)** | Fitur `claim_submission` tabel (R7a+) masih dalam rollout bertahap. Phase R7b-R7k tercakup di `scripts/test-r7*.mjs` tapi belum semua route production-ready. |
-| **Webhook Accurate IP whitelist** | Kode whitelist ada tapi baris `return 403` dikomentari. Di production, IP filtering harus diaktifkan manual. |
-| **`config/`** | Folder berisi data statik (principles, dll) — tidak ter-trace penuh karena bukan TypeScript eksportabel; kemungkinan JSON/YAML. |
-| **`runtime/` path** | Direktori file PDF dibuat dinamis saat runtime. Tidak ada cleanup otomatis; bisa membesar di production jika tidak ada cron/purge. |
-| **`app/(dashboard)/finance/page.tsx`** | Memanggil Python FastAPI backend langsung via `NEXT_PUBLIC_FASTAPI_BASE_URL`. Jika backend mati, halaman finance tidak berfungsi. |
-| **Docker vs dev** | `drizzle.config.ts` hardcode `file:sqlite.db` (bukan env). Perlu disesuaikan jika path container berbeda dari root. |
-| **`rekprinciple.xlsx`** | File Excel di root — tidak jelas apakah dipakai runtime atau hanya referensi manual. |
+> Blueprint desain — belum ada kode. Menggantikan pipeline Excel lama (Power Query `2.3 To SPV dan SM New.xlsx` + `generate_laporan_from_sheets.exe` + `kirim_laporan_gui.exe`).
+> Tujuan: **1× upload → laporan per SPV/SM (email) + feed dashboard sales**, tanpa buka Excel.
+
+**Masalah lama (terukur):** refresh Power Query ~15–20 mnt + generate ~15 mnt (~35 mnt total). Sebab utama audit:
+- Query `SalesBase` (baca `2. To Format Laporan.xlsx` = 132.120 baris × 63 kol; 8 `Table.NestedJoin` + 5 `Table.Group`) **dihitung ulang 22×** karena 22 query pakai `Source = SalesBase` **tanpa `Table.Buffer`**.
+- Semua data di-load ke worksheet (bukan Data Model) → file **86 MB**, .xlsx (XML). 0 formula/0 conditional-format di sheet besar → recalc/volatile BUKAN penyebab.
+
+**Alur target:**
+```
+UI: modul /laporan-harian (atau tab di /insentif-sales)
+  -> POST /api/laporan-harian/upload  (multipart: "1. Paste Data.xlsx", "3. Stock.xlsx")
+     -> requirePermission("laporan_harian.upload")
+     -> teruskan ke python_backend FastAPI: POST /laporan-harian/process
+        -> pandas replika logika Power Query SalesBase:
+           merge flag AO/EC/IA, Nota Retur/Batal, map Golongan(SPV)+NAMA SM, Kategori Baru
+        -> output: (a) rows per SPV & per SM, (b) rows stock per SPV, (c) agregat progress harian
+     -> tulis file per-SPV/SM ke runtime/laporan-harian/<tanggal>/
+     -> feed dashboard: BULK upsert ke sales_daily_progress (batch, hindari N+1)
+  <- { ok, runId, ringkasan per SPV, daftar penerima (PREVIEW, belum k

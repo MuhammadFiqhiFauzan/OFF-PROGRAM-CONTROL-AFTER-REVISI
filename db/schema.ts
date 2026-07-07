@@ -911,35 +911,44 @@ export const accessGroup = sqliteTable("access_group", {
 // Divalidasi ke permission registry (P3) saat tulis — TIDAK ada tabel permissions.
 export const groupPermission = sqliteTable("group_permission", {
     groupId: text("group_id").notNull().references(() => accessGroup.id),
-    permissionKey: text("permission_key").notNull(),
-}, (t) => ({
-    pk: primaryKey({ columns: [t.groupId, t.permissionKey] }),
-    groupIdx: index("idx_group_permission_group").on(t.groupId),
-}));
-
-export const userGroup = sqliteTable("user_group", {
-    userId: text("user_id").notNull().references(() => user.id),
-    groupId: text("group_id").notNull().references(() => accessGroup.id),
-    assignedBy: text("assigned_by"),
-    assignedAt: integer("assigned_at", { mode: "timestamp" }).notNull(),
-}, (t) => ({
-    pk: primaryKey({ columns: [t.userId, t.groupId] }),
-    userIdx: index("idx_user_group_user").on(t.userId),
-    groupIdx: index("idx_user_group_group").on(t.groupId),
-}));
-
-// Jejak audit perubahan otorisasi: siapa ubah group/permission siapa, kapan.
-export const permissionAuditLog = sqliteTable("permission_audit_log", {
+    permissionKey: text("p
+// --- Laporan Harian per SPV/SM (modul baru) --- //
+// Menggantikan pipeline Excel lama (Power Query 2.3 + generate_laporan.exe + kirim_laporan.exe).
+// report_recipient = pengganti mapping_laporan.csv (keyword SPV -> daftar email).
+// report_run       = audit tiap proses upload/kirim (dry-run vs sent).
+export const reportRecipient = sqliteTable("report_recipient", {
     id: text("id").primaryKey(),
-    actorUserId: text("actor_user_id"),
-    actorName: text("actor_name"),
-    action: text("action").notNull(), // "group.create" | "user_group.assign" | "group_permission.add" | ...
-    targetUserId: text("target_user_id"),
-    targetGroupId: text("target_group_id"),
-    detail: text("detail", { mode: "json" }),
+    keyword: text("keyword").notNull().unique(),   // mis. "ANDRI", "MOTASA 1" (match nama file/SPV)
+    emails: text("emails").notNull(),              // dipisah koma/titik-koma
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const reportRun = sqliteTable("report_run", {
+    id: text("id").primaryKey(),
+    reportDate: text("report_date").notNull(),     // YYYY-MM-DD periode laporan
+    status: text("status").notNull().default("dry_run"), // 'dry_run' | 'sent' | 'failed'
+    fileCount: integer("file_count").notNull().default(0),
+    emailCount: integer("email_count").notNull().default(0),
+    salesRows: integer("sales_rows").notNull().default(0),
+    progressRows: integer("progress_rows").notNull().default(0),
+    note: text("note"),
+    uploadedBy: text("uploaded_by"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 }, (t) => ({
-    actorIdx: index("idx_pal_actor").on(t.actorUserId),
-    targetUserIdx: index("idx_pal_target_user").on(t.targetUserId),
-    targetGroupIdx: index("idx_pal_target_group").on(t.targetGroupId),
+    dateIdx: index("idx_report_run_date").on(t.reportDate),
+}));
+
+// log per-penerima tiap run (dry-run preview + hasil kirim)
+export const reportRunRecipient = sqliteTable("report_run_recipient", {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => reportRun.id),
+    keyword: text("keyword").notNull(),
+    email: text("email").notNull(),
+    fileName: text("file_name"),
+    sendStatus: text("send_status").notNull().default("pending"), // 'pending' | 'sent' | 'failed'
+    error: text("error"),
+}, (t) => ({
+    runIdx: index("idx_rrr_run").on(t.runId),
 }));

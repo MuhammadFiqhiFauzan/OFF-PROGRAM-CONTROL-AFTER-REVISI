@@ -1,10 +1,17 @@
 import nodemailer from "nodemailer";
 
+interface EmailAttachment {
+    filename: string;
+    content: Buffer | Uint8Array;
+    contentType?: string;
+}
+
 interface SendEmailOptions {
-    to: string;
+    to: string | string[];
     subject: string;
     text: string;
     html?: string;
+    attachments?: EmailAttachment[];
 }
 
 const transporter = nodemailer.createTransport({
@@ -17,7 +24,7 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-export async function sendEmail({ to, subject, text, html }: SendEmailOptions) {
+export async function sendEmail({ to, subject, text, html, attachments }: SendEmailOptions) {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
         console.warn("⚠️ SMTP credentials not configured. Email blocked:", { to, subject });
         return false;
@@ -26,10 +33,15 @@ export async function sendEmail({ to, subject, text, html }: SendEmailOptions) {
     try {
         const info = await transporter.sendMail({
             from: process.env.SMTP_FROM || `"ERP Support" <${process.env.SMTP_USER}>`,
-            to,
+            to: Array.isArray(to) ? to.join(", ") : to,
             subject,
             text,
             html: html || `<p>${text}</p>`,
+            attachments: attachments?.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                contentType: a.contentType,
+            })),
         });
 
         console.log("✉️ Email sent successfully! Message ID:", info.messageId);
