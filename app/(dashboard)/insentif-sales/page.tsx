@@ -1234,29 +1234,37 @@ function AdminView({ rows }: { rows: Salesman[] }) {
     );
 }
 
-// ── Kelola Hierarki (Bagian C) — additive, BELUM dipakai kalkulasi/scoping apapun ──
+// ── Kelola Hierarki (Bagian C) — assignment additive; blok Link Akun mengaktifkan
+// scoping "SPV/SM cuma lihat bawahan sendiri" secara opt-in per user ──────────────
 interface SpvSalesAssignmentRow { id: string; salesCode: string; spvName: string; }
 interface SmSpvAssignmentRow { id: string; spvName: string; smName: string; }
+interface UserIdentityRow { id: string; name: string; email: string; hierarchyRole: "spv" | "sm" | null; hierarchyName: string | null; }
 
 function HierarchyAssignmentSection() {
     const [spvSales, setSpvSales] = useState<SpvSalesAssignmentRow[]>([]);
     const [smSpv, setSmSpv] = useState<SmSpvAssignmentRow[]>([]);
+    const [users, setUsers] = useState<UserIdentityRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [newSalesCode, setNewSalesCode] = useState("");
     const [newSpvName, setNewSpvName] = useState("");
     const [newSpvName2, setNewSpvName2] = useState("");
     const [newSmName, setNewSmName] = useState("");
+    const [selUserId, setSelUserId] = useState("");
+    const [selRole, setSelRole] = useState<"spv" | "sm">("spv");
+    const [selName, setSelName] = useState("");
     const [saving, setSaving] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const [r1, r2] = await Promise.all([
+            const [r1, r2, r3] = await Promise.all([
                 fetch("/api/insentif-sales/hierarchy/spv-sales"),
                 fetch("/api/insentif-sales/hierarchy/sm-spv"),
+                fetch("/api/insentif-sales/hierarchy/user-identity"),
             ]);
             setSpvSales(r1.ok ? ((await r1.json()).rows ?? []) : []);
             setSmSpv(r2.ok ? ((await r2.json()).rows ?? []) : []);
+            setUsers(r3.ok ? ((await r3.json()).users ?? []) : []);
         } catch {
             toast.error("Gagal memuat data hierarki.");
         } finally {
@@ -1265,6 +1273,40 @@ function HierarchyAssignmentSection() {
     }, []);
 
     useEffect(() => { load(); }, [load]);
+
+    async function linkIdentity() {
+        if (!selUserId || !selName.trim()) { toast.error("Pilih user & isi nama identitas."); return; }
+        setSaving(true);
+        try {
+            const res = await fetch("/api/insentif-sales/hierarchy/user-identity", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: selUserId, hierarchyRole: selRole, hierarchyName: selName.trim() }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? "Gagal simpan");
+            toast.success("Identitas tersimpan — scoping aktif untuk user ini.");
+            setSelUserId(""); setSelName("");
+            load();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Gagal simpan");
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function unlinkIdentity(userId: string) {
+        try {
+            const res = await fetch("/api/insentif-sales/hierarchy/user-identity", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, hierarchyRole: null, hierarchyName: null }),
+            });
+            if (!res.ok) throw new Error();
+            toast.success("Scoping dicabut — user kembali lihat semua data.");
+            load();
+        } catch {
+            toast.error("Gagal cabut identitas.");
+        }
+    }
 
     async function addSpvSales() {
         if (!newSalesCode.trim() || !newSpvName.trim()) { toast.error("Kode Sales & Nama SPV wajib diisi."); return; }
@@ -1330,7 +1372,7 @@ function HierarchyAssignmentSection() {
 
     return (
         <div className="bg-[#1a1c23]/60 rounded-xl border border-white/10 p-5">
-            <SectionTitle icon={Users} no={4} title="Kelola Hierarki (Belum Aktif)" desc="Assignment Sales → SPV → SM — belum dipakai kalkulasi insentif maupun scoping akses" />
+            <SectionTitle icon={Users} no={4} title="Kelola Hierarki" desc="Assignment Sales → SPV → SM, dipakai grouping insentif SPV — scoping akses hanya aktif untuk user yang di-link di blok bawah" />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-3">
                 <div>
                     <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Sales → SPV</div>
@@ -1367,6 +1409,32 @@ function HierarchyAssignmentSection() {
                             </div>
                         ))}
                     </div>
+                </div>
+            </div>
+            <div className="mt-6 pt-6 border-t border-white/10">
+                <div className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">⚠ Link Akun Login → Identitas SPV/SM (Scoping Akses)</div>
+                <p className="text-[11px] text-slate-500 mb-3">Setelah di-link, user ini HANYA lihat data timnya sendiri di Dashboard Sales/SPV/SM. Cabut untuk kembalikan ke lihat-semua (default).</p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                    <select className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-500 w-56" value={selUserId} onChange={(e) => setSelUserId(e.target.value)}>
+                        <option value="">— Pilih user —</option>
+                        {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.email})</option>)}
+                    </select>
+                    <select className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-500 w-24" value={selRole} onChange={(e) => setSelRole(e.target.value as "spv" | "sm")}>
+                        <option value="spv">SPV</option>
+                        <option value="sm">SM</option>
+                    </select>
+                    <input className={inputCls} placeholder="Nama identitas (persis spv_name/sm_name)" value={selName} onChange={(e) => setSelName(e.target.value)} />
+                    <button onClick={linkIdentity} disabled={saving} className="px-3 py-1.5 rounded bg-amber-600/40 border border-amber-500/40 text-amber-200 text-xs disabled:opacity-50 shrink-0">+ Link</button>
+                </div>
+                <div className="max-h-48 overflow-y-auto border border-white/10 rounded-lg divide-y divide-white/5">
+                    {loading ? <div className="p-3 text-xs text-slate-500">Memuat…</div> : users.filter((u) => u.hierarchyRole).length === 0 ? (
+                        <div className="p-3 text-xs text-slate-500 italic">Belum ada user yang di-scope — semua user lihat semua data (default).</div>
+                    ) : users.filter((u) => u.hierarchyRole).map((u) => (
+                        <div key={u.id} className="flex items-center justify-between px-3 py-2 text-xs">
+                            <span className="text-slate-300">{u.name} — <span className="text-amber-300 uppercase">{u.hierarchyRole}</span> <span className="text-indigo-300">{u.hierarchyName}</span></span>
+                            <button onClick={() => unlinkIdentity(u.id)} className="text-slate-600 hover:text-rose-400" title="Cabut scoping">×</button>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>

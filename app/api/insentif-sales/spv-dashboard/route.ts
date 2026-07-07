@@ -16,6 +16,7 @@ import { db } from "@/lib/db";
 import { spvSalesAssignment } from "@/db/schema";
 import { getTargetsForPeriod, computeMtdByPrinciple } from "@/lib/insentif-sales";
 import { requirePermission } from "@/lib/rbac/resolve";
+import { getScopeForUser } from "@/lib/insentif-hierarchy-scope";
 import { calculateInsentifSPV, type SpvSalesRow } from "@/lib/insentif-spv-calc";
 import type { StatusInsentif } from "@/lib/insentif-sales-calc";
 
@@ -28,12 +29,16 @@ export async function GET(req: NextRequest) {
     const month = parseInt(searchParams.get("month") ?? String(now.getMonth() + 1), 10);
     const year = parseInt(searchParams.get("year") ?? String(now.getFullYear()), 10);
 
-    const [targets, realByPrinciple, assignments] = await Promise.all([
+    const [rawTargets, realByPrinciple, assignments, scope] = await Promise.all([
         getTargetsForPeriod(month, year),
         computeMtdByPrinciple(month, year),
         db.select().from(spvSalesAssignment),
+        getScopeForUser(gate.session.user.id),
     ]);
     const assignedSpvOf = new Map(assignments.map((a) => [a.salesCode, a.spvName]));
+    // scope null = tidak ada scoping (default). Non-null = user SPV/SM opt-in — grouping
+    // SPV di bawah otomatis cuma berisi timnya sendiri (SPV: 1 grup; SM: SPV bawahannya saja).
+    const targets = scope === null ? rawTargets : rawTargets.filter((t) => scope.has(t.salesCode));
 
     const bySpv = new Map<string, SpvSalesRow[]>();
     for (const t of targets) {

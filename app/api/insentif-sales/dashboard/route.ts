@@ -23,6 +23,7 @@ import {
     getTargetsForPeriod,
 } from "@/lib/insentif-sales";
 import { requirePermission } from "@/lib/rbac/resolve";
+import { getScopeForUser } from "@/lib/insentif-hierarchy-scope";
 import {
     computeExclusive,
     computeMix,
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
     const principle = searchParams.get("principle") ?? undefined;
     const branch = searchParams.get("branch") ?? undefined;
 
-    const [targets, realByPrinciple, supportRows, paymentRows] = await Promise.all([
+    const [rawTargets, realByPrinciple, supportRows, paymentRows, scope] = await Promise.all([
         getTargetsForPeriod(month, year, principle, branch),
         computeMtdByPrinciple(month, year),
         db
@@ -57,7 +58,11 @@ export async function GET(req: NextRequest) {
             })
             .from(incentivePayments)
             .where(and(eq(incentivePayments.periodMonth, month), eq(incentivePayments.periodYear, year))),
+        getScopeForUser(gate.session.user.id),
     ]);
+    // scope null = tidak ada scoping (perilaku existing/default). Non-null = user SPV/SM
+    // opt-in (lib/insentif-hierarchy-scope) — cuma lihat salesCode bawahannya sendiri.
+    const targets = scope === null ? rawTargets : rawTargets.filter((t) => scope.has(t.salesCode));
 
     // Skema insentif konstanta-bobot berlaku untuk GT/TT (sinonim). MT: belum ada aturan → 0.
     const isSchemeChannel = (ch: string) => ch === "GT" || ch === "TT";

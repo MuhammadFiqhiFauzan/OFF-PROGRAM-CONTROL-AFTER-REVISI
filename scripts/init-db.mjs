@@ -553,6 +553,8 @@ const migrations = [
   `ALTER TABLE off_batch ADD COLUMN created_by_role TEXT;`,
   `ALTER TABLE sales_targets ADD COLUMN tipe_sales TEXT NOT NULL DEFAULT 'exclusive';`,
   `ALTER TABLE sales_targets ADD COLUMN status_insentif TEXT NOT NULL DEFAULT 'distributor_principle';`,
+  `ALTER TABLE user ADD COLUMN hierarchyRole TEXT;`,
+  `ALTER TABLE user ADD COLUMN hierarchyName TEXT;`,
   `ALTER TABLE off_batch_item ADD COLUMN no_claim TEXT;`,
   `ALTER TABLE off_batch_item ADD COLUMN no_rekening TEXT;`,
   `ALTER TABLE off_batch_item ADD COLUMN finance_payment_status TEXT NOT NULL DEFAULT 'unpaid';`,

@@ -18,6 +18,12 @@ export const user = sqliteTable("user", {
     banned: integer('banned', { mode: 'boolean' }).default(false),
     banReason: text('banReason'),
     banExpires: integer('banExpires', { mode: 'timestamp' }),
+    // Identitas hierarki insentif (Bagian C, opt-in per-user) — null = tidak ada scoping,
+    // user lihat semua sesuai permission normal (perilaku existing, tidak berubah).
+    // 'spv' | 'sm' | null. Diisi manual oleh admin lewat Kelola Hierarki kalau mau
+    // enforce "SPV/SM cuma lihat bawahan sendiri". Lihat lib/insentif-hierarchy-scope.ts.
+    hierarchyRole: text('hierarchyRole'),
+    hierarchyName: text('hierarchyName'), // exact spv_name/sm_name string di sales_targets
     createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull()
 });
