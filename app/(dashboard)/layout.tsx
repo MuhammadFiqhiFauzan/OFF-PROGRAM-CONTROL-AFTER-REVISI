@@ -9,6 +9,7 @@ import SidebarLayout from "@/components/SidebarLayout";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import AccessDenied from "@/components/AccessDenied";
+import ChatWidget from "@/components/ChatWidget";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -42,6 +43,7 @@ export default async function DashboardLayout({
             {allowed ? children : <AccessDenied />}
             <ServiceWorkerRegistration />
             <PWAInstallPrompt />
+            <ChatWidget />
         </SidebarLayout>
     );
 }

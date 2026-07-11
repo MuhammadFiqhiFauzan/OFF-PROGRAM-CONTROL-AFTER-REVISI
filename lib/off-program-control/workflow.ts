@@ -1,4 +1,12 @@
-import { offFinanceStatuses } from "./constants";
+import {
+  offStatuses,
+  offSmStatuses,
+  offClaimStatuses,
+  offOmStatuses,
+  offFinalStatuses,
+  offFinanceStatuses,
+  type OffBatchStatus,
+} from "./constants";
 import type { OffBatchRow, OffItemRow, OffPaymentRow } from "./types";
 
 export function canProcessFinancePayment(batch: OffBatchRow) {
@@ -38,15 +46,17 @@ export function paymentsHaveProofs(payments: OffPaymentRow[]) {
   );
 }
 
-type BatchProgressSource = Pick<
-  OffBatchRow,
-  | "status"
-  | "financeStatus"
-  | "finalStatus"
-  | "omStatus"
-  | "claimStatus"
-  | "smStatus"
->;
+type BatchProgressSource = {
+  // string fallback diperlukan karena Drizzle menginfer status sebagai string,
+  // bukan OffBatchStatus. Union memastikan literal baru di fungsi ini tetap
+  // tervalidasi terhadap konstanta yang terdaftar.
+  status: OffBatchStatus | string;
+  financeStatus: string;
+  finalStatus: string;
+  omStatus: string;
+  claimStatus: string;
+  smStatus: string;
+};
 
 type FinalChecklistSource = Pick<
   OffItemRow,
@@ -64,36 +74,40 @@ export function computeBatchProgress(batch: BatchProgressSource): number {
   const financeStatus = batch.financeStatus;
   const finalStatus = batch.finalStatus;
 
-  if (status === "Cancelled" || status === "Cancelled by OM") return 0;
-  if (finalStatus === "Completed" || status === "Completed") return 100;
-  if (finalStatus === "Fully Refunded") return 100;
-  if (finalStatus === "Pending Refund" || finalStatus === "Partially Refunded" || status === "Overpaid - Pending Refund") return 92;
-  if (finalStatus === "Incomplete Documents") return 90;
-  if (finalStatus === "Waiting Claim Final Verification" || status === "Paid")
-    return 85;
-  if (financeStatus === "Partial Paid" || status === "Partial Paid") return 75;
+  if (status === offStatuses.cancelled || status === offStatuses.cancelledByOm) return 0;
+  if (finalStatus === offFinalStatuses.completed || status === offStatuses.completed) return 100;
+  if (finalStatus === offFinalStatuses.fullyRefunded) return 100;
   if (
-    batch.omStatus === "Approved" &&
-    ["Waiting Payment", "Not Started"].includes(financeStatus)
-  )
-    return 65;
+    finalStatus === offFinalStatuses.pendingRefund ||
+    finalStatus === offFinalStatuses.partiallyRefunded ||
+    // ponytail: status legacy — tidak lagi ditulis ke DB baru, dipertahankan
+    // agar baris lama tetap mendapat progress 92 bukan fallback 10.
+    status === offStatuses.overpaidPendingRefund
+  ) return 92;
+  if (finalStatus === offFinalStatuses.incompleteDocuments) return 90;
   if (
-    batch.claimStatus === "Approved" ||
-    status === "Claim Approved" ||
-    status === "Ready for OM" ||
-    status === "Waiting OM"
-  )
-    return 50;
-  if (batch.smStatus === "Approved by SM" || status === "Approved by SM")
-    return 35;
-  if (status === "Submitted to SM" || batch.smStatus === "Waiting Review")
-    return 20;
+    finalStatus === offFinalStatuses.waitingClaimFinalVerification ||
+    status === offStatuses.paid
+  ) return 85;
+  if (financeStatus === offFinanceStatuses.partialPaid || status === offStatuses.partialPaid) return 75;
   if (
-    status === "Draft" ||
-    status === "Returned by SM" ||
-    status === "Returned by Claim"
-  )
-    return 10;
+    batch.omStatus === offOmStatuses.approved &&
+    ([offFinanceStatuses.waitingPayment, offFinanceStatuses.notStarted] as string[]).includes(financeStatus)
+  ) return 65;
+  if (
+    batch.claimStatus === offClaimStatuses.approved ||
+    status === offStatuses.claimApproved
+    // ponytail: "Ready for OM" dan "Waiting OM" dihapus — status legacy yang
+    // tidak lagi ditulis ke DB. Data lama dengan nilai ini akan fallback ke 10
+    // (Draft level), yang acceptable untuk record orphan.
+  ) return 50;
+  if (batch.smStatus === offSmStatuses.approvedBySm || status === offStatuses.approvedBySm) return 35;
+  if (status === offStatuses.submittedToSm || batch.smStatus === offSmStatuses.waitingReview) return 20;
+  if (
+    status === offStatuses.draft ||
+    status === offStatuses.returnedBySm ||
+    status === offStatuses.returnedByClaim
+  ) return 10;
   return 10;
 }
 

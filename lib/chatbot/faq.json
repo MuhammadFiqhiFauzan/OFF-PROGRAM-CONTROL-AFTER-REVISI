@@ -1,0 +1,931 @@
+[
+  {
+    "keywords": [
+      "off program",
+      "off-program",
+      "program control",
+      "apa itu opc"
+    ],
+    "question": "Apa itu OFF Program Control?",
+    "answer": "OFF Program Control (OPC) adalah modul untuk mengelola biaya promosi off-program ke principal. Mencakup seluruh siklus: input supervisor → review SM → validasi klaim → persetujuan OM → pembayaran finance → verifikasi final → refund jika ada → selesai.\n\n25 principal didukung: RB, FKS, FON, REBO, MI, PAS, SPS, GDI, DOLPHIN, UNIBIS, URC, HEINZ, ENI, NATUR, MR, PRISKILA, USM, VINDA, KINO, ABC, CUSSONS, SHINZUI, FRS, MOTASA, PURATOS.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "submit opc",
+      "submit batch",
+      "kirim opc",
+      "input batch",
+      "buat batch"
+    ],
+    "question": "Bagaimana cara submit OPC?",
+    "answer": "Untuk submit OPC:\n1. Buka menu Off Program Control\n2. Buat batch baru (pilih principal, bulan, tahun)\n3. Tambah item (no surat, no claim, nama program, toko, barang, nominal)\n4. Pilih tipe program: Display, Visibility, Promo On Store, Event, atau Sample\n5. Upload dokumen (kwitansi, SKP, FP, PC, foto, rekap)\n6. Klik 'Submit ke SM'\n\nBatch akan masuk antrian review Sales Manager.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "status opc",
+      "alur opc",
+      "workflow opc",
+      "tahapan opc",
+      "siklus opc"
+    ],
+    "question": "Apa saja status dan alur OPC?",
+    "answer": "Alur lengkap OPC (8 tahap):\n\n1. **Draft** — Supervisor input batch\n2. **Submitted to SM** — Menunggu review SM\n3. **Approved by SM** — SM setujui, masuk antrian klaim\n4. **Claim Approved** — Klaim validasi dan setujui\n5. **OM Approved** — Operational Manager setujui\n6. **Partial Paid / Paid** — Finance proses pembayaran\n7. **Completed** — Verifikasi final selesai\n\nStatus tambahan: Returned by SM, Returned by Claim, Cancelled by OM, Returned to Finance.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "supervisor",
+      "sebagai supervisor",
+      "kerja supervisor"
+    ],
+    "question": "Apa yang bisa dilakukan supervisor di OPC?",
+    "answer": "Sebagai Supervisor, Anda bisa:\n- **Buat batch** baru untuk principal\n- **Edit batch** yang dikembalikan oleh SM\n- **Submit batch** ke Sales Manager\n- **Submit refund** jika ada pengembalian\n- **Lihat diskon** yang dikelola\n\nAnda hanya bisa melihat batch yang Anda buat sendiri. Setelah submit, batch terkunci dan tidak bisa diedit.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "sales manager",
+      "approve sm",
+      "review sm",
+      "sebagai sm"
+    ],
+    "question": "Apa yang bisa dilakukan Sales Manager di OPC?",
+    "answer": "Sebagai Sales Manager, Anda bisa:\n- **Review batch** dari supervisor\n- **Approve batch** — batch lolos ke tahap klaim\n- **Return batch** — kembalikan ke supervisor dengan catatan\n- **Submit refund** jika diperlukan\n\nTab yang bisa diakses: Overview dan Sales.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "operational manager",
+      "approve om",
+      "keputusan om",
+      "sebagai om"
+    ],
+    "question": "Apa yang bisa dilakukan Operational Manager di OPC?",
+    "answer": "Sebagai Operational Manager, Anda bisa:\n- **Approve batch** — setujui untuk pembayaran\n- **Cancel batch** — batalkan batch dengan catatan\n\nOM adalah approval terakhir sebelum pembayaran. Tab yang bisa diakses: Overview dan OM.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "claim workflow",
+      "klaim",
+      "proses klaim"
+    ],
+    "question": "Apa itu Claim Workflow?",
+    "answer": "Claim Workflow adalah modul untuk mengelola pengajuan klaim ke principal setelah OPC di-approve OM. Fitur:\n- Assign No Claim (auto-generate berdasarkan rule)\n- Edit pajak (DPP, PPN, PPh)\n- Generate dokumen: surat klaim, summary, receipt (PDF)\n- Submit ke principal\n- Tracking pembayaran\n- Outstanding monitoring\n\nStatus: Draft → Need Revision → Ready to Submit → Submitted to Principal → Partially Paid → Paid → Closed.",
+    "links": [
+      {
+        "label": "Buka Claim Workflow",
+        "href": "/claim-workflow"
+      }
+    ],
+    "category": "claim"
+  },
+  {
+    "keywords": [
+      "multi no claim",
+      "submission",
+      "per pengajuan",
+      "per program",
+      "per toko",
+      "multi claim"
+    ],
+    "question": "Apa itu Multi No Claim?",
+    "answer": "Multi No Claim (Phase R7a) memungkinkan satu claim workflow memiliki beberapa submission:\n\n**Scope:**\n- per_pengajuan (default) — satu No Claim per batch\n- per_program — satu No Claim per tipe program\n- per_toko — satu No Claim per toko\n- per_item — satu No Claim per item\n- custom — scope manual\n\nSetiap submission punya No Claim, dokumen, dan tracking pembayaran sendiri.",
+    "category": "claim"
+  },
+  {
+    "keywords": [
+      "no claim",
+      "assign no claim",
+      "nomor claim",
+      "assign claim"
+    ],
+    "question": "Bagaimana cara assign No Claim?",
+    "answer": "No Claim di-assign otomatis berdasarkan rule yang dikonfigurasi. Setiap claim workflow bisa memiliki multiple submission (Phase R7a - Multi No Claim), masing-masing dengan No Claim, dokumen, dan tracking pembayaran sendiri.\n\nScope submission: per_pengajuan (default), per_program, per_toko, per_item, custom.",
+    "links": [
+      {
+        "label": "Buka Claim Workflow",
+        "href": "/claim-workflow"
+      }
+    ],
+    "category": "claim"
+  },
+  {
+    "keywords": [
+      "bayar opc",
+      "kelola pembayaran",
+      "menu pembayaran",
+      "payment",
+      "pembayaran",
+      "sppd"
+    ],
+    "question": "Bagaimana cara mengelola pembayaran?",
+    "answer": "Pembayaran dikelola di menu Pembayaran/SPPD:\n\n**Pembayaran:**\n- Upload LPB (Laporan Penerimaan Barang) via Excel\n- Input manual: tipe CBD, no LPB, principle, invoice, nilai\n- Editable grid dengan filter dan search\n- Compile ke cart dan submit dengan metode bayar\n\n**SPPD (Surat Perintah Pembayaran Dana):**\n- Konfigurasi nomor SPPD\n- Format: {seq}/SPA/PDSB/{bulan_romawi}/{tahun}\n- Generate dan download template",
+    "links": [
+      {
+        "label": "Buka Pembayaran",
+        "href": "/payments"
+      },
+      {
+        "label": "Format SPPD",
+        "href": "/payments/sppd"
+      }
+    ],
+    "category": "payment"
+  },
+  {
+    "keywords": [
+      "insentif sales",
+      "hitung insentif",
+      "kpi",
+      "dashboard sales"
+    ],
+    "question": "Apa itu modul Insentif Sales?",
+    "answer": "Modul Insentif Sales menghitung insentif berdasarkan pencapaian KPI:\n\n**4 KPI Types:**\n- **Value** (DPP sales): tier 250K-1.2M\n- **EC** (Effective Call): tier 150K-350K\n- **AO** (Aktif Outlet): tier 200K-450K\n- **IA** (Item Super/Toko): tier 175K-400K\n\n**5 Dashboard Views:**\n- Dashboard Sales (data sendiri)\n- Dashboard SPV (tim)\n- Dashboard SM (multi-tim)\n- Input Penjualan (admin upload target)\n- Verifikasi Finance (proses bayar)\n\n**Status pembayaran:** belum, lunas, tunggakan.",
+    "links": [
+      {
+        "label": "Buka Insentif Sales",
+        "href": "/insentif-sales"
+      }
+    ],
+    "category": "sales"
+  },
+  {
+    "keywords": [
+      "form kontrol",
+      "journey",
+      "jks",
+      "ao control"
+    ],
+    "question": "Apa itu Form Kontrol SUPER?",
+    "answer": "Form Kontrol SUPER adalah sistem kontrol field sales dengan 9 modul:\n\n1. **JKS** — Jadwal Kunjungan Salesman (master data kunjungan)\n2. **AO Harian** — Tracking kunjungan harian dengan GPS + foto\n3. **Toko Tidak Order** — Tracking alasan no-order\n4. **Laporan Harian** — Ringkasan kunjungan salesman\n5. **Briefing SPV** — Briefing pagi/sore dengan agenda\n6. **Kontrol SM** — Oversight dari Sales Manager\n7. **Frekuensi Kunjungan** — Analisis frekuensi\n8. **Hierarki Sales** — Struktur organisasi sales\n\nAO status: not_visited, ordered, active, not_order, priority.",
+    "links": [
+      {
+        "label": "Buka Form Kontrol",
+        "href": "/form-kontrol"
+      }
+    ],
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "merchandising",
+      "merchandising check"
+    ],
+    "question": "Apa itu merchandising check di Form Kontrol?",
+    "answer": "Merchandising check dilakukan saat kunjungan salesman ke toko. 6 item yang dicek:\n1. Produk jelas terlihat\n2. Display rapi\n3. Dibersihkan\n4. Ditata ulang\n5. Posisi mudah dijangkau\n6. Semua SKU tersedia\n\nDilengkapi foto, step photos, dan catatan.",
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "briefing",
+      "spv briefing",
+      "briefing pagi",
+      "briefing sore"
+    ],
+    "question": "Apa itu SPV Briefing?",
+    "answer": "SPV Briefing adalah sesi briefing supervisor dengan 2 sesi:\n- **Pagi** — agenda standar kunjungan hari ini\n- **Sore** — review hasil kunjungan\n\nMencakup: toko yang dibahas, penyebab masalah, solusi yang diambil.",
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "rbac",
+      "akses",
+      "permission",
+      "role",
+      "kelola user"
+    ],
+    "question": "Bagaimana cara mengelola user dan akses?",
+    "answer": "Kelola user di menu User & RBAC.\n\n**5 Base Roles:**\n- **Admin** — semua modul, semua aksi, kelola user\n- **Manager** — view, approve, export\n- **Finance** — pembayaran, transfer, post Accurate\n- **Staff** — input data, upload, generate\n- **Viewer** — view-only\n\n**Dynamic RBAC:**\n- Buat Access Groups dengan permission granular\n- Format: module.action (misal: off_program_control.sm_approve)\n- User bisa punya multiple groups (UNION permissions)\n- Audit trail untuk semua perubahan akses",
+    "links": [
+      {
+        "label": "Kelola User",
+        "href": "/admin/users"
+      },
+      {
+        "label": "Kelola Akses Group",
+        "href": "/admin/groups"
+      }
+    ],
+    "category": "admin"
+  },
+  {
+    "keywords": [
+      "input engine",
+      "input data engine",
+      "cara input",
+      "cara pakai engine",
+      "kolom data",
+      "isi data",
+      "manual input",
+      "excel upload engine",
+      "input data",
+      "filter kolom",
+      "filter data",
+      "filter"
+    ],
+    "question": "Bagaimana cara input data di AOL Form Engine?",
+    "answer": "Cara input data di AOL Form Engine:\n\n**Langkah-langkah:**\n1. Login ke Accurate Online (klik tombol Login AOL)\n2. Pilih database Accurate\n3. Pilih route/endpoint (misal: sales-invoice/save)\n4. Input data dengan 2 cara:\n   - **Manual:** isi JSON payload langsung di kolom input\n   - **Excel Upload:** upload file .xlsx, sistem auto-parse ke payload\n5. Review data (cek duplicate detection)\n6. Klik Submit untuk post ke Accurate\n\n**Tips:**\n- Pastikan format Excel sesuai template per-route\n- Duplicate detection mencegah posting ganda\n- Semua transaksi dicatat di idempotency log",
+    "links": [
+      {
+        "label": "Buka AOL Form Engine",
+        "href": "/api-wrapper"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "accurate",
+      "erp",
+      "sync",
+      "sinkron",
+      "aol",
+      "api wrapper",
+      "engine",
+      "form engine",
+      "payload",
+      "route",
+      "endpoint"
+    ],
+    "question": "Bagaimana cara sync data dari Accurate?",
+    "answer": "Integrasi Accurate Online via OAuth 2.0:\n\n**Data yang di-sync:**\n- Item (produk)\n- Customer\n\n**Operasi yang didukung:**\n- Sales Invoice save/bulk-save\n- Sales Receipt save/bulk-save\n- Purchase Payment save/bulk-save\n- Bank Transfer bulk-save\n- 100+ endpoint Accurate lainnya\n\n**Fitur:**\n- Excel bulk upload dengan parser per-route\n- Duplicate detection sebelum posting\n- Idempotency via SQLite log\n- Session caching",
+    "links": [
+      {
+        "label": "AOL Form Engine",
+        "href": "/api-wrapper"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "validator",
+      "diskon",
+      "discount",
+      "validasi"
+    ],
+    "question": "Apa itu Validator Diskon?",
+    "answer": "Validator Diskon adalah tools untuk cross-reference data sales dengan master promo pabrik.\n\n**Upload yang dibutuhkan:**\n1. Data Penjualan (.xlsx)\n2. Dataset Diskon Pabrik (.xlsx)\n3. Data Channel by SUB (.xlsx)\n4. Dataset Diskon Internal (opsional)\n\n**Output:** Hasil validasi JSON + download Excel. Diproses oleh Python FastAPI backend.",
+    "links": [
+      {
+        "label": "Buka Validator",
+        "href": "/validator"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "principle",
+      "principal",
+      "mapping principle"
+    ],
+    "question": "Di mana data master principal?",
+    "answer": "Data master principal dikelola di menu Master Principle.\n\n**25 Principal didukung:** RB, FKS, FON, REBO, MI, PAS, SPS, GDI, DOLPHIN, UNIBIS, URC, HEINZ, ENI, NATUR, MR, PRISKILA, USM, VINDA, KINO, ABC, CUSSONS, SHINZUI, FRS, MOTASA, PURATOS.\n\n**Data per principal:**\n- Nama perusahaan\n- File Excel master data\n- Mapping ke vendor Accurate\n- Mapping ke bank Accurate",
+    "links": [
+      {
+        "label": "Master Principle",
+        "href": "/principles"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "summary promo",
+      "promo",
+      "rekap promo",
+      "ai-powered",
+      "pdf promo"
+    ],
+    "question": "Apa itu Summary Promo?",
+    "answer": "Summary Promo adalah modul AI-powered untuk ekstraksi dan kompilasi promo:\n\n**Fitur:**\n- Upload PDF promo dari principal\n- AI mode: 'split' atau 'full' extraction\n- Filter: Kelompok, Variant, Gramasi\n- Generate summary compilation\n- Email summary\n- Download form dan dataset\n\n**Data fields:** no, principle, surat_program, nama_program, channel, periode, kelompok, variant, gramasi, ketentuan, benefit.",
+    "links": [
+      {
+        "label": "Summary Promo",
+        "href": "/summary"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "finance",
+      "keuangan",
+      "bukti transfer",
+      "post accurate"
+    ],
+    "question": "Apa saja yang bisa dilakukan di modul Finance?",
+    "answer": "Modul Finance mencakup:\n\n**Fitur:**\n- Review payment drafts dengan detail invoice\n- Mapping principle ke vendor dan bank Accurate\n- Upload bukti transfer\n- Approve/transfer payments\n- Post ke Accurate sebagai purchase-payment\n- Track status posting Accurate\n- Export data\n\n**Proses:** Draft → Review → Transfer → Post Accurate → Selesai.",
+    "links": [
+      {
+        "label": "Buka Finance",
+        "href": "/finance"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "beranda",
+      "home",
+      "utama",
+      "kembali"
+    ],
+    "question": "Kembali ke dashboard",
+    "answer": "Klik link di bawah untuk kembali ke dashboard utama.",
+    "links": [
+      {
+        "label": "Dashboard",
+        "href": "/"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "theme",
+      "tema",
+      "gelap",
+      "terang",
+      "dark",
+      "light",
+      "ganti tema"
+    ],
+    "question": "Bagaimana cara ganti tema?",
+    "answer": "Klik ikon palette di pojok kanan atas header. Tersedia 3 tema:\n\n1. **Office Calm** — hijau teduh untuk kerja lama (default)\n2. **Neon HUD** — sci-fi control tower (gelap)\n3. **iOS Liquid Glass** — frosted glass terang ala iOS\n\nTema disimpan di localStorage dan tetap aktif sampai diganti.",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "logout",
+      "keluar",
+      "sign out",
+      "keluar akun"
+    ],
+    "question": "Bagaimana cara logout?",
+    "answer": "Klik ikon logout di pojok kanan atas header. Anda akan diarahkan ke halaman login. Session akan dihapus otomatis.",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "laporan",
+      "lihat laporan",
+      "rekap laporan"
+    ],
+    "question": "Di mana melihat laporan?",
+    "answer": "Laporan tersedia di beberapa tempat:\n\n- **Summary Promo** → ringkasan promosi dari PDF\n- **Claim Workflow** → tab Reports, export klaim\n- **Insentif Sales** → rekap insentif per sales\n- **Form Kontrol** → laporan harian salesman\n- **Finance** → export pembayaran\n- **OPC** → export batch, audit log\n\nSemua modul mendukung export data.",
+    "links": [
+      {
+        "label": "Summary Promo",
+        "href": "/summary"
+      },
+      {
+        "label": "Claim Reports",
+        "href": "/claim-workflow"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "tipe program",
+      "program type",
+      "tipe display",
+      "tipe visibility",
+      "promo on store",
+      "tipe event",
+      "tipe sample"
+    ],
+    "question": "Apa saja tipe program di OPC?",
+    "answer": "Tipe program OPC:\n\n**Program Utama:**\n- Display\n- Visibility\n- Promo On Store\n- Event\n- Sample\n\n**Program CLM:**\n- Insentif\n- Diskon Reguler\n- Insentif Distributor\n- Retur\n\nTipe legacy juga didukung dengan normalisasi otomatis.",
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "dokumen opc",
+      "kwitansi",
+      "surat keterangan",
+      "faktur pajak",
+      "proof of claim"
+    ],
+    "question": "Dokumen apa saja yang perlu di-upload di OPC?",
+    "answer": "Dokumen checklist OPC (level Supervisor):\n- **KWT** — Kwitansi\n- **SKP** — Surat Keterangan Pembayaran\n- **FP** — Faktur Pajak\n- **PC** — Proof of Claim\n- **Foto** — Foto bukti\n- **Rekap** — Rekapitulasi\n- **Others** — Dokumen lainnya\n\nDokumen final (level Claim): finalKwt, finalSkp, finalFp, finalPc, finalFoto, finalRekap, finalOthers.",
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "pajak",
+      "ppn",
+      "pph",
+      "dpp",
+      "tax",
+      "pph exempt"
+    ],
+    "question": "Bagaimana pengelolaan pajak di Claim Workflow?",
+    "answer": "Di Claim Workflow, Anda bisa edit:\n- **DPP** (Dasar Pengenaan Pajak)\n- **PPN** — rate dan amount\n- **PPh** — rate dan amount\n- **Nilai Klaim** — total yang diklaim ke principal\n\nSetiap item punya field: pphExempt (apakah PPh dikecualikan), pphAmount, adjustmentPph.\n\nTotal dihitung otomatis: totalDpp, totalPpn, totalPph, totalClaim.",
+    "category": "claim"
+  },
+  {
+    "keywords": [
+      "refund",
+      "pengembalian",
+      "selisih",
+      "overpaid"
+    ],
+    "question": "Bagaimana proses refund di OPC?",
+    "answer": "Refund terjadi ketika ada selisih pembayaran (overpaid):\n\n**Alur:**\n1. Finance detect overpaid\n2. Supervisor submit refund\n3. Verifikasi refund oleh claim\n4. Selesai\n\nData refund: refundNo, refundAmount, refundMethod, refundDate, senderName, receiverBank, proofPath.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "period closure",
+      "tutup periode",
+      "tutup bulan",
+      "close period"
+    ],
+    "question": "Apa itu period closure di OPC?",
+    "answer": "Period closure adalah penutupan periode per principal+bulan+tahun.\n\n**Status:**\n- **Terbuka** — batch masih bisa diinput\n- **Tertutup** — batch baru tidak bisa dibuat untuk periode tersebut\n\nHanya admin/claim yang bisa melakukan close/open period.",
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "audit",
+      "audit log",
+      "riwayat",
+      "trail"
+    ],
+    "question": "Apa itu audit log?",
+    "answer": "Audit log mencatat semua perubahan di sistem:\n\n**OPC:** off_audit_log — perubahan status, approval, return, pembayaran\n**Claim:** claim_audit_log — perubahan workflow dan submission\n**Form Kontrol:** kontrol_audit_log — perubahan kunjungan\n**RBAC:** permission_audit_log — perubahan akses user\n\nSemua log non-destruktif (koreksi ditambahkan, tidak menghapus data asli).",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "notif",
+      "notification",
+      "notifikasi"
+    ],
+    "question": "Apakah ada notifikasi di sistem?",
+    "answer": "Ya, sistem mengirim email notification pada transisi status OPC. Tabel off_notification menyimpan record notifikasi yang terkirim. Notifikasi otomatis dikirim saat:\n- Batch di-submit ke SM\n- SM approve/return\n- OM approve/cancel\n- Finance proses pembayaran",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "pwa",
+      "install",
+      "android",
+      "ios",
+      "aplikasi"
+    ],
+    "question": "Bisakah diinstall sebagai aplikasi?",
+    "answer": "Ya! Sistem ini adalah PWA (Progressive Web App). Anda bisa install sebagai aplikasi di:\n- **Android** — Chrome → Install App\n- **iOS** — Safari → Add to Home Screen\n- **Desktop** — Chrome → Install App\n\nFitur PWA: service worker, offline caching, install prompt otomatis.",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "gps",
+      "lokasi",
+      "check in",
+      "check out",
+      "koordinat"
+    ],
+    "question": "Bagaimana GPS bekerja di Form Kontrol?",
+    "answer": "AO Harian menggunakan GPS untuk tracking kunjungan:\n\n**Saat check-in/out:**\n- Latitude, longitude, accuracy dicatat\n- Foto diambil dari lokasi\n- gpsFlag ditandai jika ada anomali\n\n**SPV Dashboard:**\n- Lihat semua kunjungan tim dengan peta\n- Flag kunjungan yang perlu review\n- Auto-match dari data transaksi",
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "excel",
+      "import",
+      "xlsx",
+      "bulk upload",
+      "upload excel"
+    ],
+    "question": "Modul mana yang mendukung upload Excel?",
+    "answer": "Beberapa modul mendukung upload Excel:\n\n- **Payments** — upload LPB/backup data\n- **SPPD** — upload data pembayaran/SPPD\n- **Insentif Sales** — upload target sales\n- **Summary Promo** — upload master data principal\n- **Validator** — upload 3-4 file Excel\n- **AOL Form Engine** — bulk upload payload Accurate\n- **Master Principle** — upload master data Excel\n\nFormat: .xlsx untuk semua modul.",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "login",
+      "masuk",
+      "sign in",
+      "password",
+      "lupa password"
+    ],
+    "question": "Bagaimana cara login?",
+    "answer": "Login dengan email dan password yang dibuatkan oleh admin.\n\n**Catatan penting:**\n- Sign-up dinonaktifkan — admin yang membuat akun\n- Email wajib diverifikasi sebelum login\n- Rate limit: 5 percobaan per 15 menit per IP\n- Password reset via email (berlaku 1 jam)\n\nHubungi admin jika lupa password atau butuh akun baru.",
+    "links": [
+      {
+        "label": "Login",
+        "href": "/login"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "sm approve",
+      "sm return",
+      "bagaimana sm",
+      "cara sm"
+    ],
+    "question": "Bagaimana SM approve atau return batch?",
+    "answer": "Sebagai Sales Manager:\n\n**Approve:**\n1. Buka tab Overview atau Sales\n2. Klik batch yang ingin di-review\n3. Review data item dan dokumen\n4. Klik 'Approve' — batch lolos ke tahap klaim\n\n**Return:**\n1. Klik batch yang bermasalah\n2. Tulis catatan/alasan pengembalian\n3. Klik 'Return' — batch kembali ke supervisor\n\nBatch yang di-return bisa diedit ulang oleh supervisor.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "om approve",
+      "om cancel",
+      "bagaimana om",
+      "cara om"
+    ],
+    "question": "Bagaimana OM approve atau cancel batch?",
+    "answer": "Sebagai Operational Manager:\n\n**Approve:**\n1. Buka tab Overview atau OM\n2. Review batch yang sudah lolos klaim\n3. Klik 'Approve' — batch masuk antrian pembayaran finance\n\n**Cancel:**\n1. Klik batch yang batal\n2. Tulis alasan pembatalan\n3. Klik 'Cancel' — batch dibatalkan\n\nOM adalah approval terakhir sebelum pembayaran.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "finance bayar",
+      "finance payment",
+      "cara finance",
+      "proses bayar"
+    ],
+    "question": "Bagaimana finance memproses pembayaran?",
+    "answer": "Sebagai Finance:\n\n1. Buka tab Finance di OPC\n2. Review batch yang sudah di-approve OM\n3. Input pembayaran (bisa parsial)\n4. Pilih metode: Transfer (wajib upload bukti) atau Tunai\n5. Submit pembayaran\n\nDi modul Finance terpisah:\n- Review payment drafts\n- Mapping ke vendor/bank Accurate\n- Upload bukti transfer\n- Post ke Accurate ERP",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      },
+      {
+        "label": "Buka Finance",
+        "href": "/finance"
+      }
+    ],
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "claim review",
+      "claim approve",
+      "claim return",
+      "validasi klaim"
+    ],
+    "question": "Bagaimana claim review dan approve batch?",
+    "answer": "Sebagai Claim:\n\n**Review:**\n1. Buka tab Claim atau Audit\n2. Review dokumen dan data batch\n3. Cek kelengkapan: kwitansi, SKP, FP, PC, foto, rekap\n\n**Approve:**\n- Klik 'Approve' — batch lolos ke OM\n\n**Return:**\n- Klik 'Return' — batch kembali ke supervisor dengan catatan\n\nClaim juga bisa: close period, export audit log, koreksi data.",
+    "links": [
+      {
+        "label": "Buka OPC",
+        "href": "/off-program-control"
+      }
+    ],
+    "category": "claim"
+  },
+  {
+    "keywords": [
+      "staff input",
+      "staff kerja",
+      "sebagai staff"
+    ],
+    "question": "Apa yang bisa dilakukan staff?",
+    "answer": "Sebagai Staff, Anda bisa:\n\n**Payments:**\n- Input data pembayaran\n- Upload LPB via Excel\n- Edit grid pembayaran\n\n**Summary:**\n- Upload data\n- Generate summary\n\n**Validator:**\n- Upload file untuk validasi diskon\n\n**View:**\n- Lihat data OPC dan Claim (read-only)\n- Lihat Form Kontrol",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "teknologi",
+      "tech stack",
+      "framework",
+      "database",
+      "arsitektur"
+    ],
+    "question": "Apa teknologi yang digunakan sistem ini?",
+    "answer": "Tech Stack:\n\n**Frontend:**\n- Next.js 16 (App Router)\n- React 19\n- Tailwind CSS 4\n- TypeScript\n\n**Backend (Node):**\n- Next.js API Routes\n- Drizzle ORM + SQLite (libsql)\n\n**Backend (Python):**\n- FastAPI (payments, summary, validator, principles)\n\n**ERP:**\n- Accurate Online via OAuth 2.0\n\n**Auth:**\n- Better Auth (email/password)\n\n**Deploy:**\n- Docker + Coolify\n- PWA support",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "database",
+      "tabel",
+      "table",
+      "schema",
+      "db"
+    ],
+    "question": "Apa saja tabel di database?",
+    "answer": "Database SQLite dengan 35+ tabel:\n\n**Auth (4):** user, session, account, verification\n**OFF Program (10):** off_batch, off_batch_item, off_payment, off_refund, off_period_closure, off_notification, off_audit_log, off_discount_submission, off_discount_audit_log\n**Claim (5):** claim_workflow, claim_workflow_item, claim_payment, claim_submission, claim_audit_log\n**Insentif (6):** sales_profile, sales_targets, sales_daily_progress, incentive_tiers, incentive_payments, incentive_support\n**Form Kontrol (8):** jks_master, sales_outlet_txn, no_order_reason, ao_control_daily, merchandising_check, salesman_daily_report, spv_briefing, sm_control\n**RBAC (4):** access_group, group_permission, user_group, permission_audit_log\n**Cache (5):** sync_state, item, customer, idempotency_log, accurate_oauth_session",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "help",
+      "bantuan",
+      "panduan",
+      "menu",
+      "faq",
+      "cara pakai"
+    ],
+    "question": "Apa saja yang bisa dibantu?",
+    "answer": "Saya bisa membantu dengan:\n\n📋 **Modul Utama:**\n- OFF Program Control → kelola biaya promosi (8 tahap)\n- Claim Workflow → kelola klaim ke principal\n- Pembayaran/SPPD → kelola pembayaran dan SPPD\n- Insentif Sales → hitung insentif berdasarkan KPI\n- Form Kontrol → kontrol aktivitas harian salesman\n\n🔧 **Tools:**\n- Validator Diskon → validasi data sales\n- AOL Form Engine → akses data Accurate\n- Master Principle → data principal\n- Summary Promo → rekap promo AI-powered\n- Finance → pembayaran dan posting Accurate\n\n📊 **Data:**\n- Ketik 'total batch' untuk data OPC\n- Ketik 'total klaim' untuk data claim\n- Ketik 'batch per status' untuk breakdown",
+    "links": [
+      {
+        "label": "Dashboard",
+        "href": "/"
+      },
+      {
+        "label": "OPC",
+        "href": "/off-program-control"
+      },
+      {
+        "label": "Claim",
+        "href": "/claim-workflow"
+      },
+      {
+        "label": "Pembayaran",
+        "href": "/payments"
+      },
+      {
+        "label": "Insentif Sales",
+        "href": "/insentif-sales"
+      },
+      {
+        "label": "Form Kontrol",
+        "href": "/form-kontrol"
+      },
+      {
+        "label": "Finance",
+        "href": "/finance"
+      }
+    ],
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "gelombang",
+      "wave",
+      "nomor pengajuan",
+      "no pengajuan"
+    ],
+    "question": "Apa itu gelombang dan nomor pengajuan?",
+    "answer": "Gelombang adalah nomor urut batch per principal. Nomor pengajuan format:\n\n**Standard:** {gelombang}/{principleCode}/{bulan}/{tahun}\n**Claim-originated:** {gelombang}/CLM/{kode}/{bulan}/{tahun}\n\nNomor unik per batch dan auto-generate saat submit.",
+    "category": "opc"
+  },
+  {
+    "keywords": [
+      "metode bayar",
+      "payment method",
+      "cara bayar opc"
+    ],
+    "question": "Apa saja metode pembayaran?",
+    "answer": "Metode pembayaran di OPC:\n\n1. **Transfer** — wajib upload bukti transfer\n2. **Tunai** — bukti tidak diperlukan\n\nDi modul Payments:\n- **NON_PANIN** (default)\n- Metode lain saat submit cart\n\nDi Finance:\n- Mapping ke bank Accurate\n- Post sebagai purchase-payment",
+    "category": "payment"
+  },
+  {
+    "keywords": [
+      "outstanding",
+      "deadline",
+      "terlambat",
+      "overdue",
+      "deadline klaim"
+    ],
+    "question": "Apa itu outstanding monitoring?",
+    "answer": "Outstanding monitoring di Claim Workflow menampilkan klaim yang belum dibayar melewati deadline.\n\n**Fitur:**\n- Dashboard dengan hari outstanding\n- Filter berdasarkan principal\n- Tracking remaining amount\n- Status: Submitted to Principal → Outstanding (jika melewati deadline)",
+    "links": [
+      {
+        "label": "Claim Workflow",
+        "href": "/claim-workflow"
+      }
+    ],
+    "category": "claim"
+  },
+  {
+    "keywords": [
+      "sales profile",
+      "sales code",
+      "branch",
+      "traditional trade",
+      "modern trade"
+    ],
+    "question": "Apa itu sales profile?",
+    "answer": "Sales Profile adalah data identitas sales yang terhubung ke user:\n\n**Fields:**\n- salesCode — kode unik sales\n- principle — principal yang ditangani\n- branch — cabang\n- channel — TT (Traditional Trade) atau MT (Modern Trade)\n- spv — supervisor\n- sm — sales manager\n\nDigunakan di Insentif Sales dan Form Kontrol.",
+    "category": "sales"
+  },
+  {
+    "keywords": [
+      "upload target",
+      "set target",
+      "target sales"
+    ],
+    "question": "Bagaimana cara set target sales?",
+    "answer": "Target sales di-upload oleh admin di modul Insentif Sales > Input Penjualan:\n\n**Per sales per bulan:**\n- value — target DPP sales\n- ec — target Effective Call\n- ao — target Aktif Outlet\n- ia — target Item Super/Toko\n- splm — target SPLM\n- tipeSales — mix/exclusive\n- statusInsentif — distributor_principle/distributor/principle\n\nUpload via Excel atau input manual.",
+    "links": [
+      {
+        "label": "Insentif Sales",
+        "href": "/insentif-sales"
+      }
+    ],
+    "category": "sales"
+  },
+  {
+    "keywords": [
+      "time gone",
+      "pace",
+      "pencapaian",
+      "achievement",
+      "persentase"
+    ],
+    "question": "Bagaimana cara hitung pencapaian sales?",
+    "answer": "Pencapaian dihitung berdasarkan:\n\n**Time Gone:**\n- Persentase bulan yang sudah berjalan (hari kerja Senin-Jumat)\n- Misal: 15 hari kerja dari 22 total = 68.2%\n\n**Pace Status:**\n- 🟢 Green — ≥100% dari expected\n- 🟡 Yellow — 80-99%\n- 🔴 Red — <80%\n\n**Achievement %:**\n- (actual / target) × 100\n- Lookup ke tier untuk hitung insentif",
+    "category": "sales"
+  },
+  {
+    "keywords": [
+      "potongan",
+      "deduction",
+      "insentif support"
+    ],
+    "question": "Apa itu support deduction di insentif?",
+    "answer": "Support deduction adalah potongan dari insentif sales:\n\n**Per sales per principle per periode:**\n- Jumlah support yang harus dipotong\n- Diinput oleh admin\n- Otomatis dikurangi dari total insentif\n\n**Contoh:** Sales A dapat insentif 1.2M, ada support 200K → terima 1M.",
+    "category": "sales"
+  },
+  {
+    "keywords": [
+      "kunjungan",
+      "frekuensi",
+      "jadwal",
+      "hari kunjungan"
+    ],
+    "question": "Bagaimana jadwal kunjungan salesman?",
+    "answer": "Jadwal kunjungan (JKS) dikelola di Form Kontrol:\n\n**Master data per sales+outlet+principle:**\n- hariKunjungan — hari dalam minggu\n- mingguPattern — ganjil/genap/all\n- area, rayon — lokasi\n- channel — TT/MT\n- visitFrequency — 1x, 2x, 4x per bulan\n\n**Kunjungan harian:**\n- AO status: not_visited → ordered → active\n- GPS check-in/out\n- Foto bukti\n- Merchandising check",
+    "links": [
+      {
+        "label": "Form Kontrol",
+        "href": "/form-kontrol"
+      }
+    ],
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "no order",
+      "tidak order",
+      "toko tidak order"
+    ],
+    "question": "Apa itu tracking no-order?",
+    "answer": "Tracking toko yang tidak order saat kunjungan salesman:\n\n**Data:**\n- custCode, custName, salesCode\n- visitDate, noOrderReasonCode\n- noOrderNote — alasan detail\n\n**Digunakan untuk:**\n- Analisis pola no-order\n- Follow-up oleh SPV/SM\n- Laporan performa toko",
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "sm control",
+      "coaching",
+      "deviasi",
+      "oversight"
+    ],
+    "question": "Apa itu SM Control di Form Kontrol?",
+    "answer": "SM Control adalah fitur oversight Sales Manager:\n\n**Fitur:**\n- Checklist SPV yang sudah di-review\n- JKS check — apakah jadwal sesuai\n- Foto check — apakah foto valid\n- Coaching note — catatan coaching\n- Deviations — penyimpangan yang ditemukan\n- Follow-up — tindak lanjut",
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "spv dashboard",
+      "dashboard spv",
+      "team metrics",
+      "metrik tim"
+    ],
+    "question": "Apa yang terlihat di SPV Dashboard?",
+    "answer": "SPV Dashboard di Form Kontrol menampilkan:\n\n**Aggregate team metrics:**\n- Total kunjungan hari ini\n- Breakdown: ordered, active, not_order, not_visited\n- GPS compliance\n- Merchandising score\n- No-order reasons\n\nDiakses oleh: SPV, SM, admin, manager.",
+    "links": [
+      {
+        "label": "Form Kontrol",
+        "href": "/form-kontrol/spv-dashboard"
+      }
+    ],
+    "category": "form-kontrol"
+  },
+  {
+    "keywords": [
+      "terima kasih",
+      "thanks",
+      "makasih"
+    ],
+    "question": "Terima kasih",
+    "answer": "Sama-sama! Ada yang bisa saya bantu lagi? Ketik 'menu' untuk panduan.",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "oke",
+      "mengerti",
+      "paham"
+    ],
+    "question": "Oke, saya mengerti",
+    "answer": "Baik! Jika butuh bantuan lagi, ketik 'menu' atau tanya langsung.",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "siapa kamu",
+      "kamu siapa",
+      "apa ini",
+      "chatbot",
+      "bot"
+    ],
+    "question": "Siapa kamu?",
+    "answer": "Saya AI Assistant — chatbot rule-based yang membantu navigasi Smart ERP CV. Surya Perkasa. Saya bisa:\n\n- Menjawab pertanyaan tentang modul ERP\n- Memberikan panduan navigasi\n- Mengambil data dari database\n\nKetik 'menu' untuk panduan lengkap.",
+    "category": "general"
+  },
+  {
+    "keywords": [
+      "versi",
+      "version",
+      "update",
+      "terbaru"
+    ],
+    "question": "Apa versi sistem ini?",
+    "answer": "Sistem ini dibangun dengan:\n- Next.js 16.2.9 (Turbopack)\n- React 19\n- Tailwind CSS 4\n- Drizzle ORM\n- Better Auth\n\nFitur terbaru: Multi No Claim (Phase R7a), Dynamic RBAC, Form Kontrol SUPER.",
+    "category": "general"
+  },
+  {
+    "keywords": ["status batch", "cek batch", "detail batch", "lacak batch", "no pengajuan"],
+    "question": "Bagaimana cara cek status batch?",
+    "answer": "Untuk cek status batch berdasarkan nomor pengajuan:\n\nKetik: **\"status batch [nomor]\"**\n\nContoh:\n- \"status batch 001\"\n- \"detail batch 2025\"\n\nBot akan menampilkan:\n- Info batch (principal, periode, nominal)\n- Status lengkap: Supervisor, SM, Claim, OM, Finance, Final, Refund\n- Catatan dari setiap tahap",
+    "category": "opc"
+  },
+  {
+    "keywords": ["status claim", "cek claim", "detail claim", "lacak claim"],
+    "question": "Bagaimana cara cek status claim?",
+    "answer": "Untuk cek status claim workflow:\n\nKetik: **\"status claim [nomor]\"**\n\nContoh:\n- \"status claim CLM-2025\"\n- \"detail claim 001\"\n\nBot akan menampilkan:\n- Info claim (principal, status, no claim)\n- Nilai: DPP, PPN, PPh, total klaim, sudah dibayar, sisa\n- Tanggal submitted dan closed",
+    "category": "claim"
+  },
+  {
+    "keywords": ["batch principal", "cari batch principal", "batch berdasarkan principal"],
+    "question": "Bagaimana cara cari batch berdasarkan principal?",
+    "answer": "Untuk cari batch berdasarkan principal:\n\nKetik: **\"batch principal [nama]\"**\n\nContoh:\n- \"batch principal RB\"\n- \"batch principal FKS\"\n- \"principal FON batch\"\n\nBot akan menampilkan daftar batch untuk principal tersebut (maks 10). Ketik \"status batch [nomor]\" untuk detail lengkap.",
+    "category": "opc"
+  },
+  {
+    "keywords": ["batch bulan", "batch periode", "cari batch bulan"],
+    "question": "Bagaimana cara cari batch berdasarkan periode?",
+    "answer": "Untuk cari batch berdasarkan bulan/tahun:\n\nKetik: **\"batch bulan [bulan] [tahun]\"**\n\nContoh:\n- \"batch bulan 6 2025\"\n- \"batch periode januari 2025\"\n- \"bulan maret batch\"\n\nBot akan menampilkan daftar batch untuk periode tersebut (maks 10). Ketik \"status batch [nomor]\" untuk detail lengkap.",
+    "category": "opc"
+  }
+]

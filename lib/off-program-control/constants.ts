@@ -39,9 +39,55 @@ export const offStatuses = {
     paid: "Paid",
     returnedToFinance: "Returned to Finance",
     completed: "Completed",
+    // Status aktif yang dipakai di routes dan lib
+    returnedByClaim: "Returned by Claim",
+    cancelledByOm: "Cancelled by OM",
+    cancelled: "Cancelled",
+    // ponytail: status legacy — tidak lagi ditulis ke DB baru,
+    // dipertahankan agar data lama tetap terhitung dengan benar.
+    overpaidPendingRefund: "Overpaid - Pending Refund",
+} as const;
+
+/** Union type dari semua nilai offStatuses. */
+export type OffBatchStatus = typeof offStatuses[keyof typeof offStatuses];
+
+/** Sub-status SM. */
+export const offSmStatuses = {
+    notStarted: "Not Started",
+    waitingReview: "Waiting Review",
+    approvedBySm: "Approved by SM",
+    returned: "Returned",
+} as const;
+
+/** Sub-status Claim. */
+export const offClaimStatuses = {
+    notStarted: "Not Started",
+    approved: "Approved",
+    returned: "Returned",
+} as const;
+
+/** Sub-status OM. */
+export const offOmStatuses = {
+    notStarted: "Not Started",
+    notifyOm: "Notify OM",
+    waitingApproval: "Waiting Approval",
+    approved: "Approved",
+    cancelled: "Cancelled",
+} as const;
+
+/** Sub-status Final Claim. */
+export const offFinalStatuses = {
+    notStarted: "Not Started",
+    waitingClaimFinalVerification: "Waiting Claim Final Verification",
+    incompleteDocuments: "Incomplete Documents",
+    completed: "Completed",
+    fullyRefunded: "Fully Refunded",
+    partiallyRefunded: "Partially Refunded",
+    pendingRefund: "Pending Refund",
 } as const;
 
 export const offFinanceStatuses = {
+    notStarted: "Not Started",
     waitingPayment: "Waiting Payment",
     partialPaid: "Partial Paid",
     paid: "Paid",

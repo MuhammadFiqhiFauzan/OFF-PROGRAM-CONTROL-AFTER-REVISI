@@ -1,0 +1,16 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+
+  "instructions": [
+    "AGENTS.md",
+    ".kilo/rules/*.md",
+    ".kilo/rules/ecc/common/*.md",
+    ".kilo/rules/ecc/typescript/*.md"
+  ],
+
+  "skills": {
+    "paths": [
+      ".kilo/skills"
+    ]
+  }
+}

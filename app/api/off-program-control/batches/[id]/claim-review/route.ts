@@ -76,6 +76,9 @@ export async function POST(request: Request, context: Context) {
           locked: false,
           // Timestamp tahap return untuk deteksi SLA "Bermasalah" (#16).
           returnedAt: now,
+          // W3: Reset finalStatus agar tidak ada nilai stale dari tahap
+          // sebelumnya jika batch diproses ulang dari awal.
+          finalStatus: "Not Started",
           updatedAt: now,
         })
         .where(eq(offBatch.id, id));
@@ -86,7 +89,8 @@ export async function POST(request: Request, context: Context) {
         fromStatus: data.batch.claimStatus,
         toStatus: "Returned",
         note,
-        metadata: { completenessStatus },
+        // W3: catat nilai finalStatus sebelum di-reset agar overwrite traceable.
+        metadata: { completenessStatus, fromFinalStatus: data.batch.finalStatus },
       });
       const updated = await getBatchWithItems(id);
       return NextResponse.json({
